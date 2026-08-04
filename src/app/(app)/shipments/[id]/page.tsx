@@ -2,13 +2,15 @@ import Link from "next/link";
 import { notFound, redirect } from "next/navigation";
 import { getCurrentProfile } from "@/lib/actions/auth";
 import {
+  assignCarrier,
   generateInvoice,
   requestAccessorial,
   updateShipmentStatus,
   uploadPod,
 } from "@/lib/actions/freight";
 import { createClient } from "@/lib/supabase/server";
-import { isStaff, money, statusBadge, type ShipmentStatus } from "@/lib/types";
+import { isOperations, money, statusBadge, type ShipmentStatus } from "@/lib/types";
+import { canManageBilling } from "@/lib/roles";
 
 export default async function ShipmentDetailPage({
   params,
@@ -49,11 +51,18 @@ export default async function ShipmentDetailPage({
     .from("invoices")
     .select("*")
     .eq("shipment_id", id);
+  const { data: allCarriers } = isOperations(profile.role)
+    ? await supabase.from("carriers").select("id, name").order("name")
+    : { data: [] as { id: string; name: string }[] };
 
   const margin = Number(profit?.margin ?? 0);
   const canOperate =
-    isStaff(profile.role) ||
+    isOperations(profile.role) ||
     (profile.role === "carrier" && profile.carrier_id === s.carrier_id);
+  const canBill = canManageBilling(profile.role);
+  const canAssign =
+    isOperations(profile.role) &&
+    !["delivered", "completed", "cancelled"].includes(s.status);
 
   async function setStatus(status: ShipmentStatus, _fd?: FormData) {
     "use server";
@@ -71,19 +80,19 @@ export default async function ShipmentDetailPage({
           </p>
           <span className={`badge mt-2 ${statusBadge(s.status)}`}>{s.status}</span>
         </div>
-        {canOperate ? (
+        {canOperate || canBill ? (
           <div className="flex flex-wrap gap-2">
-            {s.status === "scheduled" || s.status === "assigned" || s.status === "booked" ? (
+            {canOperate && (s.status === "scheduled" || s.status === "assigned" || s.status === "booked") ? (
               <form action={setStatus.bind(null, "picked_up")}>
                 <button className="btn btn-sm">Confirm pickup</button>
               </form>
             ) : null}
-            {["picked_up", "assigned", "booked"].includes(s.status) ? (
+            {canOperate && ["picked_up", "assigned", "booked"].includes(s.status) ? (
               <form action={setStatus.bind(null, "in_transit")}>
                 <button className="btn btn-sm btn-outline">Mark in transit</button>
               </form>
             ) : null}
-            {isStaff(profile.role) && ["delivered", "completed"].includes(s.status) ? (
+            {canBill && ["delivered", "completed"].includes(s.status) ? (
               <form action={generateInvoice.bind(null, id)}>
                 <button className="btn btn-sm btn-primary">Generate invoice</button>
               </form>
@@ -115,6 +124,37 @@ export default async function ShipmentDetailPage({
               <li>Freight: {s.freight_type ?? "—"} · Weight {s.weight_lbs ?? "—"} lbs</li>
               <li>Pickup {s.pickup_date ?? "TBD"} · Delivery {s.delivery_date ?? "TBD"}</li>
             </ul>
+            {canAssign ? (
+              <form action={assignCarrier} className="mt-4 grid gap-2 border-t border-base-200 pt-3">
+                <input type="hidden" name="shipment_id" value={id} />
+                <label className="form-control w-full">
+                  <span className="label-text text-xs">Assign / reassign carrier</span>
+                  <select
+                    name="carrier_id"
+                    className="select select-bordered select-sm"
+                    defaultValue={s.carrier_id ?? ""}
+                  >
+                    <option value="">Unassigned</option>
+                    {(allCarriers ?? []).map((c) => (
+                      <option key={c.id} value={c.id}>
+                        {c.name}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                <label className="form-control w-full">
+                  <span className="label-text text-xs">Carrier cost (optional update)</span>
+                  <input
+                    name="carrier_cost"
+                    type="number"
+                    step="0.01"
+                    defaultValue={s.carrier_cost ?? ""}
+                    className="input input-bordered input-sm"
+                  />
+                </label>
+                <button className="btn btn-primary btn-sm">Save carrier assignment</button>
+              </form>
+            ) : null}
           </div>
         </div>
 

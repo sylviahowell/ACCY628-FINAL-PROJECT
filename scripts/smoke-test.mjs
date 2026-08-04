@@ -220,7 +220,7 @@ async function main() {
     else ok("Mark delivered");
   }
 
-  // 6) Accessorial + invoice + payment as broker/manager
+  // 6) Accessorial as broker; invoice + payment as billing
   const { error: chErr } = await broker.supabase.from("shipment_charges").insert({
     shipment_id: shipment.id,
     charge_type: "accessorial",
@@ -233,12 +233,24 @@ async function main() {
   if (chErr) fail("Add accessorial", chErr.message);
   else ok("Add accessorial", "$150");
 
+  let billing;
+  try {
+    billing = await ensureUser("billing@freightflow.example", {
+      full_name: "Bailey Billing",
+      role: "billing",
+    });
+    ok("Billing login", billing.userId.slice(0, 8));
+  } catch (e) {
+    fail("Billing login", String(e.message || e));
+    billing = broker;
+  }
+
   // Control: cancelled invoice block is separate; test invoice after delivery
   const invNum = `INV-SMOKE-${Date.now().toString().slice(-6)}`;
   const due = new Date();
   due.setDate(due.getDate() + 30);
   const total = 2500 + 150;
-  const { data: invoice, error: iErr } = await broker.supabase
+  const { data: invoice, error: iErr } = await billing.supabase
     .from("invoices")
     .insert({
       invoice_number: invNum,
@@ -258,17 +270,17 @@ async function main() {
 
   if (invoice) {
     const payAmt = 1000;
-    const { error: pErr } = await broker.supabase.from("payments").insert({
+    const { error: pErr } = await billing.supabase.from("payments").insert({
       invoice_id: invoice.id,
       amount: payAmt,
       method: "ach_simulated",
       reference: "SMOKE-ACH",
-      recorded_by: broker.userId,
+      recorded_by: billing.userId,
     });
     if (pErr) fail("Record payment", pErr.message);
     else ok("Record payment", `$${payAmt}`);
 
-    const { error: uErr } = await broker.supabase
+    const { error: uErr } = await billing.supabase
       .from("invoices")
       .update({ amount_paid: payAmt, status: "partial" })
       .eq("id", invoice.id);

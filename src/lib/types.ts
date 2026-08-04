@@ -36,6 +36,8 @@ export const DEMO_USERS: {
   email: string;
   full_name: string;
   role: UserRole;
+  portal: string;
+  portalAction: string;
   customer_id?: string;
   carrier_id?: string;
   description: string;
@@ -44,27 +46,43 @@ export const DEMO_USERS: {
     email: "manager@freightflow.example",
     full_name: "Morgan Manager",
     role: "manager",
-    description: "Full access — dashboards, approvals, and financials",
+    portal: "Executive Portal",
+    portalAction: "Enter as leadership",
+    description: "Company-wide margin, AR, approvals, and controls",
   },
   {
     email: "broker@freightflow.example",
     full_name: "Blake Broker",
     role: "broker",
-    description: "Customers, contracts, carriers, and shipments",
+    portal: "Broker Ops Portal",
+    portalAction: "Enter as operations",
+    description: "Book loads, assign carriers, manage contracts",
+  },
+  {
+    email: "billing@freightflow.example",
+    full_name: "Bailey Billing",
+    role: "billing",
+    portal: "Billing & Accounting Portal",
+    portalAction: "Enter as billing",
+    description: "Invoices, payments, AR aging, and disputes",
   },
   {
     email: "customer@freightflow.example",
     full_name: "Casey Customer",
     role: "customer",
+    portal: "Shipper Portal",
+    portalAction: "Enter as shipper",
     customer_id: "11111111-1111-1111-1111-111111111101",
-    description: "Track your freight and invoices",
+    description: "Track your freight, invoices, and open disputes",
   },
   {
     email: "carrier@freightflow.example",
     full_name: "Chris Carrier",
     role: "carrier",
+    portal: "Carrier Portal",
+    portalAction: "Enter as carrier",
     carrier_id: "22222222-2222-2222-2222-222222222201",
-    description: "Assigned loads, POD, and status updates",
+    description: "Assigned loads, POD uploads, and delivery updates",
   },
 ];
 
@@ -86,6 +104,11 @@ export function isStaff(role: UserRole) {
   return role === "manager" || role === "broker" || role === "billing";
 }
 
+/** Ops staff who book/assign freight (not billing-only). */
+export function isOperations(role: UserRole) {
+  return role === "manager" || role === "broker";
+}
+
 export function statusBadge(status: string) {
   const map: Record<string, string> = {
     scheduled: "badge-info",
@@ -102,6 +125,8 @@ export function statusBadge(status: string) {
     disputed: "badge-error",
     sent: "badge-info",
     open: "badge-warning",
+    resolved: "badge-success",
+    rejected: "badge-error",
   };
   return map[status] ?? "badge-ghost";
 }

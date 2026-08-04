@@ -3,7 +3,8 @@
 import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
 import { getCurrentProfile } from "@/lib/actions/auth";
-import { isStaff, type ShipmentStatus } from "@/lib/types";
+import { isOperations, type ShipmentStatus } from "@/lib/types";
+import { canManageBilling } from "@/lib/roles";
 
 async function logStatus(
   shipmentId: string,
@@ -32,7 +33,7 @@ async function logStatus(
 
 export async function createCustomer(formData: FormData) {
   const profile = await getCurrentProfile();
-  if (!profile || !isStaff(profile.role)) throw new Error("Only staff can create customers.");
+  if (!profile || !isOperations(profile.role)) throw new Error("Only operations staff can create customers.");
   const supabase = await createClient();
   const { error } = await supabase.from("customers").insert({
     name: String(formData.get("name") || "").trim(),
@@ -51,7 +52,7 @@ export async function createCustomer(formData: FormData) {
 
 export async function createCarrier(formData: FormData) {
   const profile = await getCurrentProfile();
-  if (!profile || !isStaff(profile.role)) throw new Error("Only staff can create carriers.");
+  if (!profile || !isOperations(profile.role)) throw new Error("Only operations staff can create carriers.");
   const supabase = await createClient();
   const { error } = await supabase.from("carriers").insert({
     name: String(formData.get("name") || "").trim(),
@@ -71,7 +72,7 @@ export async function createCarrier(formData: FormData) {
 
 export async function createContract(formData: FormData) {
   const profile = await getCurrentProfile();
-  if (!profile || !isStaff(profile.role)) throw new Error("Only staff can create contracts.");
+  if (!profile || !isOperations(profile.role)) throw new Error("Only operations staff can create contracts.");
   const supabase = await createClient();
   const { error } = await supabase.from("contracts").insert({
     contract_number: String(formData.get("contract_number") || "").trim(),
@@ -93,7 +94,7 @@ export async function createContract(formData: FormData) {
 
 export async function createShipment(formData: FormData) {
   const profile = await getCurrentProfile();
-  if (!profile || !isStaff(profile.role)) throw new Error("Only staff can create shipments.");
+  if (!profile || !isOperations(profile.role)) throw new Error("Only operations staff can create shipments.");
 
   const carrierId = String(formData.get("carrier_id") || "") || null;
   const customerRate = Number(formData.get("customer_rate") || 0);
@@ -157,6 +158,59 @@ export async function createShipment(formData: FormData) {
   revalidatePath("/shipments");
   revalidatePath("/dashboard");
   return data.id as string;
+}
+
+/** Assign or reassign a carrier on an existing load (ops only). */
+export async function assignCarrier(formData: FormData) {
+  const profile = await getCurrentProfile();
+  if (!profile || !isOperations(profile.role)) {
+    throw new Error("Only operations staff can assign carriers.");
+  }
+
+  const shipmentId = String(formData.get("shipment_id") || "");
+  const carrierId = String(formData.get("carrier_id") || "") || null;
+  const carrierCostRaw = String(formData.get("carrier_cost") || "").trim();
+  const supabase = await createClient();
+
+  const { data: shipment } = await supabase
+    .from("shipments")
+    .select("id, status, carrier_id, carrier_cost")
+    .eq("id", shipmentId)
+    .single();
+  if (!shipment) throw new Error("Shipment not found");
+  if (["delivered", "completed", "cancelled"].includes(shipment.status)) {
+    throw new Error("Cannot reassign a delivered, completed, or cancelled load.");
+  }
+
+  const patch: {
+    carrier_id: string | null;
+    status?: string;
+    carrier_cost?: number;
+  } = { carrier_id: carrierId };
+
+  if (carrierCostRaw !== "") {
+    patch.carrier_cost = Number(carrierCostRaw);
+  }
+
+  if (carrierId && ["draft", "scheduled"].includes(shipment.status)) {
+    patch.status = "assigned";
+  }
+  if (!carrierId && shipment.status === "assigned") {
+    patch.status = "scheduled";
+  }
+
+  const { error } = await supabase.from("shipments").update(patch).eq("id", shipmentId);
+  if (error) throw new Error(error.message);
+
+  if (carrierId && patch.status === "assigned" && shipment.status !== "assigned") {
+    await logStatus(shipmentId, shipment.status, "assigned", profile.id, "Carrier assigned");
+  } else if (!carrierId && patch.status === "scheduled") {
+    await logStatus(shipmentId, shipment.status, "scheduled", profile.id, "Carrier unassigned");
+  }
+
+  revalidatePath(`/shipments/${shipmentId}`);
+  revalidatePath("/shipments");
+  revalidatePath("/dashboard");
 }
 
 export async function updateShipmentStatus(shipmentId: string, toStatus: ShipmentStatus) {
@@ -277,7 +331,9 @@ export async function requestAccessorial(formData: FormData) {
 
 export async function generateInvoice(shipmentId: string, _formData?: FormData) {
   const profile = await getCurrentProfile();
-  if (!profile || !isStaff(profile.role)) throw new Error("Only staff can invoice.");
+  if (!profile || !canManageBilling(profile.role)) {
+    throw new Error("Only billing or managers can generate invoices.");
+  }
 
   const supabase = await createClient();
   const { data: shipment } = await supabase
@@ -315,7 +371,7 @@ export async function generateInvoice(shipmentId: string, _formData?: FormData) 
     .eq("shipment_id", shipmentId);
 
   const accessorials = (charges ?? [])
-    .filter((c) => c.billable_to_customer && c.approval_status !== "pending")
+    .filter((c) => c.billable_to_customer && c.approval_status === "approved")
     .reduce((s, c) => s + Number(c.amount), 0);
   const discount =
     shipment.discount_approved || profile.role === "manager"
@@ -356,7 +412,9 @@ export async function generateInvoice(shipmentId: string, _formData?: FormData) 
 
 export async function recordPayment(formData: FormData) {
   const profile = await getCurrentProfile();
-  if (!profile || !isStaff(profile.role)) throw new Error("Only staff can record payments.");
+  if (!profile || !canManageBilling(profile.role)) {
+    throw new Error("Only billing or managers can record payments.");
+  }
 
   const invoiceId = String(formData.get("invoice_id") || "");
   const amount = Number(formData.get("amount") || 0);
@@ -397,7 +455,7 @@ export async function recordPayment(formData: FormData) {
 
 export async function openDispute(formData: FormData) {
   const profile = await getCurrentProfile();
-  if (!profile || !["customer", "manager", "broker", "billing"].includes(profile.role)) {
+  if (!profile || !["customer", "manager", "billing"].includes(profile.role)) {
     throw new Error("Not allowed.");
   }
   const supabase = await createClient();
@@ -416,6 +474,74 @@ export async function openDispute(formData: FormData) {
     await supabase.from("invoices").update({ status: "disputed" }).eq("id", invoiceId);
   }
   revalidatePath("/invoices");
+  revalidatePath("/disputes");
+  revalidatePath("/dashboard");
+}
+
+/** Close a billing dispute and return the invoice to a collectible status. */
+export async function resolveDispute(formData: FormData) {
+  const profile = await getCurrentProfile();
+  if (!profile || !canManageBilling(profile.role)) {
+    throw new Error("Only billing or managers can resolve disputes.");
+  }
+
+  const disputeId = String(formData.get("dispute_id") || "");
+  const decision = String(formData.get("decision") || "resolved");
+  if (!["resolved", "rejected"].includes(decision)) {
+    throw new Error("Invalid dispute decision.");
+  }
+
+  const supabase = await createClient();
+  const { data: dispute } = await supabase
+    .from("disputes")
+    .select("id, invoice_id, status")
+    .eq("id", disputeId)
+    .single();
+  if (!dispute) throw new Error("Dispute not found");
+  if (dispute.status !== "open") throw new Error("Dispute is already closed.");
+
+  const { error } = await supabase
+    .from("disputes")
+    .update({ status: decision })
+    .eq("id", disputeId);
+  if (error) throw new Error(error.message);
+
+  if (dispute.invoice_id) {
+    const { data: invoice } = await supabase
+      .from("invoices")
+      .select("id, status, total, amount_paid")
+      .eq("id", dispute.invoice_id)
+      .single();
+
+    if (invoice && invoice.status === "disputed") {
+      const paid = Number(invoice.amount_paid);
+      const total = Number(invoice.total);
+      let nextStatus = "pending";
+      if (paid >= total && total > 0) nextStatus = "paid";
+      else if (paid > 0) nextStatus = "partial";
+
+      // Keep disputed if another open dispute still exists on this invoice
+      const { data: otherOpen } = await supabase
+        .from("disputes")
+        .select("id")
+        .eq("invoice_id", invoice.id)
+        .eq("status", "open")
+        .limit(1);
+
+      if (!otherOpen?.length) {
+        await supabase
+          .from("invoices")
+          .update({ status: nextStatus })
+          .eq("id", invoice.id);
+      }
+    }
+  }
+
+  revalidatePath("/disputes");
+  revalidatePath("/invoices");
+  revalidatePath("/payments");
+  revalidatePath("/ar");
+  revalidatePath("/dashboard");
 }
 
 export async function reviewApproval(formData: FormData) {

@@ -1,7 +1,32 @@
 import Link from "next/link";
+import {
+  BriefcaseBusiness,
+  Building2,
+  Calculator,
+  LayoutDashboard,
+  Truck,
+} from "lucide-react";
 import { loginAsDemo, signIn } from "@/lib/actions/auth";
-import { DEMO_PASSWORD, DEMO_USERS } from "@/lib/types";
+import { DEMO_USERS, type UserRole } from "@/lib/types";
 import { ThemeSelector } from "@/components/ThemeSelector";
+
+function PortalIcon({ role }: { role: UserRole }) {
+  const className = "h-5 w-5 shrink-0 text-primary";
+  switch (role) {
+    case "manager":
+      return <LayoutDashboard className={className} />;
+    case "broker":
+      return <BriefcaseBusiness className={className} />;
+    case "billing":
+      return <Calculator className={className} />;
+    case "customer":
+      return <Building2 className={className} />;
+    case "carrier":
+      return <Truck className={className} />;
+    default:
+      return <BriefcaseBusiness className={className} />;
+  }
+}
 
 export default function LoginPage() {
   return (
@@ -17,7 +42,7 @@ export default function LoginPage() {
         </div>
       </div>
 
-      <div className="mx-auto grid max-w-6xl gap-10 px-4 py-10 lg:grid-cols-2 lg:items-center lg:py-20">
+      <div className="mx-auto grid max-w-6xl gap-10 px-4 py-10 lg:grid-cols-2 lg:items-center lg:py-16">
         <section>
           <p className="text-sm uppercase tracking-[0.25em] text-sky-200">
             Freight Brokerage & Logistics
@@ -26,14 +51,14 @@ export default function LoginPage() {
             Move freight. Bill accurately. Know your margin.
           </h1>
           <p className="mt-4 max-w-xl text-base text-slate-200/90">
-            FreightFlow helps your team manage customers, carriers, contracts,
-            shipments, invoices, and profitability in one place — from the first
-            booking to the final payment.
+            Five portals for five jobs — executive, broker operations, billing,
+            shipper, and carrier. Each view shows only what that role needs for
+            contract-to-cash.
           </p>
         </section>
 
         <section className="card bg-base-100 text-base-content shadow-2xl">
-          <div className="card-body">
+          <div className="card-body gap-4">
             <h2 className="card-title">Sign in</h2>
             <form action={signIn} className="space-y-3">
               <label className="form-control w-full">
@@ -66,20 +91,38 @@ export default function LoginPage() {
               </Link>
             </p>
 
-            <div className="divider text-xs">Demo roles (panel / classmates)</div>
-            <div className="grid gap-2">
+            <div className="divider text-xs m-0">Enter a portal</div>
+
+            <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
               {DEMO_USERS.map((u) => (
                 <form key={u.email} action={loginAsDemo.bind(null, u.email)}>
-                  <button type="submit" className="btn btn-outline btn-sm w-full justify-between">
-                    <span>{u.full_name}</span>
-                    <span className="badge badge-ghost capitalize">{u.role}</span>
+                  <button
+                    type="submit"
+                    className="group flex h-full w-full flex-col rounded-box border border-base-300 bg-base-100 p-4 text-left transition hover:border-primary hover:bg-primary/5"
+                  >
+                    <div className="flex items-start justify-between gap-2">
+                      <div className="flex items-center gap-2">
+                        <span className="rounded-lg bg-primary/10 p-2">
+                          <PortalIcon role={u.role} />
+                        </span>
+                        <div>
+                          <p className="text-sm font-semibold leading-tight">
+                            {u.portal}
+                          </p>
+                          <p className="text-xs opacity-60">{u.full_name}</p>
+                        </div>
+                      </div>
+                    </div>
+                    <p className="mt-3 grow text-xs leading-snug opacity-70">
+                      {u.description}
+                    </p>
+                    <span className="mt-3 text-xs font-semibold text-primary group-hover:underline">
+                      {u.portalAction} →
+                    </span>
                   </button>
                 </form>
               ))}
             </div>
-            <p className="text-xs opacity-60">
-              Demo password: <code>{DEMO_PASSWORD}</code>
-            </p>
           </div>
         </section>
       </div>

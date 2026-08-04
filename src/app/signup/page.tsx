@@ -39,9 +39,10 @@ export default function SignUpPage() {
               className="input input-bordered w-full"
             />
             <select name="role" className="select select-bordered w-full" defaultValue="broker">
-              <option value="broker">Broker / Dispatcher</option>
-              <option value="manager">Manager</option>
-              <option value="customer">Customer</option>
+              <option value="manager">Executive / Manager</option>
+              <option value="broker">Broker Operations</option>
+              <option value="billing">Billing & Accounting</option>
+              <option value="customer">Shipper (Customer)</option>
               <option value="carrier">Carrier</option>
             </select>
             <button type="submit" className="btn btn-primary w-full">

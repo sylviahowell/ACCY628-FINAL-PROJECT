@@ -33,7 +33,7 @@ export async function signUp(formData: FormData) {
     options: {
       data: {
         full_name: fullName || email.split("@")[0],
-        role: ["manager", "broker", "customer", "carrier"].includes(role)
+        role: ["manager", "broker", "billing", "customer", "carrier"].includes(role)
           ? role
           : "broker",
       },

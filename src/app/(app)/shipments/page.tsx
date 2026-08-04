@@ -2,11 +2,12 @@ import Link from "next/link";
 import { redirect } from "next/navigation";
 import { getCurrentProfile } from "@/lib/actions/auth";
 import { createClient } from "@/lib/supabase/server";
-import { isStaff, money, statusBadge } from "@/lib/types";
+import { isOperations, money, statusBadge } from "@/lib/types";
 
 export default async function ShipmentsPage() {
   const profile = await getCurrentProfile();
   if (!profile) redirect("/login");
+  if (profile.role === "billing") redirect("/dashboard");
 
   const supabase = await createClient();
   const { data: shipments } = await supabase
@@ -29,7 +30,7 @@ export default async function ShipmentsPage() {
             Track freight from scheduled pickup through delivery and completion.
           </p>
         </div>
-        {isStaff(profile.role) ? (
+        {isOperations(profile.role) ? (
           <Link href="/shipments/new" className="btn btn-primary">New shipment</Link>
         ) : null}
       </div>

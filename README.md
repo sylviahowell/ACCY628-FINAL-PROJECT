@@ -34,9 +34,10 @@ Password for all demo users: `FreightDemo2026!`
 
 | Email | Role |
 |-------|------|
-| manager@freightflow.example | Manager |
-| broker@freightflow.example | Broker |
-| customer@freightflow.example | Customer |
+| manager@freightflow.example | Executive / Manager |
+| broker@freightflow.example | Broker Operations |
+| billing@freightflow.example | Billing & Accounting |
+| customer@freightflow.example | Shipper (Customer) |
 | carrier@freightflow.example | Carrier |
 
 If login fails with an email confirmation error: Supabase Dashboard → Authentication → Providers → Email → turn off **Confirm email**.
@@ -45,9 +46,9 @@ If login fails with an email confirmation error: Supabase Dashboard → Authenti
 1. Login as **broker** → create/view customer, carrier, contract
 2. Create a **shipment** with sell rate and buy cost
 3. Login as **carrier** → confirm pickup → in transit → upload POD / deliver
-4. Login as **broker/manager** → generate invoice
+4. Login as **billing** → generate invoice from Ready to bill
 5. Record a **payment** → invoice balance updates
-6. Open **Profitability** / **Dashboard** charts
+6. Login as **manager** → Profitability / Reports / approve requests
 7. Login as **customer** → track shipments, view invoices, submit dispute
 
 ## Branch

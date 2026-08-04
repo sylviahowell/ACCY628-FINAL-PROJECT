@@ -2,12 +2,12 @@ import { redirect } from "next/navigation";
 import { getCurrentProfile } from "@/lib/actions/auth";
 import { createCarrier } from "@/lib/actions/freight";
 import { createClient } from "@/lib/supabase/server";
-import { isStaff } from "@/lib/types";
+import { isOperations } from "@/lib/types";
 
 export default async function CarriersPage() {
   const profile = await getCurrentProfile();
   if (!profile) redirect("/login");
-  if (!isStaff(profile.role)) redirect("/dashboard");
+  if (!isOperations(profile.role)) redirect("/dashboard");
 
   const supabase = await createClient();
   const { data: carriers } = await supabase.from("carriers").select("*").order("name");

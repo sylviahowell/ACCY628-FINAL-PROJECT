@@ -1,13 +1,13 @@
 import { redirect } from "next/navigation";
 import { getCurrentProfile } from "@/lib/actions/auth";
 import { createClient } from "@/lib/supabase/server";
-import { isStaff, money, statusBadge } from "@/lib/types";
+import { money, statusBadge } from "@/lib/types";
 import { StatusPie } from "@/components/Charts";
 
 export default async function ReportsPage() {
   const profile = await getCurrentProfile();
   if (!profile) redirect("/login");
-  if (!isStaff(profile.role)) redirect("/dashboard");
+  if (profile.role !== "manager") redirect("/dashboard");
 
   const supabase = await createClient();
   const { data: invoices } = await supabase

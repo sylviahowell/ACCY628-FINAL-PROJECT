@@ -4,10 +4,12 @@ import { reviewApproval } from "@/lib/actions/freight";
 import { createClient } from "@/lib/supabase/server";
 import { ThemeSelector } from "@/components/ThemeSelector";
 import { money } from "@/lib/types";
+import { ROLE_LABELS } from "@/lib/roles";
 
 export default async function SettingsPage() {
   const profile = await getCurrentProfile();
   if (!profile) redirect("/login");
+  if (profile.role !== "manager") redirect("/dashboard");
 
   const supabase = await createClient();
   const { data: settings } = await supabase
@@ -32,7 +34,7 @@ export default async function SettingsPage() {
         <div className="card-body">
           <h2 className="card-title text-base">Your profile</h2>
           <p><b>{profile.full_name}</b> · {profile.email}</p>
-          <p className="capitalize">Role: {profile.role}</p>
+          <p>{ROLE_LABELS[profile.role]}</p>
           <div className="mt-3 max-w-xs">
             <p className="mb-2 text-sm font-medium">Theme</p>
             <ThemeSelector />

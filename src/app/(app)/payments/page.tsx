@@ -2,12 +2,15 @@ import { redirect } from "next/navigation";
 import { getCurrentProfile } from "@/lib/actions/auth";
 import { recordPayment } from "@/lib/actions/freight";
 import { createClient } from "@/lib/supabase/server";
-import { isStaff, money, statusBadge } from "@/lib/types";
+import { money, statusBadge } from "@/lib/types";
+import { canManageBilling } from "@/lib/roles";
 
 export default async function PaymentsPage() {
   const profile = await getCurrentProfile();
   if (!profile) redirect("/login");
-  if (profile.role === "carrier") redirect("/dashboard");
+  if (profile.role === "carrier" || profile.role === "broker" || profile.role === "customer") {
+    redirect("/dashboard");
+  }
 
   const supabase = await createClient();
   const { data: payments } = await supabase
@@ -28,7 +31,7 @@ export default async function PaymentsPage() {
         </p>
       </div>
 
-      {isStaff(profile.role) ? (
+      {canManageBilling(profile.role) ? (
         <div className="card bg-base-100 shadow-sm">
           <div className="card-body">
             <h2 className="card-title text-base">Record payment</h2>

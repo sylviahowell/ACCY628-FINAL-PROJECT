@@ -1,18 +1,28 @@
 import { redirect } from "next/navigation";
 import { getCurrentProfile } from "@/lib/actions/auth";
 import { createClient } from "@/lib/supabase/server";
-import { isStaff, money } from "@/lib/types";
+import { money } from "@/lib/types";
 import { HorizontalBars, MonthlyBars } from "@/components/Charts";
+import { bucketByMonth } from "@/lib/analytics";
 
 export default async function ProfitabilityPage() {
   const profile = await getCurrentProfile();
   if (!profile) redirect("/login");
-  if (!isStaff(profile.role)) redirect("/dashboard");
+  if (profile.role !== "manager") redirect("/dashboard");
 
   const supabase = await createClient();
   const { data: profit } = await supabase.from("shipment_profitability").select("*");
   const { data: customers } = await supabase.from("customers").select("id, name");
+  const { data: shipments } = await supabase
+    .from("shipments")
+    .select("id, created_at, pickup_date, delivery_date");
   const names = new Map((customers ?? []).map((c) => [c.id, c.name]));
+  const shipDates = new Map(
+    (shipments ?? []).map((s) => [
+      s.id as string,
+      (s.delivery_date || s.pickup_date || s.created_at) as string,
+    ]),
+  );
 
   const rows = (profit ?? [])
     .map((p) => ({
@@ -33,12 +43,13 @@ export default async function ProfitabilityPage() {
 
   const totalRevenue = rows.reduce((s, r) => s + r.revenue, 0);
   const totalProfit = rows.reduce((s, r) => s + r.margin, 0);
-  const monthly = [
-    { month: "May", value: Math.round(totalProfit * 0.2) },
-    { month: "Jun", value: Math.round(totalProfit * 0.25) },
-    { month: "Jul", value: Math.round(totalProfit * 0.27) },
-    { month: "Aug", value: Math.round(totalProfit * 0.28) },
-  ];
+  const monthly = bucketByMonth(
+    rows.map((r) => ({
+      date: shipDates.get(r.shipment_id as string) ?? null,
+      amount: r.margin,
+    })),
+    6,
+  );
 
   return (
     <div className="space-y-6">
@@ -46,6 +57,7 @@ export default async function ProfitabilityPage() {
         <h1 className="text-2xl font-bold">Profitability</h1>
         <p className="text-sm opacity-70">
           Broker profit = customer revenue − carrier cost − approved extras − discounts.
+          Monthly chart uses each load&apos;s delivery (or pickup/create) date.
         </p>
       </div>
 

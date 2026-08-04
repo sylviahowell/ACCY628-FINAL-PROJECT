@@ -2,12 +2,12 @@ import { redirect } from "next/navigation";
 import { getCurrentProfile } from "@/lib/actions/auth";
 import { createCustomer } from "@/lib/actions/freight";
 import { createClient } from "@/lib/supabase/server";
-import { isStaff, money } from "@/lib/types";
+import { isOperations, money } from "@/lib/types";
 
 export default async function CustomersPage() {
   const profile = await getCurrentProfile();
   if (!profile) redirect("/login");
-  if (!isStaff(profile.role)) redirect("/dashboard");
+  if (!isOperations(profile.role)) redirect("/dashboard");
 
   const supabase = await createClient();
   const { data: customers } = await supabase.from("customers").select("*").order("name");

@@ -2,7 +2,7 @@
 
 import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
-import { DEMO_PASSWORD, DEMO_USERS, type Profile } from "@/lib/types";
+import { DEMO_PASSWORD, DEMO_USERS, type Profile, type UserRole } from "@/lib/types";
 
 export async function getCurrentProfile(): Promise<Profile | null> {
   const supabase = await createClient();
@@ -17,56 +17,59 @@ export async function getCurrentProfile(): Promise<Profile | null> {
     .eq("id", user.id)
     .maybeSingle();
 
-  return data as Profile | null;
+  return (data as Profile | null) ?? null;
 }
 
-export async function ensureDemoUsers() {
+export async function signUp(formData: FormData) {
+  const email = String(formData.get("email") || "").trim();
+  const password = String(formData.get("password") || "");
+  const fullName = String(formData.get("full_name") || "").trim();
+  const role = (String(formData.get("role") || "broker") as UserRole) || "broker";
+
   const supabase = await createClient();
-  const results: string[] = [];
-
-  for (const demo of DEMO_USERS) {
-    const { error: signInError } = await supabase.auth.signInWithPassword({
-      email: demo.email,
-      password: DEMO_PASSWORD,
-    });
-
-    if (!signInError) {
-      await supabase.auth.signOut();
-      results.push(`${demo.email}: exists`);
-      continue;
-    }
-
-    const { error: signUpError } = await supabase.auth.signUp({
-      email: demo.email,
-      password: DEMO_PASSWORD,
-      options: {
-        data: {
-          full_name: demo.full_name,
-          role: demo.role,
-          customer_id: demo.customer_id ?? "",
-          carrier_id: demo.carrier_id ?? "",
-        },
+  const { error } = await supabase.auth.signUp({
+    email,
+    password,
+    options: {
+      data: {
+        full_name: fullName || email.split("@")[0],
+        role: ["manager", "broker", "customer", "carrier"].includes(role)
+          ? role
+          : "broker",
       },
-    });
+    },
+  });
 
-    if (signUpError) {
-      results.push(`${demo.email}: ${signUpError.message}`);
-    } else {
-      await supabase.auth.signOut();
-      results.push(`${demo.email}: created`);
-    }
+  if (error) throw new Error(error.message);
+
+  const { error: signInError } = await supabase.auth.signInWithPassword({
+    email,
+    password,
+  });
+  if (signInError) {
+    throw new Error(
+      signInError.message +
+        " If email confirmation is on, turn it off in Supabase Auth settings for local testing.",
+    );
   }
 
-  return results;
+  redirect("/dashboard");
+}
+
+export async function signIn(formData: FormData) {
+  const email = String(formData.get("email") || "").trim();
+  const password = String(formData.get("password") || "");
+  const supabase = await createClient();
+  const { error } = await supabase.auth.signInWithPassword({ email, password });
+  if (error) throw new Error(error.message);
+  redirect("/dashboard");
 }
 
 export async function loginAsDemo(email: string, _formData?: FormData) {
-  const supabase = await createClient();
   const demo = DEMO_USERS.find((u) => u.email === email);
-  if (!demo) {
-    throw new Error("Unknown demo user");
-  }
+  if (!demo) throw new Error("Unknown demo user");
 
+  const supabase = await createClient();
   const { error: signInError } = await supabase.auth.signInWithPassword({
     email: demo.email,
     password: DEMO_PASSWORD,
@@ -85,24 +88,21 @@ export async function loginAsDemo(email: string, _formData?: FormData) {
         },
       },
     });
+    if (signUpError) throw new Error(signUpError.message);
 
-    if (signUpError) {
-      throw new Error(signUpError.message);
-    }
-
-    const { error: secondSignIn } = await supabase.auth.signInWithPassword({
+    const { error: second } = await supabase.auth.signInWithPassword({
       email: demo.email,
       password: DEMO_PASSWORD,
     });
-    if (secondSignIn) {
+    if (second) {
       throw new Error(
-        secondSignIn.message +
-          " If email confirmation is required, disable it in Supabase Auth settings for demo accounts.",
+        second.message +
+          " Turn off Confirm email in Supabase Auth → Providers → Email for demo accounts.",
       );
     }
   }
 
-  redirect("/workspace");
+  redirect("/dashboard");
 }
 
 export async function signOut() {

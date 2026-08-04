@@ -1,21 +1,15 @@
 @import "tailwindcss";
-
-:root {
-  --background: #f4f6f8;
-  --foreground: #0f172a;
-  --brand: #0f2744;
-  --accent: #c4a35a;
-}
-
-@theme inline {
-  --color-background: var(--background);
-  --color-foreground: var(--foreground);
-  --font-sans: var(--font-source-sans), "Source Sans 3", system-ui, sans-serif;
-  --font-serif: var(--font-source-serif), "Source Serif 4", Georgia, serif;
+@plugin "daisyui" {
+  themes: corporate --default, business --prefersdark, winter, nord, emerald;
 }
 
 body {
-  background: var(--background);
-  color: var(--foreground);
-  font-family: var(--font-sans);
+  font-family: var(--font-source-sans), "Source Sans 3", system-ui, sans-serif;
+}
+
+.freight-hero {
+  background:
+    radial-gradient(ellipse at top left, rgba(56, 189, 248, 0.25), transparent 50%),
+    radial-gradient(ellipse at bottom right, rgba(14, 165, 233, 0.15), transparent 45%),
+    linear-gradient(160deg, #0b1f36 0%, #123555 45%, #0f2744 100%);
 }

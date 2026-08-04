@@ -31,7 +31,10 @@ export async function updateSession(request: NextRequest) {
 
   const path = request.nextUrl.pathname;
   const isPublic =
-    path === "/" || path.startsWith("/login") || path.startsWith("/auth");
+    path === "/" ||
+    path.startsWith("/login") ||
+    path.startsWith("/signup") ||
+    path.startsWith("/auth");
 
   if (!user && !isPublic) {
     const url = request.nextUrl.clone();
@@ -39,9 +42,9 @@ export async function updateSession(request: NextRequest) {
     return NextResponse.redirect(url);
   }
 
-  if (user && (path === "/login" || path === "/")) {
+  if (user && (path === "/login" || path === "/signup" || path === "/")) {
     const url = request.nextUrl.clone();
-    url.pathname = "/workspace";
+    url.pathname = "/dashboard";
     return NextResponse.redirect(url);
   }
 

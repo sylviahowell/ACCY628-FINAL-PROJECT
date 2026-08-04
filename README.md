@@ -1,74 +1,54 @@
-# LaneLedger Freight — ACCY628 Final Project
+# FreightFlow
 
-Web-based **freight brokerage** contract engagement and contract-to-cash system.
+Freight Brokerage & Logistics contract-to-cash app for ACCY628.
 
-## Shared infrastructure (use these only)
+## Stack
+Next.js · React · Tailwind CSS · daisyUI · Supabase · Recharts
 
-| Resource | Value |
-|----------|--------|
-| GitHub | `sylviahowell/ACCY628-FINAL-PROJECT` |
-| Supabase project | **ACCY628-Final-Project** (`hdoaultadiqdmaijcjyp`) |
-| Do not use | ConcertCosts or any other Supabase project |
+## Shared Supabase project (only this one)
+- **Name:** ACCY628-Final-Project
+- **Ref:** `hdoaultadiqdmaijcjyp`
+- Do **not** use ConcertCosts
 
-## Local setup
-
-1. Clone the repo and open it in Cursor.
-2. Create `.env.local` (never commit this):
+## Environment
+Copy `.env.example` to `.env.local` (already created for Sylvia):
 
 ```env
 NEXT_PUBLIC_SUPABASE_URL=https://hdoaultadiqdmaijcjyp.supabase.co
 NEXT_PUBLIC_SUPABASE_ANON_KEY=<publishable key from Supabase>
 ```
 
-3. Install and run:
+Never put a service-role key in the frontend.
 
+After changing `.env.local`, **restart** the dev server (`Ctrl+C`, then `npm run dev`).
+
+## Run locally
 ```bash
 npm install
 npm run dev
 ```
+Open http://localhost:3000 (or the port shown in the terminal).
 
-4. Open [http://localhost:3000](http://localhost:3000) and use the **demo role picker** on `/login`.
-
-### Demo accounts
-
-Password for all: `FreightDemo2026!`
+## Demo login (quick role switch)
+Password for all demo users: `FreightDemo2026!`
 
 | Email | Role |
 |-------|------|
-| manager@freight.demo | Manager |
-| broker@freight.demo | Broker |
-| billing@freight.demo | Billing |
-| customer@freight.demo | Customer (Midwest Retail) |
-| carrier@freight.demo | Carrier (Prairie Haulers) |
+| manager@freightflow.example | Manager |
+| broker@freightflow.example | Broker |
+| customer@freightflow.example | Customer |
+| carrier@freightflow.example | Carrier |
 
-If first login fails with an email-confirmation error, in Supabase Dashboard → Authentication → Providers → Email, turn off **Confirm email** for development/demo.
+If login fails with an email confirmation error: Supabase Dashboard → Authentication → Providers → Email → turn off **Confirm email**.
 
-## Branch workflow
+## Test the main workflow
+1. Login as **broker** → create/view customer, carrier, contract
+2. Create a **shipment** with sell rate and buy cost
+3. Login as **carrier** → confirm pickup → in transit → upload POD / deliver
+4. Login as **broker/manager** → generate invoice
+5. Record a **payment** → invoice balance updates
+6. Open **Profitability** / **Dashboard** charts
+7. Login as **customer** → track shipments, view invoices, submit dispute
 
-- Work on your **own branch** (not `main`).
-- Pull latest `main` before starting new work.
-- Do not commit `.env.local`.
-
-### Ready for team review / merge (section 6.8)
-
-This foundation lives on branch **`SylviaHowell`** and is not yet committed/pushed. When the team agrees:
-
-1. Commit on `SylviaHowell` (exclude `.env.local`).
-2. Push the branch: `git push -u origin SylviaHowell`
-3. Ask Cursor to merge into `main` **locally** after pulling latest `main`, test with `npm run dev`, then push `main`.
-4. Teammates pull `main` into their own branches (section 6.9).
-
-Do **not** merge to `main` until at least one teammate has reviewed the spine flow (login → load → POD → invoice → payment).
-
-## What this foundation includes
-
-- Roles with different workspaces (manager, broker, billing, customer, carrier)
-- Customers, carriers, contracts, shipments/loads
-- Accessorial charges, invoices, simulated payments, disputes
-- Delivery confirmation (POD) before invoicing
-- Brokerage margin view (`shipment_profitability`)
-- Status audit trail
-
-## Team next modules
-
-Broker ops polish, carrier POD UX, customer portal depth, AR aging dashboards, GAAP/controls documentation in-app, richer seed edge cases, Vercel deploy (owner only).
+## Branch
+Work on your personal branch (e.g. `SylviaHowell`), not directly on `main`.

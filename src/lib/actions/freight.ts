@@ -3,322 +3,455 @@
 import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
 import { getCurrentProfile } from "@/lib/actions/auth";
+import { isStaff, type ShipmentStatus } from "@/lib/types";
 
-export async function createLoad(formData: FormData) {
-  const profile = await getCurrentProfile();
-  if (!profile || !["manager", "broker"].includes(profile.role)) {
-    return { error: "Only brokers or managers can create loads." };
-  }
-
+async function logStatus(
+  shipmentId: string,
+  fromStatus: string | null,
+  toStatus: string,
+  profileId: string,
+  note?: string,
+) {
   const supabase = await createClient();
-  const loadNumber = String(formData.get("load_number") || "").trim();
-  const customerId = String(formData.get("customer_id") || "");
+  await supabase.from("shipment_status_updates").insert({
+    shipment_id: shipmentId,
+    from_status: fromStatus,
+    to_status: toStatus,
+    changed_by: profileId,
+    note: note ?? null,
+  });
+  await supabase.from("status_events").insert({
+    entity_type: "shipment",
+    entity_id: shipmentId,
+    from_status: fromStatus,
+    to_status: toStatus,
+    changed_by: profileId,
+    note: note ?? null,
+  });
+}
+
+export async function createCustomer(formData: FormData) {
+  const profile = await getCurrentProfile();
+  if (!profile || !isStaff(profile.role)) throw new Error("Only staff can create customers.");
+  const supabase = await createClient();
+  const { error } = await supabase.from("customers").insert({
+    name: String(formData.get("name") || "").trim(),
+    contact_name: String(formData.get("contact_name") || "").trim() || null,
+    contact_email: String(formData.get("contact_email") || "").trim() || null,
+    contact_phone: String(formData.get("contact_phone") || "").trim() || null,
+    billing_address: String(formData.get("billing_address") || "").trim() || null,
+    shipping_address: String(formData.get("shipping_address") || "").trim() || null,
+    payment_terms: String(formData.get("payment_terms") || "Net 30").trim(),
+    credit_limit: Number(formData.get("credit_limit") || 50000),
+    notes: String(formData.get("notes") || "").trim() || null,
+  });
+  if (error) throw new Error(error.message);
+  revalidatePath("/customers");
+}
+
+export async function createCarrier(formData: FormData) {
+  const profile = await getCurrentProfile();
+  if (!profile || !isStaff(profile.role)) throw new Error("Only staff can create carriers.");
+  const supabase = await createClient();
+  const { error } = await supabase.from("carriers").insert({
+    name: String(formData.get("name") || "").trim(),
+    dot_number: String(formData.get("dot_number") || "").trim() || null,
+    mc_number: String(formData.get("mc_number") || "").trim() || null,
+    contact_name: String(formData.get("contact_name") || "").trim() || null,
+    contact_email: String(formData.get("contact_email") || "").trim() || null,
+    contact_phone: String(formData.get("contact_phone") || "").trim() || null,
+    insurance_expiration: String(formData.get("insurance_expiration") || "") || null,
+    equipment_type: String(formData.get("equipment_type") || "").trim() || null,
+    service_area: String(formData.get("service_area") || "").trim() || null,
+    rating: Number(formData.get("rating") || 4),
+  });
+  if (error) throw new Error(error.message);
+  revalidatePath("/carriers");
+}
+
+export async function createContract(formData: FormData) {
+  const profile = await getCurrentProfile();
+  if (!profile || !isStaff(profile.role)) throw new Error("Only staff can create contracts.");
+  const supabase = await createClient();
+  const { error } = await supabase.from("contracts").insert({
+    contract_number: String(formData.get("contract_number") || "").trim(),
+    customer_id: String(formData.get("customer_id") || ""),
+    title: String(formData.get("title") || "").trim(),
+    start_date: String(formData.get("start_date") || ""),
+    end_date: String(formData.get("end_date") || "") || null,
+    billing_terms: String(formData.get("payment_terms") || "Net 30"),
+    payment_terms: String(formData.get("payment_terms") || "Net 30"),
+    fuel_surcharge_pct: Number(formData.get("fuel_surcharge_pct") || 0),
+    shipping_rates: String(formData.get("shipping_rates") || "").trim() || null,
+    renewal_option: formData.get("renewal_option") === "on",
+    notes: String(formData.get("notes") || "").trim() || null,
+    status: "active",
+  });
+  if (error) throw new Error(error.message);
+  revalidatePath("/contracts");
+}
+
+export async function createShipment(formData: FormData) {
+  const profile = await getCurrentProfile();
+  if (!profile || !isStaff(profile.role)) throw new Error("Only staff can create shipments.");
+
   const carrierId = String(formData.get("carrier_id") || "") || null;
-  const contractId = String(formData.get("contract_id") || "") || null;
-  const originCity = String(formData.get("origin_city") || "").trim();
-  const originState = String(formData.get("origin_state") || "").trim();
-  const destCity = String(formData.get("dest_city") || "").trim();
-  const destState = String(formData.get("dest_state") || "").trim();
   const customerRate = Number(formData.get("customer_rate") || 0);
   const carrierCost = Number(formData.get("carrier_cost") || 0);
-  const pickupDate = String(formData.get("pickup_date") || "") || null;
-  const promised = String(formData.get("promised_delivery_date") || "") || null;
+  const discount = Number(formData.get("discount_amount") || 0);
 
+  if (discount > 0) {
+    // Control: discounts need manager approval before they apply
+  }
+
+  const pickup = String(formData.get("pickup_location") || "").trim();
+  const delivery = String(formData.get("delivery_location") || "").trim();
+  const [originCity = pickup, originState = ""] = pickup.split(",").map((s) => s.trim());
+  const [destCity = delivery, destState = ""] = delivery.split(",").map((s) => s.trim());
+
+  const status: ShipmentStatus = carrierId ? "assigned" : "scheduled";
+  const supabase = await createClient();
   const { data, error } = await supabase
     .from("shipments")
     .insert({
-      load_number: loadNumber,
-      customer_id: customerId,
+      load_number: String(formData.get("load_number") || "").trim(),
+      customer_id: String(formData.get("customer_id") || ""),
       carrier_id: carrierId,
-      contract_id: contractId,
-      status: carrierId ? "booked" : "draft",
-      origin_city: originCity,
-      origin_state: originState,
-      dest_city: destCity,
-      dest_state: destState,
+      contract_id: String(formData.get("contract_id") || "") || null,
+      status,
+      pickup_location: pickup,
+      delivery_location: delivery,
+      origin_city: originCity || "TBD",
+      origin_state: originState || "NA",
+      dest_city: destCity || "TBD",
+      dest_state: destState || "NA",
+      pickup_date: String(formData.get("pickup_date") || "") || null,
+      delivery_date: String(formData.get("delivery_date") || "") || null,
+      promised_delivery_date: String(formData.get("delivery_date") || "") || null,
+      freight_type: String(formData.get("freight_type") || "").trim() || null,
+      weight_lbs: Number(formData.get("weight_lbs") || 0) || null,
       customer_rate: customerRate,
       carrier_cost: carrierCost,
-      pickup_date: pickupDate,
-      promised_delivery_date: promised,
+      discount_amount: discount,
+      discount_approved: discount === 0 || profile.role === "manager",
       created_by: profile.id,
     })
     .select("id")
     .single();
 
-  if (error) return { error: error.message };
-
-  await supabase.from("status_events").insert({
-    entity_type: "shipment",
-    entity_id: data.id,
-    from_status: null,
-    to_status: carrierId ? "booked" : "draft",
-    changed_by: profile.id,
-    note: "Load created",
-  });
-
-  revalidatePath("/workspace");
-  revalidatePath("/workspace/loads");
-  return { success: true, id: data.id };
-}
-
-export async function markInTransit(shipmentId: string, _formData?: FormData) {
-  const profile = await getCurrentProfile();
-  if (!profile || !["manager", "broker", "carrier"].includes(profile.role)) {
-    throw new Error("Not allowed.");
-  }
-
-  const supabase = await createClient();
-  const { data: existing } = await supabase
-    .from("shipments")
-    .select("status")
-    .eq("id", shipmentId)
-    .single();
-
-  const { error } = await supabase
-    .from("shipments")
-    .update({ status: "in_transit" })
-    .eq("id", shipmentId);
-
   if (error) throw new Error(error.message);
 
-  await supabase.from("status_events").insert({
-    entity_type: "shipment",
-    entity_id: shipmentId,
-    from_status: existing?.status ?? null,
-    to_status: "in_transit",
-    changed_by: profile.id,
-    note: "Marked in transit",
-  });
-
-  revalidatePath("/workspace");
-  revalidatePath(`/workspace/loads/${shipmentId}`);
-}
-
-export async function confirmDelivery(shipmentId: string, _formData?: FormData) {
-  const profile = await getCurrentProfile();
-  if (!profile || !["manager", "broker", "carrier"].includes(profile.role)) {
-    throw new Error("Not allowed to confirm delivery.");
+  if (discount > 0 && profile.role !== "manager") {
+    await supabase.from("approval_requests").insert({
+      entity_type: "shipment",
+      entity_id: data.id,
+      request_type: "discount",
+      amount: discount,
+      reason: "Shipment discount requires manager approval",
+      requested_by: profile.id,
+      status: "pending",
+    });
   }
 
+  await logStatus(data.id, null, status, profile.id, "Shipment created");
+  revalidatePath("/shipments");
+  revalidatePath("/dashboard");
+  return data.id as string;
+}
+
+export async function updateShipmentStatus(shipmentId: string, toStatus: ShipmentStatus) {
+  const profile = await getCurrentProfile();
+  if (!profile) throw new Error("Not signed in");
+
   const supabase = await createClient();
-  const { data: existing } = await supabase
+  const { data: shipment } = await supabase
     .from("shipments")
-    .select("status")
+    .select("*")
     .eq("id", shipmentId)
     .single();
+  if (!shipment) throw new Error("Shipment not found");
 
-  const { error } = await supabase
-    .from("shipments")
-    .update({
-      status: "delivered",
-      delivered_at: new Date().toISOString(),
-      delivered_by: profile.id,
-      delivery_date: new Date().toISOString().slice(0, 10),
-    })
-    .eq("id", shipmentId);
+  if (profile.role === "carrier" && shipment.carrier_id !== profile.carrier_id) {
+    throw new Error("Carriers can only update their assigned loads.");
+  }
+  if (profile.role === "customer") throw new Error("Customers cannot change shipment status.");
 
-  if (error) throw new Error(error.message);
-
-  await supabase.from("status_events").insert({
-    entity_type: "shipment",
-    entity_id: shipmentId,
-    from_status: existing?.status ?? null,
-    to_status: "delivered",
-    changed_by: profile.id,
-    note: "Proof of delivery confirmed",
-  });
-
-  revalidatePath("/workspace");
-  revalidatePath(`/workspace/loads/${shipmentId}`);
-}
-
-export async function addAccessorial(formData: FormData) {
-  const profile = await getCurrentProfile();
-  if (!profile || !["manager", "broker", "billing", "carrier"].includes(profile.role)) {
-    throw new Error("Not allowed.");
+  if (toStatus === "completed" && !shipment.carrier_id) {
+    throw new Error("Cannot complete a shipment without an assigned carrier.");
+  }
+  if (toStatus === "completed") {
+    const { data: pods } = await supabase
+      .from("proof_of_delivery")
+      .select("id")
+      .eq("shipment_id", shipmentId)
+      .limit(1);
+    if (!pods?.length) {
+      throw new Error("Proof of delivery is required before completing a shipment.");
+    }
   }
 
-  const supabase = await createClient();
+  const patch: Record<string, unknown> = { status: toStatus };
+  if (toStatus === "delivered" || toStatus === "completed") {
+    patch.delivered_at = new Date().toISOString();
+    patch.delivered_by = profile.id;
+    patch.delivery_date = new Date().toISOString().slice(0, 10);
+  }
+
+  const { error } = await supabase.from("shipments").update(patch).eq("id", shipmentId);
+  if (error) throw new Error(error.message);
+
+  await logStatus(shipmentId, shipment.status, toStatus, profile.id);
+  revalidatePath("/shipments");
+  revalidatePath(`/shipments/${shipmentId}`);
+  revalidatePath("/dashboard");
+}
+
+export async function uploadPod(formData: FormData) {
+  const profile = await getCurrentProfile();
+  if (!profile || !["carrier", "manager", "broker"].includes(profile.role)) {
+    throw new Error("Not allowed to upload POD.");
+  }
   const shipmentId = String(formData.get("shipment_id") || "");
-  const description = String(formData.get("description") || "").trim();
-  const amount = Number(formData.get("amount") || 0);
-  const billable = formData.get("billable_to_customer") === "on";
-  const payable = formData.get("payable_to_carrier") === "on";
-
-  const { error } = await supabase.from("shipment_charges").insert({
+  const supabase = await createClient();
+  const { error } = await supabase.from("proof_of_delivery").insert({
     shipment_id: shipmentId,
-    charge_type: "accessorial",
-    description,
-    amount,
-    billable_to_customer: billable,
-    payable_to_carrier: payable,
+    uploaded_by: profile.id,
+    file_url: String(formData.get("file_url") || "").trim() || null,
+    notes: String(formData.get("notes") || "").trim() || null,
+    signed_by: String(formData.get("signed_by") || "").trim() || null,
+    delivered_at: new Date().toISOString(),
   });
-
   if (error) throw new Error(error.message);
 
-  revalidatePath(`/workspace/loads/${shipmentId}`);
+  await updateShipmentStatus(shipmentId, "delivered");
+  revalidatePath(`/shipments/${shipmentId}`);
+}
+
+export async function requestAccessorial(formData: FormData) {
+  const profile = await getCurrentProfile();
+  if (!profile) throw new Error("Not signed in");
+
+  const shipmentId = String(formData.get("shipment_id") || "");
+  const amount = Number(formData.get("amount") || 0);
+  const description = String(formData.get("description") || "").trim();
+  const supabase = await createClient();
+
+  const { data: settings } = await supabase
+    .from("app_settings")
+    .select("accessorial_approval_threshold")
+    .eq("id", 1)
+    .maybeSingle();
+  const threshold = Number(settings?.accessorial_approval_threshold ?? 250);
+  const needsApproval = amount > threshold && profile.role !== "manager";
+
+  const { data: charge, error } = await supabase
+    .from("shipment_charges")
+    .insert({
+      shipment_id: shipmentId,
+      charge_type: "accessorial",
+      description,
+      amount,
+      billable_to_customer: true,
+      payable_to_carrier: formData.get("payable_to_carrier") === "on",
+      approval_status: needsApproval ? "pending" : "approved",
+      requested_by: profile.id,
+    })
+    .select("id")
+    .single();
+  if (error) throw new Error(error.message);
+
+  if (needsApproval) {
+    await supabase.from("approval_requests").insert({
+      entity_type: "shipment_charge",
+      entity_id: charge.id,
+      request_type: "accessorial",
+      amount,
+      reason: description,
+      requested_by: profile.id,
+      status: "pending",
+    });
+  }
+
+  revalidatePath(`/shipments/${shipmentId}`);
 }
 
 export async function generateInvoice(shipmentId: string, _formData?: FormData) {
   const profile = await getCurrentProfile();
-  if (!profile || !["manager", "billing", "broker"].includes(profile.role)) {
-    throw new Error("Only billing, brokers, or managers can invoice.");
-  }
+  if (!profile || !isStaff(profile.role)) throw new Error("Only staff can invoice.");
 
   const supabase = await createClient();
-  const { data: shipment, error: shipError } = await supabase
+  const { data: shipment } = await supabase
     .from("shipments")
-    .select("id, customer_id, customer_rate, status, load_number")
+    .select("*")
     .eq("id", shipmentId)
     .single();
+  if (!shipment) throw new Error("Shipment not found");
+  if (shipment.status === "cancelled") {
+    throw new Error("Cannot invoice a cancelled shipment.");
+  }
+  if (!["delivered", "completed"].includes(shipment.status)) {
+    throw new Error("Invoice only after delivery (POD evidence).");
+  }
 
-  if (shipError || !shipment) throw new Error(shipError?.message ?? "Shipment not found");
-  if (shipment.status !== "delivered") {
-    throw new Error("Invoice only after delivery (revenue earned / POD evidence).");
+  const { data: pods } = await supabase
+    .from("proof_of_delivery")
+    .select("id")
+    .eq("shipment_id", shipmentId)
+    .limit(1);
+  if (!pods?.length && shipment.pod_required !== false) {
+    throw new Error("Proof of delivery is required before invoicing.");
   }
 
   const { data: existing } = await supabase
     .from("invoices")
     .select("id")
     .eq("shipment_id", shipmentId)
-    .neq("status", "cancelled")
-    .limit(1);
-
-  if (existing && existing.length > 0) {
-    throw new Error("An open invoice already exists for this shipment.");
-  }
+    .neq("status", "cancelled");
+  if (existing?.length) throw new Error("An invoice already exists for this shipment.");
 
   const { data: charges } = await supabase
     .from("shipment_charges")
-    .select("amount, billable_to_customer")
+    .select("amount, billable_to_customer, approval_status")
     .eq("shipment_id", shipmentId);
 
   const accessorials = (charges ?? [])
-    .filter((c) => c.billable_to_customer)
-    .reduce((sum, c) => sum + Number(c.amount), 0);
-  const total = Number(shipment.customer_rate) + accessorials;
-  const invoiceNumber = `INV-${Date.now().toString().slice(-6)}`;
+    .filter((c) => c.billable_to_customer && c.approval_status !== "pending")
+    .reduce((s, c) => s + Number(c.amount), 0);
+  const discount =
+    shipment.discount_approved || profile.role === "manager"
+      ? Number(shipment.discount_amount || 0)
+      : 0;
+  const total = Number(shipment.customer_rate) - discount + accessorials;
   const due = new Date();
   due.setDate(due.getDate() + 30);
 
-  const { data: invoice, error } = await supabase
-    .from("invoices")
-    .insert({
-      invoice_number: invoiceNumber,
-      customer_id: shipment.customer_id,
-      shipment_id: shipment.id,
-      status: "sent",
-      issue_date: new Date().toISOString().slice(0, 10),
-      due_date: due.toISOString().slice(0, 10),
-      subtotal: total,
-      total,
-      amount_paid: 0,
-    })
-    .select("id")
-    .single();
-
-  if (error) throw new Error(error.message);
-
-  await supabase.from("status_events").insert({
-    entity_type: "invoice",
-    entity_id: invoice.id,
-    from_status: null,
-    to_status: "sent",
-    changed_by: profile.id,
-    note: `Billed ${shipment.load_number} after delivery confirmation`,
+  const invoiceNumber = `INV-${Date.now().toString().slice(-8)}`;
+  const { error } = await supabase.from("invoices").insert({
+    invoice_number: invoiceNumber,
+    customer_id: shipment.customer_id,
+    shipment_id: shipment.id,
+    status: "pending",
+    issue_date: new Date().toISOString().slice(0, 10),
+    due_date: due.toISOString().slice(0, 10),
+    subtotal: total,
+    total,
+    amount_paid: 0,
   });
+  if (error) {
+    if (error.message.toLowerCase().includes("duplicate")) {
+      throw new Error("Duplicate invoice number blocked by control.");
+    }
+    throw new Error(error.message);
+  }
 
-  revalidatePath("/workspace");
-  revalidatePath("/workspace/billing");
-  revalidatePath(`/workspace/loads/${shipmentId}`);
+  await supabase
+    .from("shipments")
+    .update({ status: "completed" })
+    .eq("id", shipmentId);
+
+  revalidatePath("/invoices");
+  revalidatePath(`/shipments/${shipmentId}`);
+  revalidatePath("/dashboard");
 }
 
 export async function recordPayment(formData: FormData) {
   const profile = await getCurrentProfile();
-  if (!profile || !["manager", "billing"].includes(profile.role)) {
-    throw new Error("Only billing or managers can record payments.");
-  }
+  if (!profile || !isStaff(profile.role)) throw new Error("Only staff can record payments.");
 
-  const supabase = await createClient();
   const invoiceId = String(formData.get("invoice_id") || "");
   const amount = Number(formData.get("amount") || 0);
-  const reference = String(formData.get("reference") || "").trim();
-
-  const { data: invoice, error: invError } = await supabase
+  const supabase = await createClient();
+  const { data: invoice } = await supabase
     .from("invoices")
     .select("*")
     .eq("id", invoiceId)
     .single();
-
-  if (invError || !invoice) throw new Error(invError?.message ?? "Invoice not found");
+  if (!invoice) throw new Error("Invoice not found");
   if (invoice.status === "disputed") {
-    throw new Error(
-      "Cannot mark paid in full while a dispute is open — resolve dispute first.",
-    );
+    throw new Error("Resolve the dispute before applying payment to paid-in-full.");
   }
 
-  const { error: payError } = await supabase.from("payments").insert({
+  const { error } = await supabase.from("payments").insert({
     invoice_id: invoiceId,
     amount,
-    method: "ach_simulated",
-    reference: reference || null,
+    payment_date: String(formData.get("payment_date") || new Date().toISOString().slice(0, 10)),
+    method: String(formData.get("method") || "ach_simulated"),
+    reference: String(formData.get("reference") || "") || null,
     recorded_by: profile.id,
   });
+  if (error) throw new Error(error.message);
 
-  if (payError) throw new Error(payError.message);
-
-  const newPaid = Number(invoice.amount_paid) + amount;
+  const paid = Number(invoice.amount_paid) + amount;
   let status = invoice.status;
-  if (newPaid >= Number(invoice.total)) status = "paid";
-  else if (newPaid > 0) status = "partial";
+  if (paid >= Number(invoice.total)) status = "paid";
+  else if (paid > 0) status = "partial";
 
   await supabase
     .from("invoices")
-    .update({ amount_paid: newPaid, status })
+    .update({ amount_paid: paid, status })
     .eq("id", invoiceId);
 
-  await supabase.from("status_events").insert({
-    entity_type: "invoice",
-    entity_id: invoiceId,
-    from_status: invoice.status,
-    to_status: status,
-    changed_by: profile.id,
-    note: `Payment recorded: ${amount}`,
-  });
-
-  revalidatePath("/workspace/billing");
+  revalidatePath("/payments");
+  revalidatePath("/invoices");
 }
 
 export async function openDispute(formData: FormData) {
   const profile = await getCurrentProfile();
-  if (!profile || !["customer", "billing", "manager"].includes(profile.role)) {
+  if (!profile || !["customer", "manager", "broker", "billing"].includes(profile.role)) {
     throw new Error("Not allowed.");
   }
-
   const supabase = await createClient();
   const invoiceId = String(formData.get("invoice_id") || "") || null;
-  const shipmentId = String(formData.get("shipment_id") || "") || null;
-  const reason = String(formData.get("reason") || "").trim();
-  const amount = Number(formData.get("amount_disputed") || 0);
-
   const { error } = await supabase.from("disputes").insert({
     invoice_id: invoiceId,
-    shipment_id: shipmentId,
-    reason,
-    amount_disputed: amount,
+    shipment_id: String(formData.get("shipment_id") || "") || null,
+    customer_id: profile.customer_id,
+    reason: String(formData.get("reason") || "").trim(),
+    amount_disputed: Number(formData.get("amount_disputed") || 0),
     opened_by: profile.id,
     status: "open",
   });
-
   if (error) throw new Error(error.message);
-
   if (invoiceId) {
-    await supabase
-      .from("invoices")
-      .update({ status: "disputed" })
-      .eq("id", invoiceId);
+    await supabase.from("invoices").update({ status: "disputed" }).eq("id", invoiceId);
   }
+  revalidatePath("/invoices");
+}
 
-  revalidatePath("/workspace/billing");
-  revalidatePath("/workspace");
+export async function reviewApproval(formData: FormData) {
+  const profile = await getCurrentProfile();
+  if (!profile || profile.role !== "manager") throw new Error("Managers only.");
+  const id = String(formData.get("approval_id") || "");
+  const decision = String(formData.get("decision") || "approved");
+  const supabase = await createClient();
+  const { data: req } = await supabase
+    .from("approval_requests")
+    .select("*")
+    .eq("id", id)
+    .single();
+  if (!req) throw new Error("Request not found");
+
+  await supabase
+    .from("approval_requests")
+    .update({
+      status: decision,
+      reviewed_by: profile.id,
+      reviewed_at: new Date().toISOString(),
+    })
+    .eq("id", id);
+
+  if (req.request_type === "accessorial" && req.entity_type === "shipment_charge") {
+    await supabase
+      .from("shipment_charges")
+      .update({ approval_status: decision === "approved" ? "approved" : "rejected" })
+      .eq("id", req.entity_id);
+  }
+  if (req.request_type === "discount" && req.entity_type === "shipment") {
+    await supabase
+      .from("shipments")
+      .update({ discount_approved: decision === "approved" })
+      .eq("id", req.entity_id);
+  }
+  revalidatePath("/settings");
+  revalidatePath("/shipments");
 }

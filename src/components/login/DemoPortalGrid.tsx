@@ -8,8 +8,8 @@ import {
   Headphones,
   Truck,
 } from "lucide-react";
-import { isRedirectError } from "next/dist/client/components/redirect-error";
-import { enterDemoMode } from "@/lib/actions/auth";
+import { activateDemoModeSession } from "@/lib/actions/auth";
+import { clientSignInDemoRole } from "@/lib/demo-auth-client";
 import { DEMO_MODE_STORAGE_KEY, DEMO_ROLE_STORAGE_KEY } from "@/lib/demo-mode";
 import type { UserRole } from "@/lib/types";
 import { DemoPortalCard, type PortalCardVisual } from "@/components/login/DemoPortalCard";
@@ -82,10 +82,12 @@ export function DemoPortalGrid() {
     }
     startTransition(async () => {
       try {
-        await enterDemoMode(role);
+        await clientSignInDemoRole(role);
+        await activateDemoModeSession();
+        window.location.assign(
+          `/dashboard?portal=${encodeURIComponent(role)}&t=${Date.now()}`,
+        );
       } catch (e) {
-        // redirect() throws; must not treat as a UI error
-        if (isRedirectError(e)) throw e;
         setActiveRole(null);
         setError(e instanceof Error ? e.message : "Demo sign-in failed");
       }

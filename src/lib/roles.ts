@@ -12,7 +12,7 @@ export const ROLE_LABELS: Record<UserRole, string> = {
 export const ROLE_PORTAL_BLURB: Record<UserRole, string> = {
   manager: "Company-wide oversight & approvals",
   broker: "Daily freight operations",
-  billing: "Invoicing, AR & collections",
+  billing: "Invoicing, AR, AP & collections",
   customer: "Your shipments & invoices",
   carrier: "Assigned loads & delivery docs",
 };
@@ -36,6 +36,7 @@ export function allowedPaths(role: UserRole): string[] {
         "/invoices",
         "/payments",
         "/ar",
+        "/ap",
         "/disputes",
         "/accounting",
         "/reports",
@@ -60,6 +61,7 @@ export function allowedPaths(role: UserRole): string[] {
         "/invoices",
         "/payments",
         "/ar",
+        "/ap",
         "/disputes",
         "/accounting",
         "/profitability",

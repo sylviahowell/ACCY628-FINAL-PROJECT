@@ -15,7 +15,7 @@ export default async function AccountingPage() {
   const { data: shipments } = await supabase
     .from("shipments")
     .select(
-      "id, load_number, status, customer_rate, carrier_cost, discount_amount, discount_approved, delivery_date, customers(name)",
+      "id, load_number, status, customer_rate, carrier_cost, carrier_id, discount_amount, discount_approved, delivery_date, customers(name)",
     );
   const { data: invoices } = await supabase
     .from("invoices")
@@ -25,6 +25,11 @@ export default async function AccountingPage() {
     .select("shipment_id, amount, billable_to_customer, payable_to_carrier, approval_status, charge_type");
   const { data: pods } = await supabase.from("proof_of_delivery").select("shipment_id");
   const { data: payments } = await supabase.from("payments").select("amount, payment_date");
+  const { data: carrierBills } = await supabase
+    .from("carrier_bills")
+    .select(
+      "id, bill_number, status, total, amount_paid, due_date, shipment_id, carriers(name), shipments(load_number)",
+    );
 
   const billedShipmentIds = new Set(
     (invoices ?? [])
@@ -84,6 +89,25 @@ export default async function AccountingPage() {
     .filter((i) => i.status !== "cancelled")
     .reduce((s, i) => s + Number(i.total), 0);
 
+  const openAp = (carrierBills ?? []).reduce((sum, b) => {
+    if (["paid", "cancelled"].includes(b.status)) return sum;
+    return sum + Math.max(0, Number(b.total) - Number(b.amount_paid));
+  }, 0);
+
+  const accruedUnbilledPayables = (shipments ?? []).filter(
+    (s) =>
+      ["delivered", "completed"].includes(s.status) &&
+      podShipments.has(s.id) &&
+      s.carrier_id &&
+      !(carrierBills ?? []).some(
+        (b) => b.shipment_id === s.id && b.status !== "cancelled",
+      ),
+  );
+  const accruedUnbilledPayableAmount = accruedUnbilledPayables.reduce(
+    (sum, s) => sum + Number(s.carrier_cost) + payableExtras(s.id),
+    0,
+  );
+
   const cogsOnEarned = earnedUnbilled.reduce(
     (sum, s) => sum + Number(s.carrier_cost) + payableExtras(s.id),
     0,
@@ -141,7 +165,7 @@ export default async function AccountingPage() {
         </div>
       </div>
 
-      <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
+      <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
         <div className="stats bg-base-100 shadow-sm">
           <div className="stat">
             <div className="stat-title">Earned, not yet billed</div>
@@ -168,6 +192,24 @@ export default async function AccountingPage() {
             <div className="stat-title">In-progress pipeline</div>
             <div className="stat-value text-xl">{money(deferredPipeline)}</div>
             <div className="stat-desc">Not earned yet ({inProgress.length} active loads)</div>
+          </div>
+        </div>
+        <div className="stats bg-base-100 shadow-sm">
+          <div className="stat">
+            <div className="stat-title">Accounts payable</div>
+            <div className="stat-value text-xl">{money(openAp)}</div>
+            <div className="stat-desc">Open carrier bills unpaid</div>
+          </div>
+        </div>
+        <div className="stats bg-base-100 shadow-sm">
+          <div className="stat">
+            <div className="stat-title">Accrued, not yet billed to carrier</div>
+            <div className="stat-value text-xl text-warning">
+              {money(accruedUnbilledPayableAmount)}
+            </div>
+            <div className="stat-desc">
+              {accruedUnbilledPayables.length} delivered loads awaiting carrier bill
+            </div>
           </div>
         </div>
       </div>
@@ -262,6 +304,57 @@ export default async function AccountingPage() {
               Full AR aging →
             </Link>
           </div>
+        </div>
+      </div>
+
+      <div className="card bg-base-100 shadow-sm">
+        <div className="card-body">
+          <h2 className="card-title text-base">Open payables (carrier bills)</h2>
+          <p className="text-sm opacity-70">
+            Carrier buy cost recognized with delivery; cash not yet fully remitted.
+          </p>
+          <div className="overflow-x-auto">
+            <table className="table table-sm">
+              <thead>
+                <tr>
+                  <th>Bill</th>
+                  <th>Load</th>
+                  <th>Carrier</th>
+                  <th>Status</th>
+                  <th>Balance</th>
+                  <th>Due</th>
+                </tr>
+              </thead>
+              <tbody>
+                {(carrierBills ?? [])
+                  .filter((b) => {
+                    const bal = Number(b.total) - Number(b.amount_paid);
+                    return bal > 0 && b.status !== "cancelled";
+                  })
+                  .slice(0, 12)
+                  .map((b) => (
+                    <tr key={b.id}>
+                      <td>{b.bill_number}</td>
+                      <td>
+                        {(b.shipments as { load_number?: string } | null)?.load_number ??
+                          "—"}
+                      </td>
+                      <td>{(b.carriers as { name?: string } | null)?.name ?? "—"}</td>
+                      <td>
+                        <span className={`badge badge-sm ${statusBadge(b.status)}`}>
+                          {b.status}
+                        </span>
+                      </td>
+                      <td>{money(Number(b.total) - Number(b.amount_paid))}</td>
+                      <td>{b.due_date}</td>
+                    </tr>
+                  ))}
+              </tbody>
+            </table>
+          </div>
+          <Link href="/ap" className="btn btn-ghost btn-sm w-fit">
+            Full AP workspace →
+          </Link>
         </div>
       </div>
 

@@ -8,6 +8,7 @@ import { BrokerTaskBoard } from "@/components/BrokerTaskBoard";
 import { CarrierScorecardGrid } from "@/components/CarrierScorecards";
 import { CarrierTaskList } from "@/components/CarrierTaskList";
 import { CollectionsWorklist } from "@/components/CollectionsWorklist";
+import { PayablesWorklist } from "@/components/PayablesWorklist";
 import { CustomerFriendlyStatusCard } from "@/components/ShipmentHealthCard";
 import { ProfitabilityHeatmap } from "@/components/ProfitabilityHeatmap";
 import { ShipmentMapLazy } from "@/components/ShipmentMapLazy";
@@ -25,6 +26,11 @@ import {
   buildUnbilledQueues,
   computeAging,
 } from "@/lib/collections";
+import {
+  computePayableAging,
+  openApBalance,
+  buildPayableWorklist,
+} from "@/lib/payables";
 import { toHeatRows } from "@/lib/heatmap";
 import { buildExecutiveKpis, inRange, monthBounds } from "@/lib/kpi";
 import { buildMorningBrief } from "@/lib/morning-brief";
@@ -56,6 +62,7 @@ export default async function DashboardPage() {
     { data: charges },
     { data: contracts },
     { data: collectionNotes },
+    { data: carrierBills },
   ] = await Promise.all([
     supabase
       .from("shipments")
@@ -82,7 +89,7 @@ export default async function DashboardPage() {
       .select("id, shipment_id, delivered_at, signed_by"),
     supabase
       .from("shipment_charges")
-      .select("id, shipment_id, amount, approval_status, description"),
+      .select("id, shipment_id, amount, approval_status, description, payable_to_carrier"),
     supabase
       .from("contracts")
       .select("id, contract_number, end_date, status, customers(name)"),
@@ -94,6 +101,13 @@ export default async function DashboardPage() {
       : Promise.resolve({
           data: [] as { invoice_id: string; note: string; created_at: string }[],
         }),
+    profile.role === "billing"
+      ? supabase
+          .from("carrier_bills")
+          .select(
+            "id, bill_number, status, total, amount_paid, due_date, shipment_id, carrier_id, carriers(name), shipments(load_number)",
+          )
+      : Promise.resolve({ data: [] as never[] }),
   ]);
 
   const customerName = new Map((customers ?? []).map((c) => [c.id, c.name]));
@@ -982,15 +996,43 @@ export default async function DashboardPage() {
       overdueCount: pastDue.length,
     });
 
+    const apOpenBilling = openApBalance(carrierBills ?? []);
+    const apAgingBilling = computePayableAging(carrierBills ?? [], today);
+    const apAgingChart = agingChartData(apAgingBilling);
+    const apPastDueBilling =
+      apAgingBilling.d1_30 +
+      apAgingBilling.d31_60 +
+      apAgingBilling.d61_90 +
+      apAgingBilling.d90_plus;
+
+    const payableWorklist = buildPayableWorklist({
+      bills: (carrierBills ?? []).map((b) => ({
+        id: b.id,
+        bill_number: b.bill_number,
+        carrier_id: b.carrier_id,
+        shipment_id: b.shipment_id,
+        total: Number(b.total),
+        amount_paid: Number(b.amount_paid),
+        due_date: b.due_date,
+        status: b.status,
+        carriers: b.carriers as { name?: string } | null,
+        shipments: b.shipments as { load_number?: string } | null,
+      })),
+      today,
+    });
+
     return (
       <div className="space-y-6">
         <Header
           title="Billing & Collections Dashboard"
-          subtitle="AR aging, unbilled queues, disputes, and collection actions"
+          subtitle="AR aging, AP payables, unbilled queues, disputes, and collection actions"
           action={
             <div className="flex flex-wrap gap-2">
               <Link href="/invoices" className="btn btn-outline btn-sm">
                 Ready to bill
+              </Link>
+              <Link href="/ap" className="btn btn-outline btn-sm">
+                Accounts Payable
               </Link>
               <Link href="/payments" className="btn btn-primary btn-sm">
                 Record payment
@@ -1036,6 +1078,13 @@ export default async function DashboardPage() {
             value={money(cashMonth)}
             href="/payments?filter=month"
           />
+          <Stat title="Open AP" value={money(apOpenBilling)} warn={apOpenBilling > 0} href="/ap" />
+          <Stat
+            title="AP past due"
+            value={money(apPastDueBilling)}
+            warn={apPastDueBilling > 0}
+            href="/ap"
+          />
           <Stat
             title="Delivered but unbilled"
             value={String(ready.length)}
@@ -1062,11 +1111,15 @@ export default async function DashboardPage() {
         </div>
 
         <div className="grid gap-4 lg:grid-cols-2">
+          <Panel title="AP aging">
+            <StatusPie data={apAgingChart} />
+          </Panel>
           <Panel title="Invoice aging">
             <StatusPie data={agingChart} />
           </Panel>
-          <BillingInsightsPanel insights={billingInsights} />
         </div>
+
+        <BillingInsightsPanel insights={billingInsights} />
 
         <div className="grid gap-4 lg:grid-cols-2">
           <UnbilledQueuePanel
@@ -1082,6 +1135,8 @@ export default async function DashboardPage() {
         </div>
 
         <CollectionsWorklist items={worklist} />
+
+        <PayablesWorklist items={payableWorklist} />
 
         <Panel title="Open billing disputes">
           {openDisputes.length === 0 ? (

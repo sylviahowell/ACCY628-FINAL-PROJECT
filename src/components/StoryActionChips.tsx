@@ -65,6 +65,10 @@ const CHIPS: Record<UserRole, ChipDef[]> = {
       hrefFallback: "/ar",
     },
     {
+      label: "Pay carriers · Accounts Payable",
+      hrefFallback: "/ap",
+    },
+    {
       label: "Resolve dispute · INV-9003",
       invoiceNumber: "INV-9003",
       hrefFallback: "/disputes",

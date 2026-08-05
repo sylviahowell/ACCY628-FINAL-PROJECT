@@ -1,7 +1,6 @@
 import { redirect } from "next/navigation";
 import { AppShell } from "@/components/AppShell";
 import { getCurrentProfile } from "@/lib/actions/auth";
-import { isDemoMode } from "@/lib/demo-mode-server";
 import { isDemoUserEmail } from "@/lib/demo-mode";
 
 export default async function AppLayout({
@@ -12,9 +11,8 @@ export default async function AppLayout({
   const profile = await getCurrentProfile();
   if (!profile) redirect("/login");
 
-  // Demo selector only when Demo Mode cookie is set AND session is a seeded demo user.
-  // Normal accounts never see role switching even if a stale cookie somehow exists.
-  const demoMode = (await isDemoMode()) && isDemoUserEmail(profile.email);
+  // Demo selector for any seeded demo account (portal cards or demo password login).
+  const demoMode = isDemoUserEmail(profile.email);
 
   return (
     <AppShell profile={profile} isDemoMode={demoMode}>

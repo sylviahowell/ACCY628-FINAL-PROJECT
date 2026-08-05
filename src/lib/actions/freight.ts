@@ -14,6 +14,7 @@ import {
 import { formString, moneyAmount, nonEmptyString, parseForm, uuidSchema } from "@/lib/action-schema";
 import { logEvent } from "@/lib/log-event";
 import { insuranceRiskStatus } from "@/lib/risk-credit";
+import { payableAmount } from "@/lib/payables";
 import { z } from "zod";
 
 /** Hard-block assigning a carrier whose insurance certificate is expired. */
@@ -990,5 +991,130 @@ export async function addCollectionNote(formData: FormData) {
   revalidatePath("/dashboard");
   revalidatePath("/ar");
   revalidatePath("/invoices");
+  revalidatePath("/payments");
+}
+
+export async function generateCarrierBill(shipmentId: string, _formData?: FormData) {
+  const profile = await getCurrentProfile();
+  if (!profile || !canManageBilling(profile.role)) {
+    throw new Error("Only billing or managers can create carrier bills.");
+  }
+
+  const supabase = await createClient();
+  const { data: shipment } = await supabase
+    .from("shipments")
+    .select("*")
+    .eq("id", shipmentId)
+    .single();
+  if (!shipment) throw new Error("Shipment not found");
+  if (!shipment.carrier_id) {
+    throw new Error("Assign a carrier before creating a payable.");
+  }
+  if (shipment.status === "cancelled") {
+    throw new Error("Cannot bill a cancelled shipment to the carrier.");
+  }
+  if (!["delivered", "completed"].includes(shipment.status)) {
+    throw new Error("Create carrier bills only after delivery with POD.");
+  }
+
+  const { data: pods } = await supabase
+    .from("proof_of_delivery")
+    .select("id")
+    .eq("shipment_id", shipmentId)
+    .limit(1);
+  if (!pods?.length && shipment.pod_required !== false) {
+    throw new Error("Proof of delivery is required before paying the carrier.");
+  }
+
+  const { data: existing } = await supabase
+    .from("carrier_bills")
+    .select("id")
+    .eq("shipment_id", shipmentId)
+    .neq("status", "cancelled");
+  if (existing?.length) {
+    throw new Error("A carrier bill already exists for this shipment.");
+  }
+
+  const { data: charges } = await supabase
+    .from("shipment_charges")
+    .select("amount, payable_to_carrier, approval_status")
+    .eq("shipment_id", shipmentId);
+
+  const total = payableAmount(Number(shipment.carrier_cost), charges ?? []);
+  const issueDate = new Date().toISOString().slice(0, 10);
+  const dueDate = dueDateFromTerms("Net 30", new Date(issueDate + "T00:00:00Z"));
+  const billNumber = `APB-${Date.now().toString().slice(-8)}`;
+
+  const { error } = await supabase.from("carrier_bills").insert({
+    bill_number: billNumber,
+    carrier_id: shipment.carrier_id,
+    shipment_id: shipment.id,
+    status: "pending",
+    issue_date: issueDate,
+    due_date: dueDate,
+    subtotal: total,
+    total,
+    amount_paid: 0,
+  });
+  if (error) throw new Error(error.message);
+
+  revalidatePath("/ap");
+  revalidatePath("/accounting");
+  revalidatePath("/dashboard");
+  revalidatePath(`/shipments/${shipmentId}`);
+  redirect(toastPath("/ap", `Carrier bill ${billNumber} created`));
+}
+
+export async function recordCarrierPayment(formData: FormData) {
+  const profile = await getCurrentProfile();
+  if (!profile || !canManageBilling(profile.role)) {
+    throw new Error("Only billing or managers can record carrier payments.");
+  }
+
+  const billId = String(formData.get("carrier_bill_id") || "");
+  const amount = Number(formData.get("amount") || 0);
+  if (!billId || !(amount > 0)) {
+    throw new Error("Select a bill and enter a positive amount.");
+  }
+
+  const supabase = await createClient();
+  const { data: bill } = await supabase
+    .from("carrier_bills")
+    .select("*")
+    .eq("id", billId)
+    .single();
+  if (!bill) throw new Error("Carrier bill not found");
+  if (bill.status === "cancelled") {
+    throw new Error("Cannot pay a cancelled carrier bill.");
+  }
+  if (bill.status === "on_hold") {
+    throw new Error("Release the hold before recording payment.");
+  }
+
+  const { error } = await supabase.from("carrier_payments").insert({
+    carrier_bill_id: billId,
+    amount,
+    payment_date: String(
+      formData.get("payment_date") || new Date().toISOString().slice(0, 10),
+    ),
+    method: String(formData.get("method") || "ach_simulated"),
+    reference: String(formData.get("reference") || "") || null,
+    recorded_by: profile.id,
+  });
+  if (error) throw new Error(error.message);
+
+  const paid = Number(bill.amount_paid) + amount;
+  let status = bill.status;
+  if (paid >= Number(bill.total)) status = "paid";
+  else if (paid > 0) status = "partial";
+
+  await supabase
+    .from("carrier_bills")
+    .update({ amount_paid: paid, status })
+    .eq("id", billId);
+
+  revalidatePath("/ap");
+  revalidatePath("/accounting");
+  revalidatePath("/dashboard");
   revalidatePath("/payments");
 }

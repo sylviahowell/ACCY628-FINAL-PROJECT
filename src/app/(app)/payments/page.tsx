@@ -49,6 +49,14 @@ export default async function PaymentsPage({
     .select("id, invoice_number, total, amount_paid, status, customers(name)")
     .in("status", ["pending", "sent", "partial", "overdue"]);
 
+  const recorderIds = [
+    ...new Set((payments ?? []).map((p) => p.recorded_by).filter(Boolean) as string[]),
+  ];
+  const { data: recorders } = recorderIds.length
+    ? await supabase.from("profiles").select("id, full_name").in("id", recorderIds)
+    : { data: [] as { id: string; full_name: string }[] };
+  const recorderName = new Map((recorders ?? []).map((p) => [p.id, p.full_name]));
+
   const allRows = payments ?? [];
   const rows =
     filter === "today"
@@ -127,6 +135,7 @@ export default async function PaymentsPage({
                 <th>Invoice</th>
                 <th>Amount</th>
                 <th>Method</th>
+                <th>Recorded by</th>
                 <th>Invoice status</th>
               </tr>
             </thead>
@@ -137,6 +146,9 @@ export default async function PaymentsPage({
                   <td>{(p.invoices as { invoice_number?: string } | null)?.invoice_number}</td>
                   <td>{money(p.amount)}</td>
                   <td>{paymentMethodLabel(p.method)}</td>
+                  <td className="text-sm">
+                    {p.recorded_by ? recorderName.get(p.recorded_by) ?? "Staff" : "—"}
+                  </td>
                   <td>
                     <span className={`badge ${statusBadge((p.invoices as { status?: string } | null)?.status ?? "")}`}>
                       {(p.invoices as { status?: string } | null)?.status}

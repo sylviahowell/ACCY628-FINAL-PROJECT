@@ -18,6 +18,7 @@ export default async function WarningsPage() {
     { data: pods },
     { data: disputes },
     { data: approvals },
+    { data: coverageRequests },
   ] = await Promise.all([
     supabase
       .from("shipments")
@@ -78,6 +79,20 @@ export default async function WarningsPage() {
             reason: string | null;
           }[],
         }),
+    profile.role === "manager" || profile.role === "broker"
+      ? supabase
+          .from("coverage_requests")
+          .select("id, pickup_location, delivery_location, customers(name)")
+          .eq("status", "pending")
+          .limit(30)
+      : Promise.resolve({
+          data: [] as {
+            id: string;
+            pickup_location: string;
+            delivery_location: string;
+            customers?: { name?: string } | null;
+          }[],
+        }),
   ]);
 
   let shipRows = shipments ?? [];
@@ -110,6 +125,7 @@ export default async function WarningsPage() {
     pods: podRows,
     disputes: disputeRows,
     approvals: approvals ?? [],
+    coverageRequests: coverageRequests ?? [],
     today,
   });
   const alerts = filterAlertsForProfile(all, profile);

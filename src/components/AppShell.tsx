@@ -1,6 +1,7 @@
 import { Suspense, type ReactNode } from "react";
 import {
   AlertTriangle,
+  Banknote,
   BarChart3,
   Building2,
   CheckSquare,
@@ -8,6 +9,7 @@ import {
   FileText,
   FolderOpen,
   HelpCircle,
+  Inbox,
   LayoutDashboard,
   LineChart,
   LogOut,
@@ -36,6 +38,7 @@ type ShipNavCounts = {
   delayed: number;
   unassigned: number;
   ready: number;
+  needsPod: number;
 };
 
 type InvoiceNavCounts = {
@@ -77,6 +80,7 @@ async function loadManagerShipCounts(): Promise<ShipNavCounts> {
   }
 
   let ready = 0;
+  let needsPod = 0;
   if (deliveredIds.length) {
     const [{ data: pods }, { data: invoices }] = await Promise.all([
       supabase.from("proof_of_delivery").select("shipment_id").in("shipment_id", deliveredIds),
@@ -91,9 +95,10 @@ async function loadManagerShipCounts(): Promise<ShipNavCounts> {
       (invoices ?? []).map((i) => i.shipment_id as string).filter(Boolean),
     );
     ready = deliveredIds.filter((id) => podSet.has(id) && !billedSet.has(id)).length;
+    needsPod = deliveredIds.filter((id) => !podSet.has(id)).length;
   }
 
-  return { delayed, unassigned, ready };
+  return { delayed, unassigned, ready, needsPod };
 }
 
 async function loadManagerInvoiceCounts(readyFromShips: number): Promise<InvoiceNavCounts> {
@@ -161,15 +166,16 @@ function navFor(
 
   switch (role) {
     case "manager": {
-      const c = shipCounts ?? { delayed: 0, unassigned: 0, ready: 0 };
+      const c = shipCounts ?? { delayed: 0, unassigned: 0, ready: 0, needsPod: 0 };
       const inv = invCounts ?? { ready: 0, overdue: 0, open: 0 };
       const pr = profitCounts ?? { losses: 0, lowMargin: 0 };
       return {
         primary: [
           { href: "/dashboard", label: "Executive Dashboard", icon: i(<LayoutDashboard className="h-4 w-4" />) },
           { href: "/warnings", label: "Warnings", icon: i(<AlertTriangle className="h-4 w-4" />) },
-          { href: "/risk", label: "Risk & Credit", icon: i(<ShieldAlert className="h-4 w-4" />) },
           { href: "/approvals", label: "Approvals", icon: i(<CheckSquare className="h-4 w-4" />) },
+          { href: "/risk", label: "Risk & Credit", icon: i(<ShieldAlert className="h-4 w-4" />) },
+          { href: "/coverage", label: "Coverage requests", icon: i(<Inbox className="h-4 w-4" />) },
           { href: "/controls", label: "Control activity", icon: i(<ScrollText className="h-4 w-4" />) },
           {
             href: "/shipments",
@@ -194,6 +200,8 @@ function navFor(
             ],
           },
           { href: "/ar", label: "Accounts Receivable", icon: i(<BarChart3 className="h-4 w-4" />) },
+          { href: "/ap", label: "Accounts Payable", icon: i(<Banknote className="h-4 w-4" />) },
+          { href: "/disputes", label: "Disputes", icon: i(<AlertTriangle className="h-4 w-4" />) },
           {
             href: "/profitability",
             label: "Profitability",
@@ -222,17 +230,28 @@ function navFor(
           { href: "/carriers", label: "Carriers", icon: i(<Truck className="h-4 w-4" />) },
           { href: "/contracts", label: "Contracts", icon: i(<ClipboardList className="h-4 w-4" />) },
           { href: "/payments", label: "Payments", icon: i(<Wallet className="h-4 w-4" />) },
-          { href: "/disputes", label: "Disputes", icon: i(<AlertTriangle className="h-4 w-4" />) },
           { href: "/accounting", label: "Accounting", icon: i(<ClipboardList className="h-4 w-4" />) },
         ],
       };
     }
-    case "broker":
+    case "broker": {
+      const c = shipCounts ?? { delayed: 0, unassigned: 0, ready: 0, needsPod: 0 };
       return {
         primary: [
-          { href: "/dashboard", label: "Broker Operations Dashboard", icon: i(<LayoutDashboard className="h-4 w-4" />) },
+          { href: "/dashboard", label: "Broker Operations", icon: i(<LayoutDashboard className="h-4 w-4" />) },
           { href: "/warnings", label: "Warnings", icon: i(<AlertTriangle className="h-4 w-4" />) },
-          { href: "/shipments", label: "Shipments", icon: i(<Package className="h-4 w-4" />) },
+          { href: "/coverage", label: "Coverage requests", icon: i(<Inbox className="h-4 w-4" />) },
+          {
+            href: "/shipments",
+            label: "Shipments",
+            icon: i(<Package className="h-4 w-4" />),
+            children: [
+              { href: "/shipments?status=delayed", label: "Delayed", count: c.delayed },
+              { href: "/shipments?status=unassigned", label: "Needs coverage", count: c.unassigned },
+              { href: "/shipments?filter=needs-pod", label: "Needs POD", count: c.needsPod },
+              { href: "/shipments", label: "All loads" },
+            ],
+          },
           { href: "/carriers", label: "Carriers", icon: i(<Truck className="h-4 w-4" />) },
           { href: "/customers", label: "Customers", icon: i(<Users className="h-4 w-4" />) },
           { href: "/contracts", label: "Contracts", icon: i(<ClipboardList className="h-4 w-4" />) },
@@ -240,6 +259,7 @@ function navFor(
         ],
         more: [],
       };
+    }
     case "billing":
       return {
         primary: [
@@ -248,6 +268,7 @@ function navFor(
           { href: "/shipments", label: "Shipments", icon: i(<Package className="h-4 w-4" />) },
           { href: "/invoices", label: "Invoices", icon: i(<FileText className="h-4 w-4" />) },
           { href: "/ar", label: "Accounts Receivable", icon: i(<BarChart3 className="h-4 w-4" />) },
+          { href: "/ap", label: "Accounts Payable", icon: i(<Banknote className="h-4 w-4" />) },
           { href: "/payments", label: "Payments", icon: i(<Wallet className="h-4 w-4" />) },
           { href: "/disputes", label: "Disputes", icon: i(<AlertTriangle className="h-4 w-4" />) },
           { href: "/accounting", label: "Accounting", icon: i(<ClipboardList className="h-4 w-4" />) },
@@ -261,6 +282,7 @@ function navFor(
         primary: [
           { href: "/dashboard", label: "Shipper Dashboard", icon: i(<LayoutDashboard className="h-4 w-4" />) },
           { href: "/warnings", label: "Alerts", icon: i(<AlertTriangle className="h-4 w-4" />) },
+          { href: "/coverage", label: "Request coverage", icon: i(<Inbox className="h-4 w-4" />) },
           { href: "/shipments", label: "My Shipments", icon: i(<Package className="h-4 w-4" />) },
           { href: "/invoices", label: "My Invoices", icon: i(<FileText className="h-4 w-4" />) },
           { href: "/support", label: "Support", icon: i(<HelpCircle className="h-4 w-4" />) },
@@ -300,8 +322,12 @@ export async function AppShell({
   children: React.ReactNode;
 }) {
   const isManager = profile.role === "manager";
-  const [shipCounts, profitCounts] = isManager
-    ? await Promise.all([loadManagerShipCounts(), loadManagerProfitCounts()])
+  const isBroker = profile.role === "broker";
+  const [shipCounts, profitCounts] = isManager || isBroker
+    ? await Promise.all([
+        loadManagerShipCounts(),
+        isManager ? loadManagerProfitCounts() : Promise.resolve(null),
+      ])
     : [null, null];
   const invCounts =
     isManager && shipCounts

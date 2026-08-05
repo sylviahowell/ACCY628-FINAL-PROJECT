@@ -18,7 +18,6 @@ import { createClient } from "@/lib/supabase/server";
 import { ThemeSelector } from "@/components/ThemeSelector";
 import { NotificationPreferences } from "@/components/NotificationPreferences";
 import { CompanyProfileSettings } from "@/components/CompanyProfileSettings";
-import { BrokerOpsPreferences } from "@/components/BrokerOpsPreferences";
 import { BillingPreferences } from "@/components/BillingPreferences";
 import { updateAccessorialThreshold } from "@/lib/actions/freight";
 import { ROLE_LABELS } from "@/lib/roles";
@@ -161,9 +160,25 @@ export default async function SettingsPage() {
           <SettingsCard
             icon={<ClipboardList className="h-5 w-5" aria-hidden />}
             title="Broker workspace"
-            description="Light display prefs and optional booking note boilerplate for this device."
+            description="Day desk lives on Broker Operations — cover loads from the work queue, book from New shipment, and escalate accessorials from Warnings."
           >
-            <BrokerOpsPreferences />
+            <ul className="space-y-2 text-sm">
+              <li>
+                <Link href="/dashboard" className="link link-primary">
+                  Open Broker Operations
+                </Link>
+              </li>
+              <li>
+                <Link href="/shipments/new" className="link link-hover">
+                  Create shipment
+                </Link>
+              </li>
+              <li>
+                <Link href="/warnings" className="link link-hover">
+                  Warning center
+                </Link>
+              </li>
+            </ul>
           </SettingsCard>
         </SettingsSection>
       ) : null}
@@ -209,6 +224,11 @@ export default async function SettingsPage() {
                 No customer company is linked to this account yet.
               </p>
             )}
+            <p className="mt-3 text-sm opacity-70">
+              Shipping contracts (rates, downpayment, end dates) are managed by RowanLane
+              operations. You cannot cancel a contract from this portal — use Support to request a
+              change.
+            </p>
           </SettingsCard>
         </SettingsSection>
       ) : null}
@@ -243,6 +263,11 @@ export default async function SettingsPage() {
                 No carrier record is linked to this account yet.
               </p>
             )}
+            <p className="mt-3 text-sm opacity-70">
+              Haul agreements and rate contracts are managed by RowanLane operations. Carriers
+              cannot cancel or rewrite brokerage contracts from this portal — contact your
+              RowanLane rep for changes.
+            </p>
           </SettingsCard>
         </SettingsSection>
       ) : null}

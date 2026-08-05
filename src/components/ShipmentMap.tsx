@@ -50,7 +50,7 @@ type CityHub = {
 };
 
 const QUICK: { id: string; label: string; status: string }[] = [
-  { id: "exceptions", label: "Exceptions", status: "delayed" },
+  { id: "exceptions", label: "Delayed", status: "delayed" },
   { id: "active", label: "Active", status: "active" },
   { id: "all", label: "All", status: "all" },
 ];
@@ -61,6 +61,21 @@ function isDelayed(s: MapShipment, today: string) {
     (s.promised_delivery_date as string) < today &&
     !["delivered", "completed", "cancelled"].includes(s.status)
   );
+}
+
+/** Calendar days past promised delivery (0 if on time / unknown). */
+function daysPastPromised(promised: string | null, today: string): number | null {
+  if (!promised) return null;
+  const ms =
+    new Date(today + "T00:00:00Z").getTime() -
+    new Date(promised + "T00:00:00Z").getTime();
+  return Math.floor(ms / (1000 * 60 * 60 * 24));
+}
+
+function laneLabel(s: MapShipment) {
+  const from = [s.origin_city, s.origin_state].filter(Boolean).join(", ") || "Origin";
+  const to = [s.dest_city, s.dest_state].filter(Boolean).join(", ") || "Destination";
+  return `${from} → ${to}`;
 }
 
 function statusColor(status: string, delayed: boolean) {
@@ -230,27 +245,77 @@ export function ShipmentMap({
     (toDate ? 1 : 0) +
     (statusFilter !== "active" && statusFilter !== "delayed" && statusFilter !== "all" ? 1 : 0);
 
-  const exceptionCount = useMemo(
-    () => shipments.filter((s) => isDelayed(s, today)).length,
+  const delayedLoads = useMemo(
+    () =>
+      shipments
+        .filter((s) => isDelayed(s, today))
+        .map((s) => ({
+          s,
+          daysLate: daysPastPromised(s.promised_delivery_date, today) ?? 0,
+        }))
+        .sort((a, b) => b.daysLate - a.daysLate),
     [shipments, today],
   );
+  const exceptionCount = delayedLoads.length;
 
   return (
-    <div className="card bg-base-100 shadow-sm">
+    <div id="shipment-network-map" className="card scroll-mt-24 bg-base-100 shadow-sm">
       <div className="card-body gap-3">
         <div className="flex flex-wrap items-start justify-between gap-3">
           <div>
             <h3 className="card-title text-base">Shipment network map</h3>
             <p className="text-sm opacity-70">
-              Exceptions first when present · city hubs show load counts
+              Red lanes are delayed: promised delivery date is past and the load is still open
             </p>
           </div>
           {exceptionCount > 0 ? (
             <span className="badge badge-error badge-outline">
-              {exceptionCount} exception{exceptionCount === 1 ? "" : "s"}
+              {exceptionCount} delayed load{exceptionCount === 1 ? "" : "s"}
             </span>
-          ) : null}
+          ) : (
+            <span className="badge badge-success badge-outline">No delayed loads</span>
+          )}
         </div>
+
+        {exceptionCount > 0 ? (
+          <div className="rounded-box border border-error/25 bg-error/5 px-3 py-2.5">
+            <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
+              <p className="text-xs font-semibold uppercase tracking-wide text-error">
+                Delayed loads (past promised delivery)
+              </p>
+              {statusFilter !== "delayed" ? (
+                <button
+                  type="button"
+                  className="btn btn-ghost btn-xs text-error"
+                  onClick={() => setStatusFilter("delayed")}
+                >
+                  Show on map
+                </button>
+              ) : (
+                <span className="text-[11px] opacity-60">Showing delayed lanes only</span>
+              )}
+            </div>
+            <ul className="space-y-1.5">
+              {delayedLoads.map(({ s, daysLate }) => (
+                <li
+                  key={s.id}
+                  className="flex flex-wrap items-baseline justify-between gap-x-3 gap-y-0.5 text-sm"
+                >
+                  <span>
+                    <Link href={`/shipments/${s.id}`} className="link link-hover font-medium">
+                      {s.load_number}
+                    </Link>
+                    <span className="opacity-70"> · {laneLabel(s)}</span>
+                  </span>
+                  <span className="text-xs opacity-70">
+                    Promised {s.promised_delivery_date} · {daysLate} day
+                    {daysLate === 1 ? "" : "s"} late · {s.status.replaceAll("_", " ")}
+                  </span>
+                </li>
+              ))}
+            </ul>
+          </div>
+        ) : null}
 
         <div className="flex flex-wrap items-center gap-2">
           {QUICK.map((q) => (
@@ -292,7 +357,7 @@ export function ShipmentMap({
               <option value="assigned">Assigned</option>
               <option value="in_transit">In transit</option>
               <option value="delivered">Delivered</option>
-              <option value="delayed">Delayed / exceptions</option>
+              <option value="delayed">Delayed (past promised delivery)</option>
             </select>
             <select
               className="select select-bordered select-sm"
@@ -338,16 +403,23 @@ export function ShipmentMap({
         <div className="relative h-[420px] overflow-hidden rounded-box border border-base-300">
           {plotted.length === 0 ? (
             <div className="flex h-full flex-col items-center justify-center gap-2 px-4 text-center text-sm opacity-70">
-              <p>No shipments match these filters (or cities lack demo coordinates).</p>
               {statusFilter === "delayed" ? (
-                <button
-                  type="button"
-                  className="btn btn-primary btn-xs"
-                  onClick={() => setStatusFilter("active")}
-                >
-                  Show active lanes
-                </button>
-              ) : null}
+                <>
+                  <p>No delayed loads match these filters.</p>
+                  <p className="text-xs">
+                    Delayed means promised delivery is past and the load is not yet delivered.
+                  </p>
+                  <button
+                    type="button"
+                    className="btn btn-primary btn-xs"
+                    onClick={() => setStatusFilter("active")}
+                  >
+                    Show active lanes
+                  </button>
+                </>
+              ) : (
+                <p>No shipments match these filters (or cities lack demo coordinates).</p>
+              )}
             </div>
           ) : (
             <MapContainer
@@ -424,7 +496,7 @@ export function ShipmentMap({
               <span className="inline-block h-2 w-2 rounded-full bg-[#0284c7]" /> In transit
             </span>
             <span className="flex items-center gap-1">
-              <span className="inline-block h-2 w-2 rounded-full bg-[#ef4444]" /> Delayed
+              <span className="inline-block h-2 w-2 rounded-full bg-[#ef4444]" /> Delayed (past promise)
             </span>
             <span className="flex items-center gap-1">
               <span className="inline-block h-2 w-2 rounded-full bg-[#22c55e]" /> Delivered
@@ -434,7 +506,7 @@ export function ShipmentMap({
         <p className="text-xs opacity-60">
           Showing {plotted.length} lane{plotted.length === 1 ? "" : "s"} · {hubs.length} city hub
           {hubs.length === 1 ? "" : "s"}
-          {statusFilter === "delayed" ? " · exceptions only" : ""}
+          {statusFilter === "delayed" ? " · delayed loads only" : ""}
           {statusFilter === "active" ? " · delivered hidden" : ""}. Hollow hubs = pickup; filled =
           delivery.
         </p>
@@ -458,8 +530,8 @@ function HubPopup({ hub }: { hub: CityHub }) {
             </Link>
             <span className="opacity-70">
               {" "}
-              · {s.status}
-              {delayed ? " (delayed)" : ""} · {s.customer_name}
+              · {s.status.replaceAll("_", " ")}
+              {delayed ? " · delayed" : ""} · {s.customer_name}
             </span>
           </li>
         ))}
@@ -488,10 +560,10 @@ function ShipmentPopup({
           {s.origin_city}, {s.origin_state} → {s.dest_city}, {s.dest_state}
         </li>
         <li>
-          Status: {s.status}
-          {delayed ? " (delayed)" : ""}
+          Status: {s.status.replaceAll("_", " ")}
+          {delayed ? " · delayed (past promised delivery)" : ""}
         </li>
-        <li>Expected: {s.promised_delivery_date ?? "—"}</li>
+        <li>Promised delivery: {s.promised_delivery_date ?? "—"}</li>
         {s.health_score != null ? (
           <li>
             Health: {s.health_score} — {s.health_category}

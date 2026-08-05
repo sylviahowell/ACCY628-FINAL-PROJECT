@@ -4,6 +4,7 @@ import { FilterBanner, resolveSearchParams } from "@/components/FilterBanner";
 import { ShipmentsTriage, type ShipmentListRow } from "@/components/ShipmentsTriage";
 import { requirePathAccess } from "@/lib/authz";
 import { filterShipments, shipmentFilterLabel } from "@/lib/list-filters";
+import { isActiveFinalInvoice } from "@/lib/invoice-helpers";
 import { createClient } from "@/lib/supabase/server";
 import { isOperations, money } from "@/lib/types";
 import { isInternalStaff } from "@/lib/roles";
@@ -14,6 +15,7 @@ function resolveShipmentFilter(params: Record<string, string | undefined>) {
   if (params.status === "delayed") return "delayed";
   if (params.status === "unassigned") return "unassigned";
   if (params.status === "ready") return "ready-to-bill";
+  if (params.status === "needs_pod" || params.status === "needs-pod") return "needs-pod";
   return undefined;
 }
 
@@ -56,14 +58,14 @@ export default async function ShipmentsPage({
     shipmentIds.length > 0
       ? await supabase
           .from("invoices")
-          .select("shipment_id, status")
+          .select("shipment_id, status, invoice_number")
           .in("shipment_id", shipmentIds)
-      : { data: [] as { shipment_id: string | null; status: string }[] };
+      : { data: [] as { shipment_id: string | null; status: string; invoice_number: string }[] };
 
   const podSet = new Set((pods ?? []).map((p) => p.shipment_id));
   const billedSet = new Set(
     (invoices ?? [])
-      .filter((i) => i.status !== "cancelled" && i.shipment_id)
+      .filter((i) => isActiveFinalInvoice(i) && i.shipment_id)
       .map((i) => i.shipment_id as string),
   );
 
@@ -80,7 +82,8 @@ export default async function ShipmentsPage({
 
   const staffRates = isInternalStaff(profile.role);
   const showDocsReady = true;
-  const showReadyToBill = isInternalStaff(profile.role);
+  const showReadyToBill = profile.role === "manager" || profile.role === "billing";
+  const triageMode = profile.role === "broker" ? "ops" : "finance";
   const rateHeader =
     profile.role === "customer"
       ? "Your rate"
@@ -93,6 +96,7 @@ export default async function ShipmentsPage({
     const delivered = ["delivered", "completed"].includes(s.status);
     const closed = ["delivered", "completed", "cancelled"].includes(s.status);
     const readyToBill = showReadyToBill && delivered && hasPod && !billedSet.has(s.id);
+    const needsPod = delivered && !hasPod;
     const isDelayed = Boolean(
       s.promised_delivery_date && s.promised_delivery_date < today && !closed,
     );
@@ -114,6 +118,7 @@ export default async function ShipmentsPage({
       rateDisplay,
       hasPod,
       readyToBill,
+      needsPod,
       isDelayed,
       needsCoverage,
     };
@@ -168,7 +173,12 @@ export default async function ShipmentsPage({
           }
         />
       ) : (
-        <ShipmentsTriage rows={listRows} rateHeader={rateHeader} showDocsReady={showDocsReady} />
+        <ShipmentsTriage
+          rows={listRows}
+          rateHeader={rateHeader}
+          showDocsReady={showDocsReady}
+          triageMode={triageMode}
+        />
       )}
     </div>
   );

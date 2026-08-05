@@ -127,6 +127,7 @@ export function statusBadge(status: string) {
     open: "badge-warning",
     resolved: "badge-success",
     rejected: "badge-error",
+    on_hold: "badge-warning",
   };
   return map[status] ?? "badge-ghost";
 }

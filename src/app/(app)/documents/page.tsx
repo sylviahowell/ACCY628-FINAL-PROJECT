@@ -65,7 +65,7 @@ export default async function DocumentsPage({
                     {s.load_number}
                     {s.delivery_date ? ` · delivered ${s.delivery_date}` : ""}
                   </span>
-                  <Link href={`/shipments/${s.id}`} className="btn btn-warning btn-xs">
+                  <Link href={`/shipments/${s.id}#pod-upload`} className="btn btn-warning btn-xs">
                     Upload POD
                   </Link>
                 </li>

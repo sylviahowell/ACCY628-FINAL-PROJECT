@@ -4,7 +4,8 @@ import { EmptyState } from "@/components/EmptyState";
 import { FilterBanner, resolveSearchParams } from "@/components/FilterBanner";
 import { InvoicesTriage, type InvoiceCardMeta } from "@/components/InvoicesTriage";
 import { requirePathAccess } from "@/lib/authz";
-import { generateInvoice, openDispute } from "@/lib/actions/freight";
+import { generateInvoice, openDispute, shipperMarkInvoicePaid } from "@/lib/actions/freight";
+import { isActiveFinalInvoice, isDepositInvoice } from "@/lib/invoice-helpers";
 import { filterInvoices, invoiceFilterLabel } from "@/lib/list-filters";
 import { createClient } from "@/lib/supabase/server";
 import { money, statusBadge } from "@/lib/types";
@@ -51,7 +52,7 @@ export default async function InvoicesPage({
 
   const billedIds = new Set(
     allInvoices
-      .filter((i) => i.status !== "cancelled" && i.shipment_id)
+      .filter((i) => isActiveFinalInvoice(i) && i.shipment_id)
       .map((i) => i.shipment_id as string),
   );
 
@@ -80,7 +81,9 @@ export default async function InvoicesPage({
         "id, load_number, status, customer_rate, contract_id, customer_id, customers(name), proof_of_delivery(id, signed_by), contracts(payment_terms, billing_terms, fuel_surcharge_pct)",
       )
       .in("status", ["delivered", "completed"]);
-    readyToBill = ((data ?? []) as unknown as ReadyRow[]).filter((s) => !billedIds.has(s.id));
+    readyToBill = ((data ?? []) as unknown as ReadyRow[]).filter(
+      (s) => !billedIds.has(s.id) && (s.proof_of_delivery ?? []).length > 0,
+    );
   }
 
   const customerTerms = new Map<string, string>();
@@ -95,15 +98,11 @@ export default async function InvoicesPage({
     }
   }
 
-  let overdueCount = 0;
-  let openCount = 0;
   const invoiceCards: InvoiceCardMeta[] = visibleInvoices.map((inv) => {
     const balance = Number(inv.total) - Number(inv.amount_paid);
     const isClosed = ["paid", "cancelled"].includes(inv.status) || balance <= 0;
     const isOpen = !isClosed;
     const isOverdue = isOpen && Boolean(inv.due_date && inv.due_date < today);
-    if (isOpen) openCount += 1;
-    if (isOverdue) overdueCount += 1;
 
     return {
       id: inv.id,
@@ -130,9 +129,24 @@ export default async function InvoicesPage({
               </div>
               <div className="flex flex-wrap items-center gap-1">
                 <span className={`badge ${statusBadge(inv.status)}`}>{inv.status}</span>
+                {isDepositInvoice(inv) ? (
+                  <span className="badge badge-info badge-sm">downpayment</span>
+                ) : null}
                 {isOverdue ? <span className="badge badge-error badge-sm">overdue</span> : null}
               </div>
             </div>
+            {profile.role === "customer" && isOpen && inv.status !== "disputed" ? (
+              <form
+                action={shipperMarkInvoicePaid}
+                className="mt-2 flex flex-wrap gap-2 border-t border-base-200 pt-3"
+              >
+                <input type="hidden" name="invoice_id" value={inv.id} />
+                <button className="btn btn-primary btn-sm">
+                  Mark paid ({money(balance)})
+                </button>
+                <span className="self-center text-xs opacity-60">Demo shipper self-pay</span>
+              </form>
+            ) : null}
             {profile.role === "customer" ? (
               <form
                 action={openDispute}
@@ -164,21 +178,20 @@ export default async function InvoicesPage({
 
   // Chip counts should reflect the full book when not in a dashboard deep-link,
   // and the filtered subset when one is active.
-  if (!filter || filter === "ready-to-bill") {
-    overdueCount = 0;
-    openCount = 0;
-    for (const inv of allInvoices) {
-      const balance = Number(inv.total) - Number(inv.amount_paid);
-      const isClosed = ["paid", "cancelled"].includes(inv.status) || balance <= 0;
-      const isOpen = !isClosed;
-      const isOverdue = isOpen && Boolean(inv.due_date && inv.due_date < today);
-      if (isOpen) openCount += 1;
-      if (isOverdue) overdueCount += 1;
-    }
+  const countBook = !filter || filter === "ready-to-bill" ? allInvoices : visibleInvoices;
+  let openCount = 0;
+  let overdueCount = 0;
+  for (const inv of countBook) {
+    const balance = Number(inv.total) - Number(inv.amount_paid);
+    const isClosed = ["paid", "cancelled"].includes(inv.status) || balance <= 0;
+    const isOpen = !isClosed;
+    const isOverdue = isOpen && Boolean(inv.due_date && inv.due_date < today);
+    if (isOpen) openCount += 1;
+    if (isOverdue) overdueCount += 1;
   }
 
   const showReady = canManageBilling(profile.role);
-  const readyWithPod = readyToBill.filter((s) => (s.proof_of_delivery ?? []).length > 0).length;
+  const readyWithPod = readyToBill.length;
 
   const readySection =
     showReady && readyToBill.length > 0 ? (
@@ -218,19 +231,12 @@ export default async function InvoicesPage({
                     <p className="text-xs opacity-60">
                       Terms {terms} (due in {parseNetDays(terms)} days
                       {fuelPct > 0 ? `; fuel ${fuelPct}%` : ", no contract fuel"}
-                      ) · POD:{" "}
-                      {pods.length
-                        ? `signed by ${pods[0]?.signed_by ?? "receiver"}`
-                        : "missing — cannot invoice until uploaded"}
+                      ) · POD signed by {pods[0]?.signed_by ?? "receiver"}
                     </p>
                   </div>
-                  {pods.length ? (
-                    <form action={generateInvoice.bind(null, s.id)}>
-                      <button className="btn btn-primary btn-sm">Generate invoice</button>
-                    </form>
-                  ) : (
-                    <span className="badge badge-warning">Awaiting POD</span>
-                  )}
+                  <form action={generateInvoice.bind(null, s.id)}>
+                    <button className="btn btn-primary btn-sm">Generate invoice</button>
+                  </form>
                 </div>
               );
             })}

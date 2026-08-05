@@ -8,7 +8,7 @@ import {
   demoUserForRole,
   isDemoUserEmail,
 } from "@/lib/demo-mode";
-import { isDemoMode, setDemoModeCookie } from "@/lib/demo-mode-server";
+import { setDemoModeCookie } from "@/lib/demo-mode-server";
 import { DEMO_PASSWORD, DEMO_USERS, type Profile, type UserRole } from "@/lib/types";
 import { AUTH_FETCH_TIMEOUT_MS, withTimeout } from "@/lib/with-timeout";
 import { clientKeyFromHeaders, rateLimit } from "@/lib/rate-limit";
@@ -40,32 +40,41 @@ const DEMO_SIGNIN_HELP =
   "In Auth → Providers → Email, turn off Confirm email, then create the five @rowanlane.example users.";
 
 export async function getCurrentProfile(): Promise<Profile | null> {
-  const supabase = await createClient();
-  const {
-    data: { user },
-  } = await withTimeout(
-    supabase.auth.getUser(),
-    AUTH_FETCH_TIMEOUT_MS,
-    "getUser",
-  );
-  if (!user) return null;
+  try {
+    const supabase = await createClient();
+    const {
+      data: { user },
+    } = await withTimeout(
+      supabase.auth.getUser(),
+      AUTH_FETCH_TIMEOUT_MS,
+      "getUser",
+    );
+    if (!user) return null;
 
-  const { data } = await withTimeout(
-    supabase
-      .from("profiles")
-      .select("id, email, full_name, role, customer_id, carrier_id")
-      .eq("id", user.id)
-      .maybeSingle(),
-    AUTH_FETCH_TIMEOUT_MS,
-    "getCurrentProfile",
-  );
+    const { data } = await withTimeout(
+      supabase
+        .from("profiles")
+        .select("id, email, full_name, role, customer_id, carrier_id")
+        .eq("id", user.id)
+        .maybeSingle(),
+      AUTH_FETCH_TIMEOUT_MS,
+      "getCurrentProfile",
+    );
 
-  return (data as Profile | null) ?? null;
+    return (data as Profile | null) ?? null;
+  } catch {
+    // Auth/profile hangs should not crash app routes — treat as signed out.
+    return null;
+  }
 }
 
 async function signInDemoAccount(role: UserRole) {
   const demo = demoUserForRole(role);
   const supabase = await createClient();
+
+  // Clear the previous session first — switching users without signOut
+  // often leaves stale auth cookies and the UI stays on the old portal.
+  await supabase.auth.signOut();
 
   // Sign-in only — never signUp for demos. Client signUp triggers Supabase
   // confirmation emails and quickly hits the free-tier email rate limit.
@@ -150,7 +159,8 @@ export async function signIn(formData: FormData) {
   const email = String(formData.get("email") || "").trim();
   const password = String(formData.get("password") || "");
 
-  await setDemoModeCookie(false);
+  // Demo password login unlocks the role switcher; normal users never get it.
+  await setDemoModeCookie(isDemoUserEmail(email));
 
   const supabase = await createClient();
   const { error } = await supabase.auth.signInWithPassword({ email, password });
@@ -191,18 +201,24 @@ export async function enterDemoMode(role: UserRole, _formData?: FormData) {
   await setDemoModeCookie(true);
   await signInDemoAccount(role);
   revalidatePath("/", "layout");
-  redirect(`/dashboard?portal=${encodeURIComponent(role)}`);
+  redirect(`/dashboard?portal=${encodeURIComponent(role)}&t=${Date.now()}`);
+}
+
+/**
+ * Mark Demo Mode after a successful browser-side demo sign-in.
+ * Prefer clientSignInDemoRole + this over switchDemoRole for reliable cookie updates.
+ */
+export async function activateDemoModeSession() {
+  await setDemoModeCookie(true);
+  revalidatePath("/", "layout");
 }
 
 /**
  * Switch fictional demo identity without returning to the login page.
- * Only allowed while Demo Mode cookie is set AND the current session is a demo user.
+ * Allowed for seeded demo accounts; ensures Demo Mode cookie stays set.
+ * @deprecated Prefer clientSignInDemoRole + activateDemoModeSession from the client.
  */
 export async function switchDemoRole(role: UserRole) {
-  if (!(await isDemoMode())) {
-    throw new Error("Demo Role switching is only available in Demo Mode.");
-  }
-
   const profile = await getCurrentProfile();
   if (!profile || !isDemoUserEmail(profile.email)) {
     await setDemoModeCookie(false);
@@ -213,10 +229,11 @@ export async function switchDemoRole(role: UserRole) {
     throw new Error("Unknown demo role");
   }
 
+  await setDemoModeCookie(true);
   await signInDemoAccount(role);
   // Same-URL redirect is a no-op for RSC; bust cache and force a fresh portal shell.
   revalidatePath("/", "layout");
-  redirect(`/dashboard?portal=${encodeURIComponent(role)}`);
+  redirect(`/dashboard?portal=${encodeURIComponent(role)}&t=${Date.now()}`);
 }
 
 /** Leave Demo Mode and return to the public entry page. */

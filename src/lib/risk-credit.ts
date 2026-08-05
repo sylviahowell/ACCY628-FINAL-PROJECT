@@ -9,6 +9,8 @@ export type CustomerCreditRow = {
   paymentTerms: string;
   creditLimit: number;
   openAr: number;
+  pastDue: number;
+  onCreditHold: boolean;
   utilizationPct: number | null;
   status: CreditStatus;
 };

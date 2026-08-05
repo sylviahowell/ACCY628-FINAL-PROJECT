@@ -35,6 +35,15 @@ export type UnbilledItem = {
   href: string;
 };
 
+export type CustomerArRollupRow = {
+  customerId: string;
+  customerName: string;
+  openBalance: number;
+  pastDueBalance: number;
+  invoiceCount: number;
+  oldestDays: number;
+};
+
 export function daysPastDue(dueDate: string, today: string) {
   return Math.floor(
     (new Date(today + "T00:00:00Z").getTime() -
@@ -81,6 +90,47 @@ export function agingChartData(aging: AgingBuckets) {
     { name: "61–90 days", value: Math.round(aging.d61_90) },
     { name: "90+ days", value: Math.round(aging.d90_plus) },
   ];
+}
+
+/** Roll open invoice balances up by customer, largest open AR first. */
+export function buildCustomerArRollup(
+  invoices: {
+    customer_id: string;
+    total: number;
+    amount_paid: number;
+    due_date: string;
+    status: string;
+    customers?: { name?: string } | null;
+  }[],
+  today: string,
+): CustomerArRollupRow[] {
+  const byCustomer = new Map<string, CustomerArRollupRow>();
+
+  for (const inv of invoices) {
+    if (inv.status === "cancelled") continue;
+    const balance = Number(inv.total) - Number(inv.amount_paid);
+    if (balance <= 0) continue;
+
+    const days = daysPastDue(inv.due_date, today);
+    const existing = byCustomer.get(inv.customer_id);
+    if (existing) {
+      existing.openBalance += balance;
+      if (days > 0) existing.pastDueBalance += balance;
+      existing.invoiceCount += 1;
+      existing.oldestDays = Math.max(existing.oldestDays, days);
+    } else {
+      byCustomer.set(inv.customer_id, {
+        customerId: inv.customer_id,
+        customerName: inv.customers?.name ?? "Customer",
+        openBalance: balance,
+        pastDueBalance: days > 0 ? balance : 0,
+        invoiceCount: 1,
+        oldestDays: days,
+      });
+    }
+  }
+
+  return [...byCustomer.values()].sort((a, b) => b.openBalance - a.openBalance);
 }
 
 export function recommendCollectionAction(input: {

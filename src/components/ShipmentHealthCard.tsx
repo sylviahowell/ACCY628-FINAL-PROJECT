@@ -10,7 +10,6 @@ export function CustomerFriendlyStatusCard({ health }: { health: FriendlyHealth 
           <h2 className="card-title text-base">Shipment status</h2>
           <span className={`badge ${health.badgeClass}`}>{health.label}</span>
         </div>
-        <p className="text-sm">{health.summary}</p>
         <ul className="list-disc space-y-1 pl-5 text-sm opacity-80">
           {health.reasons.map((r) => (
             <li key={r}>{r}</li>

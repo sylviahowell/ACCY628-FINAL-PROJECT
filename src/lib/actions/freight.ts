@@ -29,6 +29,11 @@ import {
   isOnCreditHold,
   pastDueBalanceFromInvoices,
 } from "@/lib/credit-hold";
+import {
+  isNegativeMargin,
+  negativeMarginMessage,
+  negativeMarginOverrideNote,
+} from "@/lib/margin-gate";
 import { expirePastEndContracts } from "@/lib/actions/contracts-lifecycle";
 import { z } from "zod";
 
@@ -399,6 +404,11 @@ export async function createShipment(formData: FormData) {
     }
   }
 
+  const lossLoad = isNegativeMargin(customerRate, carrierCost);
+  if (lossLoad && profile.role !== "manager") {
+    redirect(toastErrorPath("/shipments/new", negativeMarginMessage(customerRate, carrierCost)));
+  }
+
   let contractDownpaymentPct = 0;
   let contractPaymentTerms: string | null = null;
   if (contractId) {
@@ -473,16 +483,22 @@ export async function createShipment(formData: FormData) {
     });
   }
 
-  if (onCreditHold && profile.role === "manager") {
-    await logStatus(data.id, null, status, profile.id, creditHoldOverrideNote(pastDue));
-  } else if (creditLimit > 0 && projected > creditLimit && profile.role === "manager") {
-    await logStatus(
-      data.id,
-      null,
-      status,
-      profile.id,
-      `Credit override: AR ${openAr.toFixed(0)} + rate ${customerRate.toFixed(0)} > limit ${creditLimit.toFixed(0)}`,
-    );
+  const overrideNotes: string[] = [];
+  if (profile.role === "manager") {
+    if (onCreditHold) overrideNotes.push(creditHoldOverrideNote(pastDue));
+    if (creditLimit > 0 && projected > creditLimit) {
+      overrideNotes.push(
+        `Credit override: AR ${openAr.toFixed(0)} + rate ${customerRate.toFixed(0)} > limit ${creditLimit.toFixed(0)}`,
+      );
+    }
+    if (lossLoad) {
+      overrideNotes.push(negativeMarginOverrideNote(customerRate, carrierCost));
+    }
+  }
+  if (overrideNotes.length > 0) {
+    for (const note of overrideNotes) {
+      await logStatus(data.id, null, status, profile.id, note);
+    }
   } else {
     await logStatus(data.id, null, status, profile.id, "Shipment created");
   }
@@ -526,7 +542,7 @@ export async function assignCarrier(formData: FormData) {
 
   const { data: shipment } = await supabase
     .from("shipments")
-    .select("id, status, carrier_id, carrier_cost")
+    .select("id, status, carrier_id, carrier_cost, customer_rate")
     .eq("id", shipmentId)
     .single();
   if (!shipment) throw new Error("Shipment not found");
@@ -548,6 +564,15 @@ export async function assignCarrier(formData: FormData) {
     patch.carrier_cost = Number(carrierCostRaw);
   }
 
+  const nextCost =
+    patch.carrier_cost !== undefined
+      ? Number(patch.carrier_cost)
+      : Number(shipment.carrier_cost);
+  const customerRate = Number(shipment.customer_rate);
+  if (isNegativeMargin(customerRate, nextCost) && profile.role !== "manager") {
+    throw new Error(negativeMarginMessage(customerRate, nextCost));
+  }
+
   if (carrierId && ["draft", "scheduled"].includes(shipment.status)) {
     patch.status = "assigned";
   }
@@ -562,6 +587,20 @@ export async function assignCarrier(formData: FormData) {
     await logStatus(shipmentId, shipment.status, "assigned", profile.id, "Carrier assigned");
   } else if (!carrierId && patch.status === "scheduled") {
     await logStatus(shipmentId, shipment.status, "scheduled", profile.id, "Carrier unassigned");
+  }
+
+  if (
+    isNegativeMargin(customerRate, nextCost) &&
+    profile.role === "manager" &&
+    patch.carrier_cost !== undefined
+  ) {
+    await logStatus(
+      shipmentId,
+      shipment.status,
+      patch.status ?? shipment.status,
+      profile.id,
+      negativeMarginOverrideNote(customerRate, nextCost),
+    );
   }
 
   revalidatePath(`/shipments/${shipmentId}`);

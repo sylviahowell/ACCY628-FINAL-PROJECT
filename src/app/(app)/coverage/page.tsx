@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { BookCoverageForm } from "@/components/BookCoverageForm";
 import { requirePathAccess } from "@/lib/authz";
 import {
   acceptCoverageRequest,
@@ -6,6 +7,10 @@ import {
   createCoverageRequest,
   declineCoverageRequest,
 } from "@/lib/actions/coverage";
+import {
+  isOnCreditHold,
+  pastDueBalanceFromInvoices,
+} from "@/lib/credit-hold";
 import { createClient } from "@/lib/supabase/server";
 import { isOperations } from "@/lib/types";
 
@@ -52,6 +57,23 @@ export default async function CoveragePage() {
         .eq("status", "active")
         .order("contract_number")
     : { data: [] as never[] };
+
+  const pendingCustomerIds = [
+    ...new Set(pending.map((r) => r.customer_id).filter(Boolean)),
+  ] as string[];
+  const pastDueByCustomer = new Map<string, number>();
+  if (isOps && pendingCustomerIds.length > 0) {
+    const today = new Date().toISOString().slice(0, 10);
+    const { data: invoices } = await supabase
+      .from("invoices")
+      .select("customer_id, total, amount_paid, status, due_date")
+      .in("customer_id", pendingCustomerIds)
+      .neq("status", "cancelled");
+    for (const customerId of pendingCustomerIds) {
+      const invs = (invoices ?? []).filter((i) => i.customer_id === customerId);
+      pastDueByCustomer.set(customerId, pastDueBalanceFromInvoices(invs, today));
+    }
+  }
 
   return (
     <div className="mx-auto max-w-4xl space-y-6">
@@ -188,63 +210,23 @@ export default async function CoveragePage() {
                   <div className="flex shrink-0 flex-col gap-2">
                     {isOps && r.status === "pending" ? (
                       <>
-                        <form action={acceptCoverageRequest} className="flex w-52 flex-col gap-2">
-                          <input type="hidden" name="request_id" value={r.id} />
-                          <select
-                            name="contract_id"
-                            required
-                            className="select select-bordered select-sm w-full"
-                            defaultValue=""
-                          >
-                            <option value="" disabled>
-                              Active contract…
-                            </option>
-                            {(contracts ?? [])
-                              .filter((c) => c.customer_id === r.customer_id)
-                              .map((c) => (
-                                <option key={c.id} value={c.id}>
-                                  {c.contract_number}
-                                  {c.downpayment_pct != null
-                                    ? ` · ${c.downpayment_pct}% down`
-                                    : ""}
-                                </option>
-                              ))}
-                          </select>
-                          <input
-                            name="customer_rate"
-                            type="number"
-                            step="0.01"
-                            min="0.01"
-                            required
-                            placeholder="Customer rate $"
-                            className="input input-bordered input-sm"
-                          />
-                          <input
-                            name="carrier_cost"
-                            type="number"
-                            step="0.01"
-                            min="0"
-                            required
-                            placeholder="Carrier cost $"
-                            className="input input-bordered input-sm"
-                          />
-                          <label className="flex items-start gap-2 text-xs opacity-70">
-                            <input
-                              type="checkbox"
-                              name="confirm_outside_contract_dates"
-                              className="checkbox checkbox-xs mt-0.5"
-                            />
-                            Dates outside contract window (override)
-                          </label>
-                          {(contracts ?? []).filter((c) => c.customer_id === r.customer_id)
-                            .length === 0 ? (
-                            <p className="text-xs text-error">
-                              No active contract for this customer — create one first.
-                            </p>
-                          ) : (
-                            <button className="btn btn-primary btn-sm w-full">Book load</button>
+                        <BookCoverageForm
+                          requestId={r.id}
+                          isManager={profile.role === "manager"}
+                          customerName={customerName}
+                          pastDue={pastDueByCustomer.get(r.customer_id) ?? 0}
+                          onCreditHold={isOnCreditHold(
+                            pastDueByCustomer.get(r.customer_id) ?? 0,
                           )}
-                        </form>
+                          action={acceptCoverageRequest}
+                          contracts={(contracts ?? [])
+                            .filter((c) => c.customer_id === r.customer_id)
+                            .map((c) => ({
+                              id: c.id,
+                              contract_number: c.contract_number,
+                              downpayment_pct: c.downpayment_pct,
+                            }))}
+                        />
                         <details>
                           <summary className="btn btn-ghost btn-xs cursor-pointer">Decline…</summary>
                           <form action={declineCoverageRequest} className="mt-2 flex flex-col gap-2">

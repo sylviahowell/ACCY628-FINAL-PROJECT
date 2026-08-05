@@ -38,7 +38,7 @@ Product controls that protect booking, billing, and cash application. For ACCY62
 | False revenue (invoice without evidence) | POD required before invoice/complete; cancelled blocked | Demo POD URL can be attached without real file upload |
 | Paying a disputed invoice | `recordPayment` blocked while status is disputed | Billing can still resolve dispute then pay |
 | Unauthorized discount / accessorial | Pending approval for brokers above threshold | Managers auto-approve their own entries |
-| Negative-margin loads | Warning on shipment + Profitability filters | **Warning only**—does not hard-block booking |
+| Negative-margin loads | Brokers blocked at book/assign when carrier cost exceeds customer rate; manager override logged | Manager self-override without second person |
 | Shared demo credentials | Env-gated demo portals + rate limits | Acceptable for pitch; not production IdP |
 
 ## Closed-loop demo script
@@ -51,7 +51,7 @@ Use `manager@rowanlane.example` unless noted. Password: `FreightDemo2026!`.
 4. **Risk & Credit** (`/risk`) — Customer utilization (Summit/Midwest) and carrier insurance (expired Midwest Reefer = Suspended / blocked).
 5. **Control activity** (`/controls`) — Confirm recent approvals, credit override notes, and collection notes appear with links.
 6. **AR** (`/ar`) — Overdue worklist, collection note on `INV-EDGE-OVERDUE`, dispute awareness for `INV-9003`.
-7. **Optional broker path** — As broker, try booking above credit (blocked) or assigning an expired-insurance carrier (blocked). As manager, credit override books and logs on the shipment **Control overrides** callout.
+7. **Optional broker path** — As broker, try booking above credit (blocked), a loss load where carrier cost exceeds customer rate (blocked), or assigning an expired-insurance carrier (blocked). As manager, credit/margin overrides book and log on the shipment **Control overrides** callout.
 
 ## Related docs
 

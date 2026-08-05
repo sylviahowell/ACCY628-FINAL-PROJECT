@@ -1,0 +1,344 @@
+"use server";
+
+import { revalidatePath } from "next/cache";
+import { redirect } from "next/navigation";
+import { getCurrentProfile } from "@/lib/actions/auth";
+import { formString, nonEmptyString, parseForm, uuidSchema } from "@/lib/action-schema";
+import { isDateOutsideContractWindow } from "@/lib/contract-terms";
+import { depositAmountDue } from "@/lib/invoice-helpers";
+import { expirePastEndContracts } from "@/lib/actions/contracts-lifecycle";
+import { isOperations } from "@/lib/types";
+import { createClient } from "@/lib/supabase/server";
+import { z } from "zod";
+
+function toastPath(path: string, message: string) {
+  const join = path.includes("?") ? "&" : "?";
+  return `${path}${join}toast=${encodeURIComponent(message)}`;
+}
+
+async function logStatus(
+  shipmentId: string,
+  fromStatus: string | null,
+  toStatus: string,
+  profileId: string,
+  note?: string,
+) {
+  const supabase = await createClient();
+  await supabase.from("shipment_status_updates").insert({
+    shipment_id: shipmentId,
+    from_status: fromStatus,
+    to_status: toStatus,
+    changed_by: profileId,
+    note: note ?? null,
+  });
+  await supabase.from("status_events").insert({
+    entity_type: "shipment",
+    entity_id: shipmentId,
+    from_status: fromStatus,
+    to_status: toStatus,
+    changed_by: profileId,
+    note: note ?? null,
+  });
+}
+
+/** Shipper asks RowanLane ops to cover a lane (find/assign a carrier). */
+export async function createCoverageRequest(formData: FormData) {
+  const profile = await getCurrentProfile();
+  if (!profile || profile.role !== "customer" || !profile.customer_id) {
+    throw new Error("Only shipper accounts can request coverage.");
+  }
+
+  const input = parseForm(
+    z.object({
+      pickup_location: nonEmptyString("Pickup location", 200),
+      delivery_location: nonEmptyString("Delivery location", 200),
+      pickup_date: z.string().trim().optional(),
+      delivery_date: z.string().trim().optional(),
+      freight_type: z.string().trim().max(200).optional(),
+      weight_lbs: z.coerce.number().finite().min(0).optional(),
+      notes: z.string().trim().max(2000).optional(),
+    }),
+    {
+      pickup_location: formString(formData, "pickup_location"),
+      delivery_location: formString(formData, "delivery_location"),
+      pickup_date: formString(formData, "pickup_date") || undefined,
+      delivery_date: formString(formData, "delivery_date") || undefined,
+      freight_type: formString(formData, "freight_type") || undefined,
+      weight_lbs: formData.get("weight_lbs") || undefined,
+      notes: formString(formData, "notes") || undefined,
+    },
+  );
+
+  const supabase = await createClient();
+  const { error } = await supabase.from("coverage_requests").insert({
+    customer_id: profile.customer_id,
+    requested_by: profile.id,
+    status: "pending",
+    pickup_location: input.pickup_location,
+    delivery_location: input.delivery_location,
+    pickup_date: input.pickup_date || null,
+    delivery_date: input.delivery_date || null,
+    freight_type: input.freight_type || null,
+    weight_lbs: input.weight_lbs || null,
+    notes: input.notes || null,
+  });
+  if (error) throw new Error(error.message);
+
+  revalidatePath("/coverage");
+  revalidatePath("/dashboard");
+  revalidatePath("/warnings");
+  redirect(toastPath("/coverage", "Coverage request sent to Broker Operations"));
+}
+
+export async function cancelCoverageRequest(formData: FormData) {
+  const profile = await getCurrentProfile();
+  if (!profile || profile.role !== "customer" || !profile.customer_id) {
+    throw new Error("Only the requesting shipper can cancel.");
+  }
+  const id = parseForm(z.object({ id: uuidSchema }), {
+    id: formString(formData, "request_id"),
+  }).id;
+
+  const supabase = await createClient();
+  const { data: row } = await supabase
+    .from("coverage_requests")
+    .select("id, customer_id, status")
+    .eq("id", id)
+    .maybeSingle();
+  if (!row || row.customer_id !== profile.customer_id) {
+    throw new Error("Request not found.");
+  }
+  if (row.status !== "pending") {
+    throw new Error("Only pending requests can be cancelled.");
+  }
+
+  const { error } = await supabase
+    .from("coverage_requests")
+    .update({ status: "cancelled", reviewed_at: new Date().toISOString() })
+    .eq("id", id);
+  if (error) throw new Error(error.message);
+
+  revalidatePath("/coverage");
+  revalidatePath("/dashboard");
+  redirect(toastPath("/coverage", "Coverage request cancelled"));
+}
+
+/**
+ * Ops converts a pending coverage request into an unassigned scheduled load
+ * with contract + rates, then the broker assigns a carrier from scorecards.
+ */
+export async function acceptCoverageRequest(formData: FormData) {
+  const profile = await getCurrentProfile();
+  if (!profile || !isOperations(profile.role)) {
+    throw new Error("Only broker or manager operations can book from a request.");
+  }
+
+  const id = parseForm(z.object({ id: uuidSchema }), {
+    id: formString(formData, "request_id"),
+  }).id;
+  const contractId = parseForm(z.object({ id: uuidSchema }), {
+    id: formString(formData, "contract_id"),
+  }).id;
+  const customerRate = Number(formData.get("customer_rate") || 0);
+  const carrierCost = Number(formData.get("carrier_cost") || 0);
+  if (!(customerRate > 0)) {
+    throw new Error("Customer rate is required to book from a coverage request.");
+  }
+  if (!(carrierCost >= 0)) {
+    throw new Error("Carrier cost must be zero or greater.");
+  }
+
+  await expirePastEndContracts();
+
+  const supabase = await createClient();
+  const { data: req } = await supabase
+    .from("coverage_requests")
+    .select("*")
+    .eq("id", id)
+    .maybeSingle();
+  if (!req) throw new Error("Request not found.");
+  if (req.status !== "pending") throw new Error("Request is no longer pending.");
+
+  const { data: contract } = await supabase
+    .from("contracts")
+    .select("*")
+    .eq("id", contractId)
+    .maybeSingle();
+  if (!contract || contract.status !== "active") {
+    throw new Error("Select an active contract for this customer.");
+  }
+  if (contract.customer_id !== req.customer_id) {
+    throw new Error("Contract does not belong to the requesting customer.");
+  }
+
+  const outside =
+    isDateOutsideContractWindow(req.pickup_date, contract.start_date, contract.end_date) ||
+    isDateOutsideContractWindow(req.delivery_date, contract.start_date, contract.end_date);
+  if (outside && formData.get("confirm_outside_contract_dates") !== "on") {
+    throw new Error(
+      "Request dates are outside the contract window. Check the override box, or pick another contract.",
+    );
+  }
+
+  const { data: customer } = await supabase
+    .from("customers")
+    .select("id, credit_limit, name")
+    .eq("id", req.customer_id)
+    .single();
+  if (!customer) throw new Error("Customer not found.");
+
+  const { data: openInvoices } = await supabase
+    .from("invoices")
+    .select("total, amount_paid, status")
+    .eq("customer_id", req.customer_id)
+    .neq("status", "cancelled");
+  const openAr = (openInvoices ?? []).reduce((sum, inv) => {
+    if (["paid", "cancelled"].includes(inv.status)) return sum;
+    return sum + Math.max(0, Number(inv.total) - Number(inv.amount_paid));
+  }, 0);
+  const creditLimit = Number(customer.credit_limit ?? 0);
+  const projected = openAr + customerRate;
+  if (creditLimit > 0 && projected > creditLimit) {
+    if (profile.role !== "manager") {
+      throw new Error(
+        `Credit limit exceeded for ${customer.name}: open AR ${openAr.toFixed(0)} + rate ${customerRate.toFixed(0)} > limit ${creditLimit.toFixed(0)}. Ask a manager to book.`,
+      );
+    }
+  }
+
+  const pickup = String(req.pickup_location || "").trim();
+  const delivery = String(req.delivery_location || "").trim();
+  const [originCity = pickup, originState = ""] = pickup.split(",").map((s: string) => s.trim());
+  const [destCity = delivery, destState = ""] = delivery.split(",").map((s: string) => s.trim());
+
+  const loadNumber = `LD-REQ-${Date.now().toString().slice(-6)}`;
+  const { data: ship, error: shipErr } = await supabase
+    .from("shipments")
+    .insert({
+      load_number: loadNumber,
+      customer_id: req.customer_id,
+      carrier_id: null,
+      contract_id: contractId,
+      status: "scheduled",
+      pickup_location: pickup,
+      delivery_location: delivery,
+      origin_city: originCity || "TBD",
+      origin_state: originState || "NA",
+      dest_city: destCity || "TBD",
+      dest_state: destState || "NA",
+      pickup_date: req.pickup_date,
+      delivery_date: req.delivery_date,
+      promised_delivery_date: req.delivery_date,
+      freight_type: req.freight_type,
+      weight_lbs: req.weight_lbs,
+      customer_rate: customerRate,
+      carrier_cost: carrierCost,
+      discount_amount: 0,
+      discount_approved: true,
+      created_by: profile.id,
+    })
+    .select("id")
+    .single();
+  if (shipErr) throw new Error(shipErr.message);
+
+  const creditNote =
+    creditLimit > 0 && projected > creditLimit && profile.role === "manager"
+      ? ` Credit override: AR ${openAr.toFixed(0)} + rate ${customerRate.toFixed(0)} > limit ${creditLimit.toFixed(0)}.`
+      : "";
+  await logStatus(
+    ship.id,
+    null,
+    "scheduled",
+    profile.id,
+    `Created from customer coverage request${req.notes ? `: ${req.notes}` : ""}.${creditNote}`,
+  );
+
+  const depositAmt = depositAmountDue(customerRate, Number(contract.downpayment_pct ?? 0));
+  if (depositAmt > 0) {
+    const issueDate = new Date().toISOString().slice(0, 10);
+    const invoiceNumber = `DEP-${Date.now().toString().slice(-8)}`;
+    const { error: depErr } = await supabase.from("invoices").insert({
+      invoice_number: invoiceNumber,
+      customer_id: req.customer_id,
+      shipment_id: ship.id,
+      status: "sent",
+      issue_date: issueDate,
+      due_date: issueDate,
+      subtotal: depositAmt,
+      total: depositAmt,
+      amount_paid: 0,
+    });
+    if (depErr) throw new Error(depErr.message);
+    await logStatus(
+      ship.id,
+      "scheduled",
+      "scheduled",
+      profile.id,
+      `Downpayment invoice ${invoiceNumber} created (${Number(contract.downpayment_pct ?? 0)}%)`,
+    );
+  }
+
+  const { error: updErr } = await supabase
+    .from("coverage_requests")
+    .update({
+      status: "accepted",
+      shipment_id: ship.id,
+      reviewed_by: profile.id,
+      reviewed_at: new Date().toISOString(),
+    })
+    .eq("id", id);
+  if (updErr) throw new Error(updErr.message);
+
+  revalidatePath("/coverage");
+  revalidatePath("/shipments");
+  revalidatePath("/invoices");
+  revalidatePath("/dashboard");
+  revalidatePath("/warnings");
+  redirect(
+    toastPath(
+      `/shipments/${ship.id}`,
+      "Load booked from coverage request — assign a carrier next",
+    ),
+  );
+}
+
+export async function declineCoverageRequest(formData: FormData) {
+  const profile = await getCurrentProfile();
+  if (!profile || !isOperations(profile.role)) {
+    throw new Error("Only broker or manager operations can decline requests.");
+  }
+  const id = parseForm(z.object({ id: uuidSchema }), {
+    id: formString(formData, "request_id"),
+  }).id;
+  const note = formString(formData, "note");
+
+  const supabase = await createClient();
+  const { data: req } = await supabase
+    .from("coverage_requests")
+    .select("id, status, notes")
+    .eq("id", id)
+    .maybeSingle();
+  if (!req) throw new Error("Request not found.");
+  if (req.status !== "pending") throw new Error("Request is no longer pending.");
+
+  const nextNotes =
+    note.length >= 3
+      ? `${req.notes ?? ""}${req.notes ? "\n" : ""}[Declined] ${note}`.trim()
+      : req.notes;
+
+  const { error } = await supabase
+    .from("coverage_requests")
+    .update({
+      status: "declined",
+      notes: nextNotes,
+      reviewed_by: profile.id,
+      reviewed_at: new Date().toISOString(),
+    })
+    .eq("id", id);
+  if (error) throw new Error(error.message);
+
+  revalidatePath("/coverage");
+  revalidatePath("/dashboard");
+  revalidatePath("/warnings");
+  redirect(toastPath("/coverage", "Coverage request declined"));
+}

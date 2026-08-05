@@ -1,4 +1,5 @@
 import type { Profile, UserRole } from "@/lib/types";
+import { isActiveFinalInvoice } from "@/lib/invoice-helpers";
 
 export type AlertSeverity = "info" | "warning" | "critical";
 
@@ -72,6 +73,12 @@ type AlertSources = {
     amount: number;
     reason: string | null;
   }[];
+  coverageRequests?: {
+    id: string;
+    pickup_location: string;
+    delivery_location: string;
+    customers?: { name?: string } | { name?: string }[] | null;
+  }[];
   today: string;
 };
 
@@ -87,7 +94,7 @@ export function buildAlerts(src: AlertSources): AppAlert[] {
   const podSet = new Set(src.pods.map((p) => p.shipment_id));
   const billed = new Set(
     src.invoices
-      .filter((i) => i.status !== "cancelled" && i.shipment_id)
+      .filter((i) => isActiveFinalInvoice(i) && i.shipment_id)
       .map((i) => i.shipment_id as string),
   );
 
@@ -285,20 +292,37 @@ export function buildAlerts(src: AlertSources): AppAlert[] {
   for (const c of src.contracts) {
     if (c.status === "active" && c.end_date) {
       const days = daysBetween(src.today, c.end_date);
-      if (days >= 0 && days <= 45) {
+      if (days >= 0 && days <= 30) {
         alerts.push({
           id: `contract-${c.id}`,
           severity: "info",
           title: "Contract nearing expiration",
           reason: `${c.contract_number} ends ${c.end_date}`,
           action: "Discuss renewal with customer",
-          href: "/contracts",
+          href: "/contracts?filter=expiring",
           related: c.contract_number,
           detectedAt: src.today,
           roles: ["manager", "broker"],
         });
       }
     }
+  }
+
+  for (const r of src.coverageRequests ?? []) {
+    const cust = Array.isArray(r.customers)
+      ? r.customers[0]?.name
+      : r.customers?.name;
+    alerts.push({
+      id: `coverage-${r.id}`,
+      severity: "warning",
+      title: "Shipper coverage request",
+      reason: `${cust ?? "Customer"}: ${r.pickup_location} → ${r.delivery_location}`,
+      action: "Book load, then assign a Preferred / Approved carrier",
+      href: `/coverage#focus-${r.id}`,
+      related: cust ?? "Coverage",
+      detectedAt: src.today,
+      roles: ["manager", "broker"],
+    });
   }
 
   return alerts;

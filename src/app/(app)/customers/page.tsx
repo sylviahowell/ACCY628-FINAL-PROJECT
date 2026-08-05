@@ -1,3 +1,4 @@
+import Link from "next/link";
 import { redirect } from "next/navigation";
 import { EmptyState } from "@/components/EmptyState";
 import { requirePathAccess } from "@/lib/authz";
@@ -22,7 +23,7 @@ export default async function CustomersPage() {
       <div>
         <h1 className="text-2xl font-bold">Customers</h1>
         <p className="text-sm opacity-70">
-          Shippers you bill. Create customers, then attach contracts and shipments.
+          Shippers you book. Create customers, then attach contracts and shipments.
         </p>
       </div>
 
@@ -89,6 +90,17 @@ export default async function CustomersPage() {
                       <p className="text-xs opacity-60">AR balances managed in Billing</p>
                     )}
                     <p>Credit limit: {money(c.credit_limit)}</p>
+                    <div className="mt-2 flex flex-wrap justify-end gap-2">
+                      <Link href="/shipments" className="btn btn-ghost btn-xs">
+                        Open loads
+                      </Link>
+                      <Link href="/contracts" className="btn btn-ghost btn-xs">
+                        Contracts
+                      </Link>
+                      <Link href="/shipments/new" className="btn btn-outline btn-xs">
+                        Book load
+                      </Link>
+                    </div>
                   </div>
                 </div>
               </div>

@@ -17,18 +17,27 @@ export type ShipmentListRow = {
   rateDisplay: string;
   hasPod: boolean;
   readyToBill: boolean;
+  needsPod: boolean;
   isDelayed: boolean;
   needsCoverage: boolean;
 };
 
-export type ShipStatusFilter = "all" | "delayed" | "unassigned" | "ready";
+export type ShipStatusFilter = "all" | "delayed" | "unassigned" | "ready" | "needs_pod";
 
-function initialStatus(status: string | null, filter: string | null): ShipStatusFilter {
-  if (status === "delayed" || status === "unassigned" || status === "ready") {
-    return status;
-  }
+/** Finance roles triage Ready-to-bill; ops (broker) triage Needs POD instead. */
+export type ShipTriageMode = "finance" | "ops";
+
+function initialStatus(
+  status: string | null,
+  filter: string | null,
+  mode: ShipTriageMode,
+): ShipStatusFilter {
+  if (status === "delayed" || status === "unassigned") return status;
+  if (status === "ready" && mode === "finance") return "ready";
+  if ((status === "needs_pod" || status === "needs-pod") && mode === "ops") return "needs_pod";
   if (filter === "delayed" || filter === "unassigned") return filter;
-  if (filter === "ready-to-bill") return "ready";
+  if (filter === "ready-to-bill" && mode === "finance") return "ready";
+  if ((filter === "needs-pod" || filter === "needs_pod") && mode === "ops") return "needs_pod";
   return "all";
 }
 
@@ -37,6 +46,7 @@ function matchesFilter(row: ShipmentListRow, filter: ShipStatusFilter) {
   if (filter === "delayed") return row.isDelayed;
   if (filter === "unassigned") return row.needsCoverage;
   if (filter === "ready") return row.readyToBill;
+  if (filter === "needs_pod") return row.needsPod;
   return true;
 }
 
@@ -56,10 +66,12 @@ export function ShipmentsTriage({
   rows,
   rateHeader,
   showDocsReady,
+  triageMode = "finance",
 }: {
   rows: ShipmentListRow[];
   rateHeader: string;
   showDocsReady: boolean;
+  triageMode?: ShipTriageMode;
 }) {
   return (
     <Suspense
@@ -69,11 +81,16 @@ export function ShipmentsTriage({
           filter="all"
           rateHeader={rateHeader}
           showDocsReady={showDocsReady}
-          onFilter={() => {}}
+          triageMode={triageMode}
         />
       }
     >
-      <ShipmentsTriageInner rows={rows} rateHeader={rateHeader} showDocsReady={showDocsReady} />
+      <ShipmentsTriageInner
+        rows={rows}
+        rateHeader={rateHeader}
+        showDocsReady={showDocsReady}
+        triageMode={triageMode}
+      />
     </Suspense>
   );
 }
@@ -82,13 +99,15 @@ function ShipmentsTriageInner({
   rows,
   rateHeader,
   showDocsReady,
+  triageMode,
 }: {
   rows: ShipmentListRow[];
   rateHeader: string;
   showDocsReady: boolean;
+  triageMode: ShipTriageMode;
 }) {
   const params = useSearchParams();
-  const urlFilter = initialStatus(params.get("status"), params.get("filter"));
+  const urlFilter = initialStatus(params.get("status"), params.get("filter"), triageMode);
   const [filter, setFilter] = useState<ShipStatusFilter>(urlFilter);
   const [prevUrlFilter, setPrevUrlFilter] = useState(urlFilter);
   if (urlFilter !== prevUrlFilter) {
@@ -100,6 +119,22 @@ function ShipmentsTriageInner({
   const delayed = rows.filter((r) => r.isDelayed).length;
   const unassigned = rows.filter((r) => r.needsCoverage).length;
   const ready = rows.filter((r) => r.readyToBill).length;
+  const needsPod = rows.filter((r) => r.needsPod).length;
+
+  const chips =
+    triageMode === "ops"
+      ? ([
+          ["all", "All", rows.length],
+          ["delayed", "Delayed", delayed],
+          ["unassigned", "Needs coverage", unassigned],
+          ["needs_pod", "Needs POD", needsPod],
+        ] as const)
+      : ([
+          ["all", "All", rows.length],
+          ["delayed", "Delayed", delayed],
+          ["unassigned", "Needs coverage", unassigned],
+          ["ready", "Ready to bill", ready],
+        ] as const);
 
   const visible = useMemo(() => {
     const filtered = rows.filter((r) => matchesFilter(r, filter));
@@ -110,14 +145,7 @@ function ShipmentsTriageInner({
     <>
       <FocusScroll />
       <div className="flex flex-wrap gap-2">
-        {(
-          [
-            ["all", "All", rows.length],
-            ["delayed", "Delayed", delayed],
-            ["unassigned", "Needs coverage", unassigned],
-            ["ready", "Ready to bill", ready],
-          ] as const
-        ).map(([id, label, count]) => (
+        {chips.map(([id, label, count]) => (
           <button
             key={id}
             type="button"
@@ -133,7 +161,7 @@ function ShipmentsTriageInner({
         filter={filter}
         rateHeader={rateHeader}
         showDocsReady={showDocsReady}
-        onFilter={setFilter}
+        triageMode={triageMode}
       />
     </>
   );
@@ -144,12 +172,13 @@ function ShipmentsBody({
   filter,
   rateHeader,
   showDocsReady,
+  triageMode,
 }: {
   rows: ShipmentListRow[];
   filter: ShipStatusFilter;
   rateHeader: string;
   showDocsReady: boolean;
-  onFilter: (f: ShipStatusFilter) => void;
+  triageMode: ShipTriageMode;
 }) {
   if (rows.length === 0) {
     return (
@@ -206,8 +235,11 @@ function ShipmentsBody({
                     <span className={`badge badge-sm ${s.hasPod ? "badge-success" : "badge-ghost"}`}>
                       POD {s.hasPod ? "yes" : "no"}
                     </span>
-                    {s.readyToBill ? (
+                    {triageMode === "finance" && s.readyToBill ? (
                       <span className="badge badge-sm badge-primary">Ready to bill</span>
+                    ) : null}
+                    {triageMode === "ops" && s.needsPod ? (
+                      <span className="badge badge-sm badge-warning">Needs POD</span>
                     ) : null}
                   </div>
                 </td>
@@ -219,4 +251,3 @@ function ShipmentsBody({
     </div>
   );
 }
-

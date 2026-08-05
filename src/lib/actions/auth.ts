@@ -9,19 +9,38 @@ import {
 } from "@/lib/demo-mode";
 import { isDemoMode, setDemoModeCookie } from "@/lib/demo-mode-server";
 import { DEMO_PASSWORD, DEMO_USERS, type Profile, type UserRole } from "@/lib/types";
+import { AUTH_FETCH_TIMEOUT_MS, withTimeout } from "@/lib/with-timeout";
+
+function isMissingDemoUserError(message: string): boolean {
+  const m = message.toLowerCase();
+  return (
+    m.includes("invalid login") ||
+    m.includes("invalid credentials") ||
+    m.includes("invalid email or password") ||
+    m.includes("user not found")
+  );
+}
 
 export async function getCurrentProfile(): Promise<Profile | null> {
   const supabase = await createClient();
   const {
     data: { user },
-  } = await supabase.auth.getUser();
+  } = await withTimeout(
+    supabase.auth.getUser(),
+    AUTH_FETCH_TIMEOUT_MS,
+    "getUser",
+  );
   if (!user) return null;
 
-  const { data } = await supabase
-    .from("profiles")
-    .select("id, email, full_name, role, customer_id, carrier_id")
-    .eq("id", user.id)
-    .maybeSingle();
+  const { data } = await withTimeout(
+    supabase
+      .from("profiles")
+      .select("id, email, full_name, role, customer_id, carrier_id")
+      .eq("id", user.id)
+      .maybeSingle(),
+    AUTH_FETCH_TIMEOUT_MS,
+    "getCurrentProfile",
+  );
 
   return (data as Profile | null) ?? null;
 }
@@ -30,13 +49,28 @@ async function signInDemoAccount(role: UserRole) {
   const demo = demoUserForRole(role);
   const supabase = await createClient();
 
-  const { error: signInError } = await supabase.auth.signInWithPassword({
-    email: demo.email,
-    password: DEMO_PASSWORD,
-  });
+  // Prefer a single sign-in for seeded demo accounts (avoid slow sign-up path).
+  const { error: signInError } = await withTimeout(
+    supabase.auth.signInWithPassword({
+      email: demo.email,
+      password: DEMO_PASSWORD,
+    }),
+    AUTH_FETCH_TIMEOUT_MS,
+    "demo signIn",
+  );
 
-  if (signInError) {
-    const { error: signUpError } = await supabase.auth.signUp({
+  if (!signInError) return;
+
+  if (!isMissingDemoUserError(signInError.message)) {
+    throw new Error(
+      signInError.message +
+        " Check Supabase connectivity and that demo users exist in Auth.",
+    );
+  }
+
+  // One-time provision only when the demo user truly does not exist yet.
+  const { error: signUpError } = await withTimeout(
+    supabase.auth.signUp({
       email: demo.email,
       password: DEMO_PASSWORD,
       options: {
@@ -47,19 +81,25 @@ async function signInDemoAccount(role: UserRole) {
           carrier_id: demo.carrier_id ?? "",
         },
       },
-    });
-    if (signUpError) throw new Error(signUpError.message);
+    }),
+    AUTH_FETCH_TIMEOUT_MS,
+    "demo signUp",
+  );
+  if (signUpError) throw new Error(signUpError.message);
 
-    const { error: second } = await supabase.auth.signInWithPassword({
+  const { error: second } = await withTimeout(
+    supabase.auth.signInWithPassword({
       email: demo.email,
       password: DEMO_PASSWORD,
-    });
-    if (second) {
-      throw new Error(
-        second.message +
-          " Turn off Confirm email in Supabase Auth → Providers → Email for demo accounts.",
-      );
-    }
+    }),
+    AUTH_FETCH_TIMEOUT_MS,
+    "demo signIn after signUp",
+  );
+  if (second) {
+    throw new Error(
+      second.message +
+        " Turn off Confirm email in Supabase Auth → Providers → Email for demo accounts.",
+    );
   }
 }
 

@@ -11,6 +11,7 @@
 -- shipment_status_updates / status_events: scoped SELECT (not true for all authenticated)
 -- app_settings: read authenticated; update manager
 -- disputes: customer insert/select; staff ALL
+-- support_tickets / support_ticket_messages: staff ALL; customer/carrier scoped by org; portal messages non-internal only
 -- approval_requests: staff ALL (carrier allowed in WITH CHECK for insert paths)
 
 -- Rebuild notes:

@@ -1,16 +1,30 @@
-import { redirect } from "next/navigation";
+import { Suspense } from "react";
 import { ProfitabilityHeatmap } from "@/components/ProfitabilityHeatmap";
-import { getCurrentProfile } from "@/lib/actions/auth";
+import { FocusScroll } from "@/components/FocusScroll";
+import { requirePathAccess } from "@/lib/authz";
 import { createClient } from "@/lib/supabase/server";
 import { money } from "@/lib/types";
 import { HorizontalBars, MonthlyBars } from "@/components/Charts";
 import { bucketByMonth } from "@/lib/analytics";
-import { toHeatRows } from "@/lib/heatmap";
+import {
+  marginBand,
+  parseBandParam,
+  parseDimParam,
+  toHeatRows,
+} from "@/lib/heatmap";
+import { redirect } from "next/navigation";
 
-export default async function ProfitabilityPage() {
-  const profile = await getCurrentProfile();
-  if (!profile) redirect("/login");
+export default async function ProfitabilityPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ band?: string; dim?: string; focus?: string }>;
+}) {
+  const profile = await requirePathAccess("/profitability");
   if (profile.role !== "manager" && profile.role !== "billing") redirect("/dashboard");
+
+  const params = await searchParams;
+  const bandFilter = parseBandParam(params.band ?? null);
+  const dimFilter = parseDimParam(params.dim ?? null);
 
   const supabase = await createClient();
   const { data: profit } = await supabase.from("shipment_profitability").select("*");
@@ -37,6 +51,8 @@ export default async function ProfitabilityPage() {
       const discount = Number(p.discount_amount || 0);
       const revenue = Number(p.customer_rate) + billable - discount;
       const cogs = Number(p.carrier_cost) + payable;
+      const margin = Number(p.margin);
+      const marginPct = revenue > 0 ? (margin / revenue) * 100 : 0;
       return {
         ...p,
         customer: names.get(p.customer_id) ?? "Unknown",
@@ -45,10 +61,13 @@ export default async function ProfitabilityPage() {
         discount,
         revenue,
         cogs,
-        margin: Number(p.margin),
+        margin,
+        band: marginBand(marginPct, revenue),
       };
     })
     .sort((a, b) => a.margin - b.margin);
+
+  const detailRows = bandFilter ? rows.filter((r) => r.band === bandFilter) : rows;
 
   const byCustomer = Object.values(
     rows.reduce<Record<string, { name: string; value: number }>>((acc, r) => {
@@ -96,11 +115,15 @@ export default async function ProfitabilityPage() {
 
   return (
     <div className="space-y-6">
+      <Suspense fallback={null}>
+        <FocusScroll />
+      </Suspense>
       <div>
         <h1 className="text-2xl font-bold">Profitability</h1>
         <p className="text-sm opacity-70">
           Per-load economics: customer revenue (rate + billable extras − discounts) minus direct
           costs (carrier buy + payable accessorials).
+          {bandFilter ? ` Filtered to ${bandFilter}.` : ""}
         </p>
       </div>
 
@@ -135,7 +158,11 @@ export default async function ProfitabilityPage() {
         </div>
       </div>
 
-      <ProfitabilityHeatmap rows={heatRows} />
+      <ProfitabilityHeatmap
+        rows={heatRows}
+        initialDim={dimFilter}
+        initialBand={bandFilter}
+      />
 
       <div className="grid gap-4 lg:grid-cols-2">
         <div className="card bg-base-100 shadow-sm">
@@ -154,7 +181,10 @@ export default async function ProfitabilityPage() {
 
       <div className="card bg-base-100 shadow-sm">
         <div className="card-body">
-          <h3 className="card-title text-base">Load cost & margin detail</h3>
+          <h3 className="card-title text-base">
+            Load cost & margin detail
+            {bandFilter ? ` · ${bandFilter}` : ""}
+          </h3>
           <div className="overflow-x-auto">
             <table className="table table-sm">
               <thead>
@@ -170,7 +200,7 @@ export default async function ProfitabilityPage() {
                 </tr>
               </thead>
               <tbody>
-                {rows.slice(0, 15).map((r) => (
+                {detailRows.slice(0, bandFilter ? 50 : 15).map((r) => (
                   <tr key={r.shipment_id}>
                     <td>{r.load_number}</td>
                     <td>{r.customer}</td>
@@ -184,6 +214,13 @@ export default async function ProfitabilityPage() {
                     </td>
                   </tr>
                 ))}
+                {detailRows.length === 0 ? (
+                  <tr>
+                    <td colSpan={8} className="text-sm opacity-70">
+                      No loads in this margin band.
+                    </td>
+                  </tr>
+                ) : null}
               </tbody>
             </table>
           </div>

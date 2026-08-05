@@ -3,3 +3,4 @@
 -- Do not re-run blindly against a DB that already has these objects.
 
 -- See Supabase migrations history for the live applied version.
+-- RLS hardening and rebuild notes: supabase/migrations/

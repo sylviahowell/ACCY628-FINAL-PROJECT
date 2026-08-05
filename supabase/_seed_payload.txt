@@ -1,4 +1,4 @@
-﻿-- Phase 7: Story-driven demo seed for FreightFlow
+-- Phase 7: Story-driven demo seed for RowanLane
 -- Idempotent where practical. Preserves demo portal user FKs:
 --   customer@ â†’ Midwest Retail Group (1111...101)
 --   carrier@  â†’ Prairie Haulers LLC (2222...201)

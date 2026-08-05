@@ -1,4 +1,4 @@
--- Phase 7: Story-driven demo seed for FreightFlow
+-- Phase 7: Story-driven demo seed for RowanLane
 -- Idempotent where practical. Preserves demo portal user FKs:
 --   customer@ → Midwest Retail Group (1111...101)
 --   carrier@  → Prairie Haulers LLC (2222...201)
@@ -259,7 +259,7 @@ VALUES
     (CURRENT_DATE - 4)::timestamptz + interval '16 hours',
     'POD on file — load ready for billing review',
     'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaa4',
-    'https://docs.freightflow.com/pod/ld-2011.pdf'
+    'https://docs.rowanlane.com/pod/ld-2011.pdf'
   ),
   (
     '55555555-5555-5555-5555-555555555512',
@@ -268,7 +268,7 @@ VALUES
     (CURRENT_DATE - 2)::timestamptz + interval '14 hours',
     'POD on file; detention accessorial pending approval',
     'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaa4',
-    'https://docs.freightflow.com/pod/ld-2012.pdf'
+    'https://docs.rowanlane.com/pod/ld-2012.pdf'
   ),
   (
     '55555555-5555-5555-5555-555555555520',
@@ -277,7 +277,7 @@ VALUES
     (CURRENT_DATE - 16)::timestamptz + interval '12 hours',
     'Clean delivery — signed BOL attached',
     'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaa4',
-    'https://docs.freightflow.com/pod/ld-2020.pdf'
+    'https://docs.rowanlane.com/pod/ld-2020.pdf'
   )
 ON CONFLICT (id) DO NOTHING;
 

@@ -11,7 +11,7 @@ export function RowanLaneMark({
   return (
     // eslint-disable-next-line @next/next/no-img-element -- keep full alpha; next/image can plate white
     <img
-      src="/brand/freightflow-orbital.png"
+      src="/brand/rowanlane-orbital.png"
       alt={title}
       width={size}
       height={size}

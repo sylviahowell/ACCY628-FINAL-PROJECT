@@ -1,14 +1,13 @@
 import { redirect } from "next/navigation";
 import { CarrierScorecardGrid } from "@/components/CarrierScorecards";
-import { getCurrentProfile } from "@/lib/actions/auth";
+import { requirePathAccess } from "@/lib/authz";
 import { createCarrier } from "@/lib/actions/freight";
 import { buildCarrierScorecards } from "@/lib/carrier-scorecard";
 import { createClient } from "@/lib/supabase/server";
 import { isOperations } from "@/lib/types";
 
 export default async function CarriersPage() {
-  const profile = await getCurrentProfile();
-  if (!profile) redirect("/login");
+  const profile = await requirePathAccess("/carriers");
   if (!isOperations(profile.role)) redirect("/dashboard");
 
   const supabase = await createClient();
@@ -69,7 +68,8 @@ export default async function CarriersPage() {
         <h1 className="text-2xl font-bold">Carriers</h1>
         <p className="text-sm opacity-70">
           Trucking partners with performance scorecards for coverage decisions. Tiers are
-          rule-based — Suspended is a booking warning, not an automatic system block.
+          rule-based — Suspended (expired insurance) is blocked from create/assign; Watch List
+          remains assignable with Risk & Warnings visibility.
         </p>
       </div>
 

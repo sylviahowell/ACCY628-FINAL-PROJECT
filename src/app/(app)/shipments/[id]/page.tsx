@@ -1,11 +1,11 @@
 import Link from "next/link";
-import { notFound, redirect } from "next/navigation";
+import { notFound } from "next/navigation";
 import { C2CTimeline } from "@/components/C2CTimeline";
 import {
   CustomerFriendlyStatusCard,
   ShipmentHealthCard,
 } from "@/components/ShipmentHealthCard";
-import { getCurrentProfile } from "@/lib/actions/auth";
+import { requirePathAccess } from "@/lib/authz";
 import {
   assignCarrier,
   generateInvoice,
@@ -20,9 +20,21 @@ import {
   filterTimelineForAudience,
 } from "@/lib/portal-views";
 import { canManageBilling } from "@/lib/roles";
+import { insuranceRiskStatus } from "@/lib/risk-credit";
 import { computeShipmentHealth } from "@/lib/shipment-health";
 import { createClient } from "@/lib/supabase/server";
 import { isOperations, money, statusBadge, type ShipmentStatus } from "@/lib/types";
+
+function isControlOverrideNote(note: string | null | undefined): boolean {
+  if (!note) return false;
+  const n = note.toLowerCase();
+  return (
+    n.includes("override") ||
+    n.includes("credit override") ||
+    n.includes("discount") ||
+    n.includes("outside the contract")
+  );
+}
 
 export default async function ShipmentDetailPage({
   params,
@@ -30,8 +42,7 @@ export default async function ShipmentDetailPage({
   params: Promise<{ id: string }>;
 }) {
   const { id } = await params;
-  const profile = await getCurrentProfile();
-  if (!profile) redirect("/login");
+  const profile = await requirePathAccess("/shipments");
 
   const isCustomer = profile.role === "customer";
   const isCarrier = profile.role === "carrier";
@@ -75,11 +86,37 @@ export default async function ShipmentDetailPage({
           .in("invoice_id", invoiceIds)
       : { data: [] as { id: string; status: string; invoice_id: string }[] };
   const { data: allCarriers } = isOperations(profile.role)
-    ? await supabase.from("carriers").select("id, name").order("name")
-    : { data: [] as { id: string; name: string }[] };
+    ? await supabase
+        .from("carriers")
+        .select("id, name, insurance_expiration")
+        .order("name")
+    : { data: [] as { id: string; name: string; insurance_expiration: string | null }[] };
+
+  const today = new Date().toISOString().slice(0, 10);
+
+  const assignableCarriers = (allCarriers ?? []).filter((c) => {
+    if (c.id === s.carrier_id) return true;
+    return insuranceRiskStatus(c.insurance_expiration ?? null, today).status !== "expired";
+  });
+  const currentCarrierExpired =
+    Boolean(s.carrier_id) &&
+    (allCarriers ?? []).some(
+      (c) =>
+        c.id === s.carrier_id &&
+        insuranceRiskStatus(c.insurance_expiration ?? null, today).status === "expired",
+    );
+
+  const overrideEvents = (timeline ?? []).filter((t) => isControlOverrideNote(t.note));
+  const overrideActorIds = [
+    ...new Set(overrideEvents.map((t) => t.changed_by).filter(Boolean) as string[]),
+  ];
+  const { data: overrideActors } =
+    showInternalFinance && overrideActorIds.length
+      ? await supabase.from("profiles").select("id, full_name").in("id", overrideActorIds)
+      : { data: [] as { id: string; full_name: string }[] };
+  const actorName = new Map((overrideActors ?? []).map((p) => [p.id, p.full_name]));
 
   const margin = Number(profit?.margin ?? Number(s.customer_rate) - Number(s.carrier_cost));
-  const today = new Date().toISOString().slice(0, 10);
   const hasPod = (pods ?? []).length > 0;
   const pendingAccessorials = (charges ?? []).filter(
     (c) => c.approval_status === "pending",
@@ -226,7 +263,41 @@ export default async function ShipmentDetailPage({
       {showInternalFinance && margin < 0 ? (
         <div className="alert alert-warning">
           <span>
-            Warning: this shipment is currently unprofitable ({money(margin)} margin).
+            Warning: this shipment is currently unprofitable ({money(margin)} margin). Booking is
+            not blocked — review coverage and rates.
+          </span>
+        </div>
+      ) : null}
+
+      {showInternalFinance && overrideEvents.length > 0 ? (
+        <div className="rounded-box border border-warning/40 bg-warning/10 px-4 py-3">
+          <p className="text-xs font-semibold tracking-wide text-warning-content uppercase opacity-80">
+            Control overrides
+          </p>
+          <ul className="mt-2 space-y-2 text-sm">
+            {overrideEvents.map((t) => (
+              <li key={t.id} className="flex flex-col gap-0.5 sm:flex-row sm:items-baseline sm:gap-3">
+                <span className="shrink-0 text-xs opacity-60">
+                  {new Date(t.created_at).toLocaleString()}
+                </span>
+                <span>
+                  <span className="font-medium">
+                    {t.changed_by ? actorName.get(t.changed_by) ?? "Staff" : "Staff"}
+                  </span>
+                  {" — "}
+                  {sanitizeDemoText(t.note) || "Logged override"}
+                </span>
+              </li>
+            ))}
+          </ul>
+        </div>
+      ) : null}
+
+      {canAssign && currentCarrierExpired ? (
+        <div className="alert alert-error">
+          <span>
+            Assigned carrier has expired insurance (Suspended). Reassign to an eligible carrier —
+            saving the current assignment is blocked.
           </span>
         </div>
       ) : null}
@@ -392,15 +463,25 @@ export default async function ShipmentDetailPage({
                   <select
                     name="carrier_id"
                     className="select select-bordered select-sm"
-                    defaultValue={s.carrier_id ?? ""}
+                    defaultValue={currentCarrierExpired ? "" : (s.carrier_id ?? "")}
                   >
                     <option value="">Unassigned</option>
-                    {(allCarriers ?? []).map((c) => (
-                      <option key={c.id} value={c.id}>
-                        {c.name}
-                      </option>
-                    ))}
+                    {assignableCarriers
+                      .filter(
+                        (c) =>
+                          c.id !== s.carrier_id ||
+                          insuranceRiskStatus(c.insurance_expiration ?? null, today).status !==
+                            "expired",
+                      )
+                      .map((c) => (
+                        <option key={c.id} value={c.id}>
+                          {c.name}
+                        </option>
+                      ))}
                   </select>
+                  <span className="label-text-alt opacity-60">
+                    Suspended carriers (expired insurance) are hidden and blocked server-side.
+                  </span>
                 </label>
                 <label className="form-control w-full">
                   <span className="label-text text-xs">Carrier cost (optional update)</span>

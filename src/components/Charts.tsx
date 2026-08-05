@@ -88,15 +88,20 @@ export function MonthlyBars({
         <BarChart data={data}>
           <CartesianGrid strokeDasharray="3 3" stroke={colors.muted} opacity={0.25} />
           <XAxis dataKey="month" stroke={colors.content} tick={{ fill: colors.content, fontSize: 12 }} />
-          <YAxis stroke={colors.content} tick={{ fill: colors.content, fontSize: 12 }} />
+          <YAxis
+            stroke={colors.content}
+            width={84}
+            tick={{ fill: colors.content, fontSize: 11 }}
+            tickFormatter={(v) => money(Number(v))}
+          />
           <Tooltip
+            formatter={(value) => money(Number(value ?? 0))}
             contentStyle={{
               background: "var(--color-base-100)",
               borderColor: "var(--color-base-300)",
               color: "var(--color-base-content)",
             }}
           />
-          <Legend />
           <Bar
             dataKey={dataKey ?? "value"}
             name={name}
@@ -166,7 +171,12 @@ export function HorizontalBars({
       <ResponsiveContainer width="100%" height="100%">
         <BarChart data={data} layout="vertical" margin={{ left: 24 }}>
           <CartesianGrid strokeDasharray="3 3" stroke={colors.muted} opacity={0.25} />
-          <XAxis type="number" stroke={colors.content} tick={{ fill: colors.content, fontSize: 12 }} />
+          <XAxis
+            type="number"
+            stroke={colors.content}
+            tick={{ fill: colors.content, fontSize: 11 }}
+            tickFormatter={(v) => money(Number(v))}
+          />
           <YAxis
             type="category"
             dataKey="name"
@@ -175,6 +185,7 @@ export function HorizontalBars({
             tick={{ fill: colors.content, fontSize: 12 }}
           />
           <Tooltip
+            formatter={(value) => money(Number(value ?? 0))}
             contentStyle={{
               background: "var(--color-base-100)",
               borderColor: "var(--color-base-300)",

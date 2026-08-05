@@ -1,30 +1,38 @@
 import Link from "next/link";
-import { redirect } from "next/navigation";
 import { EmptyState } from "@/components/EmptyState";
 import { FilterBanner, resolveSearchParams } from "@/components/FilterBanner";
-import { getCurrentProfile } from "@/lib/actions/auth";
-import {
-  filterShipments,
-  shipmentFilterLabel,
-} from "@/lib/list-filters";
+import { ShipmentsTriage, type ShipmentListRow } from "@/components/ShipmentsTriage";
+import { requirePathAccess } from "@/lib/authz";
+import { filterShipments, shipmentFilterLabel } from "@/lib/list-filters";
 import { createClient } from "@/lib/supabase/server";
-import { isOperations, money, statusBadge } from "@/lib/types";
+import { isOperations, money } from "@/lib/types";
 import { isInternalStaff } from "@/lib/roles";
+
+/** Map manager-nav `?status=` shortcuts onto the shared `?filter=` vocabulary. */
+function resolveShipmentFilter(params: Record<string, string | undefined>) {
+  if (params.filter) return params.filter;
+  if (params.status === "delayed") return "delayed";
+  if (params.status === "unassigned") return "unassigned";
+  if (params.status === "ready") return "ready-to-bill";
+  return undefined;
+}
 
 export default async function ShipmentsPage({
   searchParams,
 }: {
-  searchParams?: Promise<Record<string, string | string[] | undefined>> | Record<string, string | string[] | undefined>;
+  searchParams?:
+    | Promise<Record<string, string | string[] | undefined>>
+    | Record<string, string | string[] | undefined>;
 }) {
-  const profile = await getCurrentProfile();
-  if (!profile) redirect("/login");
+  const profile = await requirePathAccess("/shipments");
 
   const params = await resolveSearchParams(searchParams);
-  const filter = params.filter;
+  const filter = resolveShipmentFilter(params);
   const filterLabel = shipmentFilterLabel(filter);
   const today = new Date().toISOString().slice(0, 10);
 
   const supabase = await createClient();
+
   let query = supabase
     .from("shipments")
     .select("*, customers(name), carriers(name)")
@@ -80,6 +88,37 @@ export default async function ShipmentsPage({
         ? "Your pay"
         : "Sell / Buy";
 
+  const listRows: ShipmentListRow[] = rows.map((s) => {
+    const hasPod = podSet.has(s.id);
+    const delivered = ["delivered", "completed"].includes(s.status);
+    const closed = ["delivered", "completed", "cancelled"].includes(s.status);
+    const readyToBill = showReadyToBill && delivered && hasPod && !billedSet.has(s.id);
+    const isDelayed = Boolean(
+      s.promised_delivery_date && s.promised_delivery_date < today && !closed,
+    );
+    const needsCoverage = !s.carrier_id && !closed;
+    const rateDisplay = staffRates
+      ? `${money(s.customer_rate)} / ${money(s.carrier_cost)}`
+      : profile.role === "customer"
+        ? money(s.customer_rate)
+        : money(s.carrier_cost);
+
+    return {
+      id: s.id,
+      loadNumber: s.load_number,
+      laneFrom: s.pickup_location ?? `${s.origin_city}, ${s.origin_state}`,
+      laneTo: s.delivery_location ?? `${s.dest_city}, ${s.dest_state}`,
+      customerName: (s.customers as { name?: string } | null)?.name ?? "—",
+      carrierName: (s.carriers as { name?: string } | null)?.name ?? "No carrier",
+      status: s.status,
+      rateDisplay,
+      hasPod,
+      readyToBill,
+      isDelayed,
+      needsCoverage,
+    };
+  });
+
   return (
     <div className="space-y-6">
       <div className="flex flex-wrap items-end justify-between gap-3">
@@ -92,7 +131,7 @@ export default async function ShipmentsPage({
                 ? "Track your freight from scheduled pickup through delivery."
                 : profile.role === "carrier"
                   ? "Loads assigned to you — update status and upload POD from each load."
-                  : "Track freight from scheduled pickup through delivery and completion."}
+                  : "Track freight from scheduled pickup through delivery and completion. Use filters to triage exceptions."}
           </p>
         </div>
         {isOperations(profile.role) ? (
@@ -104,7 +143,7 @@ export default async function ShipmentsPage({
 
       {filterLabel ? <FilterBanner label={filterLabel} clearHref="/shipments" /> : null}
 
-      {rows.length === 0 ? (
+      {listRows.length === 0 ? (
         <EmptyState
           title={filterLabel ? "No matching shipments" : "No shipments to show"}
           description={
@@ -129,71 +168,7 @@ export default async function ShipmentsPage({
           }
         />
       ) : (
-        <div className="overflow-x-auto rounded-box bg-base-100 shadow-sm">
-          <table className="table">
-            <thead>
-              <tr>
-                <th>Number</th>
-                <th>Lane</th>
-                <th>Parties</th>
-                <th>Status</th>
-                <th>{rateHeader}</th>
-                {showDocsReady ? <th>Docs / Ready</th> : null}
-              </tr>
-            </thead>
-            <tbody>
-              {rows.map((s) => {
-                const hasPod = podSet.has(s.id);
-                const delivered = ["delivered", "completed"].includes(s.status);
-                const readyToBill =
-                  showReadyToBill && delivered && hasPod && !billedSet.has(s.id);
-                return (
-                  <tr key={s.id} className="hover">
-                    <td>
-                      <Link href={`/shipments/${s.id}`} className="link link-primary font-medium">
-                        {s.load_number}
-                      </Link>
-                    </td>
-                    <td className="text-sm">
-                      {s.pickup_location ?? `${s.origin_city}, ${s.origin_state}`}
-                      <div className="opacity-60">
-                        → {s.delivery_location ?? `${s.dest_city}, ${s.dest_state}`}
-                      </div>
-                    </td>
-                    <td className="text-sm">
-                      {(s.customers as { name?: string } | null)?.name ?? "—"}
-                      <div className="opacity-60">
-                        {(s.carriers as { name?: string } | null)?.name ?? "No carrier"}
-                      </div>
-                    </td>
-                    <td>
-                      <span className={`badge ${statusBadge(s.status)}`}>{s.status}</span>
-                    </td>
-                    <td className="text-sm">
-                      {staffRates
-                        ? `${money(s.customer_rate)} / ${money(s.carrier_cost)}`
-                        : profile.role === "customer"
-                          ? money(s.customer_rate)
-                          : money(s.carrier_cost)}
-                    </td>
-                    {showDocsReady ? (
-                      <td className="text-sm">
-                        <div className="flex flex-wrap items-center gap-1">
-                          <span className={`badge badge-sm ${hasPod ? "badge-success" : "badge-ghost"}`}>
-                            POD {hasPod ? "yes" : "no"}
-                          </span>
-                          {readyToBill ? (
-                            <span className="badge badge-sm badge-primary">Ready to bill</span>
-                          ) : null}
-                        </div>
-                      </td>
-                    ) : null}
-                  </tr>
-                );
-              })}
-            </tbody>
-          </table>
-        </div>
+        <ShipmentsTriage rows={listRows} rateHeader={rateHeader} showDocsReady={showDocsReady} />
       )}
     </div>
   );

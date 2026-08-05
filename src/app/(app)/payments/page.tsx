@@ -2,7 +2,7 @@ import Link from "next/link";
 import { redirect } from "next/navigation";
 import { EmptyState } from "@/components/EmptyState";
 import { FilterBanner, resolveSearchParams } from "@/components/FilterBanner";
-import { getCurrentProfile } from "@/lib/actions/auth";
+import { requirePathAccess } from "@/lib/authz";
 import { recordPayment } from "@/lib/actions/freight";
 import { createClient } from "@/lib/supabase/server";
 import { money, statusBadge } from "@/lib/types";
@@ -29,8 +29,7 @@ export default async function PaymentsPage({
 }: {
   searchParams?: Promise<Record<string, string | string[] | undefined>> | Record<string, string | string[] | undefined>;
 }) {
-  const profile = await getCurrentProfile();
-  if (!profile) redirect("/login");
+  const profile = await requirePathAccess("/payments");
   if (profile.role === "carrier" || profile.role === "broker" || profile.role === "customer") {
     redirect("/dashboard");
   }

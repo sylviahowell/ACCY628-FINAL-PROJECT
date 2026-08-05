@@ -1,4 +1,3 @@
-import Link from "next/link";
 import { Suspense, type ReactNode } from "react";
 import {
   AlertTriangle,
@@ -26,10 +25,133 @@ import { GlobalSearch } from "@/components/GlobalSearch";
 import { signOut } from "@/lib/actions/auth";
 import { demoRoleLabel } from "@/lib/demo-mode";
 import { searchPlaceholderForRole } from "@/lib/portal-scope";
+import { createClient } from "@/lib/supabase/server";
 import type { Profile } from "@/lib/types";
 import { ROLE_LABELS, ROLE_PORTAL_BLURB } from "@/lib/roles";
 
-function navFor(role: Profile["role"]): { primary: ShellNavItem[]; more: ShellNavItem[] } {
+type ShipNavCounts = {
+  delayed: number;
+  unassigned: number;
+  ready: number;
+};
+
+type InvoiceNavCounts = {
+  ready: number;
+  overdue: number;
+  open: number;
+};
+
+type ProfitNavCounts = {
+  losses: number;
+  lowMargin: number;
+};
+
+async function loadManagerShipCounts(): Promise<ShipNavCounts> {
+  const supabase = await createClient();
+  const today = new Date().toISOString().slice(0, 10);
+
+  const { data: ships } = await supabase
+    .from("shipments")
+    .select("id, status, carrier_id, promised_delivery_date");
+
+  const rows = ships ?? [];
+  let delayed = 0;
+  let unassigned = 0;
+
+  for (const s of rows) {
+    const closed = ["delivered", "completed", "cancelled"].includes(s.status);
+    if (
+      s.promised_delivery_date &&
+      s.promised_delivery_date < today &&
+      !closed
+    ) {
+      delayed += 1;
+    }
+    if (!s.carrier_id && !closed) {
+      unassigned += 1;
+    }
+  }
+
+  const deliveredIds = rows
+    .filter((s) => ["delivered", "completed"].includes(s.status))
+    .map((s) => s.id);
+
+  let ready = 0;
+  if (deliveredIds.length) {
+    const [{ data: pods }, { data: invoices }] = await Promise.all([
+      supabase.from("proof_of_delivery").select("shipment_id").in("shipment_id", deliveredIds),
+      supabase
+        .from("invoices")
+        .select("shipment_id, status")
+        .in("shipment_id", deliveredIds),
+    ]);
+    const podSet = new Set((pods ?? []).map((p) => p.shipment_id));
+    const billedSet = new Set(
+      (invoices ?? [])
+        .filter((i) => i.status !== "cancelled" && i.shipment_id)
+        .map((i) => i.shipment_id as string),
+    );
+    ready = deliveredIds.filter((id) => podSet.has(id) && !billedSet.has(id)).length;
+  }
+
+  return { delayed, unassigned, ready };
+}
+
+async function loadManagerInvoiceCounts(readyFromShips: number): Promise<InvoiceNavCounts> {
+  const supabase = await createClient();
+  const today = new Date().toISOString().slice(0, 10);
+
+  const { data: invoices } = await supabase
+    .from("invoices")
+    .select("id, status, total, amount_paid, due_date");
+
+  let overdue = 0;
+  let open = 0;
+  for (const inv of invoices ?? []) {
+    if (["paid", "cancelled"].includes(inv.status)) continue;
+    const balance = Number(inv.total) - Number(inv.amount_paid);
+    if (balance <= 0) continue;
+    open += 1;
+    if (inv.due_date && inv.due_date < today) overdue += 1;
+  }
+
+  return {
+    ready: readyFromShips,
+    overdue,
+    open,
+  };
+}
+
+async function loadManagerProfitCounts(): Promise<ProfitNavCounts> {
+  const supabase = await createClient();
+  const { data } = await supabase
+    .from("shipment_profitability")
+    .select("margin, customer_rate, billable_accessorials, discount_amount");
+
+  let losses = 0;
+  let lowMargin = 0;
+  for (const p of data ?? []) {
+    const billable = Number(p.billable_accessorials);
+    const discount = Number(p.discount_amount || 0);
+    const revenue = Number(p.customer_rate) + billable - discount;
+    const margin = Number(p.margin);
+    if (margin < 0 || revenue <= 0) {
+      losses += 1;
+      continue;
+    }
+    const pct = (margin / revenue) * 100;
+    if (pct >= 0 && pct < 12) lowMargin += 1;
+  }
+
+  return { losses, lowMargin };
+}
+
+function navFor(
+  role: Profile["role"],
+  shipCounts?: ShipNavCounts | null,
+  invCounts?: InvoiceNavCounts | null,
+  profitCounts?: ProfitNavCounts | null,
+): { primary: ShellNavItem[]; more: ShellNavItem[] } {
   const i = (node: ReactNode) => node;
   const settings: ShellNavItem = {
     href: "/settings",
@@ -38,16 +160,59 @@ function navFor(role: Profile["role"]): { primary: ShellNavItem[]; more: ShellNa
   };
 
   switch (role) {
-    case "manager":
+    case "manager": {
+      const c = shipCounts ?? { delayed: 0, unassigned: 0, ready: 0 };
+      const inv = invCounts ?? { ready: 0, overdue: 0, open: 0 };
+      const pr = profitCounts ?? { losses: 0, lowMargin: 0 };
       return {
         primary: [
           { href: "/dashboard", label: "Executive Dashboard", icon: i(<LayoutDashboard className="h-4 w-4" />) },
           { href: "/warnings", label: "Warnings", icon: i(<AlertTriangle className="h-4 w-4" />) },
           { href: "/approvals", label: "Approvals", icon: i(<CheckSquare className="h-4 w-4" />) },
-          { href: "/shipments", label: "Shipments", icon: i(<Package className="h-4 w-4" />) },
-          { href: "/invoices", label: "Invoices", icon: i(<FileText className="h-4 w-4" />) },
+          {
+            href: "/shipments",
+            label: "Shipments",
+            icon: i(<Package className="h-4 w-4" />),
+            children: [
+              { href: "/shipments?status=delayed", label: "Delayed", count: c.delayed },
+              { href: "/shipments?status=unassigned", label: "Needs coverage", count: c.unassigned },
+              { href: "/shipments?status=ready", label: "Ready to bill", count: c.ready },
+              { href: "/shipments", label: "All loads" },
+            ],
+          },
+          {
+            href: "/invoices",
+            label: "Invoices",
+            icon: i(<FileText className="h-4 w-4" />),
+            children: [
+              { href: "/invoices?status=ready", label: "Ready to bill", count: inv.ready },
+              { href: "/invoices?status=overdue", label: "Overdue", count: inv.overdue },
+              { href: "/invoices?status=open", label: "Outstanding", count: inv.open },
+              { href: "/invoices", label: "All invoices" },
+            ],
+          },
           { href: "/ar", label: "Accounts Receivable", icon: i(<BarChart3 className="h-4 w-4" />) },
-          { href: "/profitability", label: "Profitability", icon: i(<LineChart className="h-4 w-4" />) },
+          {
+            href: "/profitability",
+            label: "Profitability",
+            icon: i(<LineChart className="h-4 w-4" />),
+            children: [
+              {
+                href: "/profitability?band=unprofitable&dim=shipment&focus=margin-leaderboard",
+                label: "Loss loads",
+                count: pr.losses,
+              },
+              {
+                href: "/profitability?band=low&dim=shipment&focus=margin-leaderboard",
+                label: "Low margin",
+                count: pr.lowMargin,
+              },
+              {
+                href: "/profitability?focus=margin-leaderboard",
+                label: "Overview",
+              },
+            ],
+          },
           settings,
         ],
         more: [
@@ -59,6 +224,7 @@ function navFor(role: Profile["role"]): { primary: ShellNavItem[]; more: ShellNa
           { href: "/accounting", label: "Accounting", icon: i(<ClipboardList className="h-4 w-4" />) },
         ],
       };
+    }
     case "broker":
       return {
         primary: [
@@ -122,7 +288,7 @@ function navFor(role: Profile["role"]): { primary: ShellNavItem[]; more: ShellNa
   }
 }
 
-export function AppShell({
+export async function AppShell({
   profile,
   isDemoMode,
   children,
@@ -131,7 +297,13 @@ export function AppShell({
   isDemoMode: boolean;
   children: React.ReactNode;
 }) {
-  const { primary, more } = navFor(profile.role);
+  const shipCounts = profile.role === "manager" ? await loadManagerShipCounts() : null;
+  const invCounts =
+    profile.role === "manager" && shipCounts
+      ? await loadManagerInvoiceCounts(shipCounts.ready)
+      : null;
+  const profitCounts = profile.role === "manager" ? await loadManagerProfitCounts() : null;
+  const { primary, more } = navFor(profile.role, shipCounts, invCounts, profitCounts);
   const showDemoSelector = isDemoMode;
   const roleDisplay = showDemoSelector
     ? demoRoleLabel(profile.role)

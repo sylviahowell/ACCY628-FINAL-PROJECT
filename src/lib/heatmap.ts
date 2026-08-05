@@ -23,6 +23,27 @@ export function marginBand(marginPct: number, revenue: number): MarginBand {
   return "Unprofitable";
 }
 
+export function parseBandParam(param: string | null | undefined): MarginBand | null {
+  if (param === "unprofitable") return "Unprofitable";
+  if (param === "low") return "Low Margin";
+  if (param === "acceptable") return "Acceptable";
+  if (param === "strong") return "Strong Profit";
+  return null;
+}
+
+export function parseDimParam(param: string | null | undefined): HeatDimension | null {
+  if (
+    param === "customer" ||
+    param === "lane" ||
+    param === "carrier" ||
+    param === "month" ||
+    param === "shipment"
+  ) {
+    return param;
+  }
+  return null;
+}
+
 export function bandClasses(band: MarginBand) {
   switch (band) {
     case "Strong Profit":

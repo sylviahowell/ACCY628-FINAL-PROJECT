@@ -50,8 +50,8 @@ export function FreightLoginHero() {
         </div>
       </div>
 
-      {/* Snapshot + disclaimer — centered, ~90% width so it floats over the hero */}
-      <div className="relative z-20 mt-5 ml-0 mr-auto w-[90%] max-w-none shrink-0 sm:mt-6 sm:w-[91%] lg:w-[92%]">
+      {/* Snapshot + disclaimer — full width of hero column for readable metrics */}
+      <div className="relative z-20 mt-5 mr-auto w-full max-w-3xl shrink-0 sm:mt-6">
         <DemoSnapshot />
 
         <p className="mt-1.5 flex items-start gap-1.5 text-[10px] font-normal leading-[1.2] sm:mt-2">

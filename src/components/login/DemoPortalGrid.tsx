@@ -1,3 +1,6 @@
+"use client";
+
+import { useState, useTransition } from "react";
 import {
   Briefcase,
   Building2,
@@ -5,6 +8,10 @@ import {
   Headphones,
   Truck,
 } from "lucide-react";
+import { isRedirectError } from "next/dist/client/components/redirect-error";
+import { enterDemoMode } from "@/lib/actions/auth";
+import { DEMO_MODE_STORAGE_KEY, DEMO_ROLE_STORAGE_KEY } from "@/lib/demo-mode";
+import type { UserRole } from "@/lib/types";
 import { DemoPortalCard, type PortalCardVisual } from "@/components/login/DemoPortalCard";
 
 /** Icons ~20% larger than prior h-5 (20px) → h-6 (24px) */
@@ -59,6 +66,32 @@ const PORTALS: PortalCardVisual[] = [
 ];
 
 export function DemoPortalGrid() {
+  const [pending, startTransition] = useTransition();
+  const [activeRole, setActiveRole] = useState<UserRole | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  function onSelect(role: UserRole) {
+    if (pending) return;
+    setError(null);
+    setActiveRole(role);
+    try {
+      sessionStorage.setItem(DEMO_MODE_STORAGE_KEY, "1");
+      sessionStorage.setItem(DEMO_ROLE_STORAGE_KEY, role);
+    } catch {
+      /* ignore */
+    }
+    startTransition(async () => {
+      try {
+        await enterDemoMode(role);
+      } catch (e) {
+        // redirect() throws; must not treat as a UI error
+        if (isRedirectError(e)) throw e;
+        setActiveRole(null);
+        setError(e instanceof Error ? e.message : "Demo sign-in failed");
+      }
+    });
+  }
+
   return (
     <div>
       <h3 className="text-[13px] font-semibold text-[#0A1F3D]">Explore Demo Portals</h3>
@@ -66,9 +99,20 @@ export function DemoPortalGrid() {
         Choose any role to enter Demo Mode. You can switch perspectives at any time from the
         role selector inside the application.
       </p>
-      <div className="login-portal-grid mt-2.5">
+      {error ? (
+        <p className="mt-2 rounded-lg border border-error/30 bg-error/10 px-2.5 py-1.5 text-[11px] text-error">
+          {error}
+        </p>
+      ) : null}
+      <div className="login-portal-grid mt-2.5" aria-busy={pending || undefined}>
         {PORTALS.map((visual) => (
-          <DemoPortalCard key={visual.role} visual={visual} />
+          <DemoPortalCard
+            key={visual.role}
+            visual={visual}
+            disabled={pending}
+            pending={pending && activeRole === visual.role}
+            onSelect={onSelect}
+          />
         ))}
       </div>
     </div>

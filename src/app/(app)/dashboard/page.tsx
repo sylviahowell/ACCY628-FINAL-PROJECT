@@ -44,45 +44,58 @@ export default async function DashboardPage() {
   const supabase = await createClient();
   const today = new Date().toISOString().slice(0, 10);
 
-  const { data: shipments } = await supabase
-    .from("shipments")
-    .select(
-      "id, load_number, status, customer_rate, carrier_cost, delivery_date, pickup_date, promised_delivery_date, created_at, created_by, carrier_id, customer_id, origin_city, origin_state, dest_city, dest_state, pickup_location, delivery_location, freight_type, customers(name), carriers(name)",
-    );
-  const { data: invoices } = await supabase
-    .from("invoices")
-    .select("id, invoice_number, status, total, amount_paid, due_date, issue_date, shipment_id, customer_id, customers(name)");
-  const { data: profit } = await supabase.from("shipment_profitability").select("*");
-  const { data: customers } = await supabase.from("customers").select("id, name");
-  const { data: carriers } = await supabase
-    .from("carriers")
-    .select("id, name, rating, insurance_expiration, equipment_type, service_area");
-  const { data: payments } = await supabase
-    .from("payments")
-    .select("amount, payment_date");
-  const { data: disputes } = await supabase
-    .from("disputes")
-    .select("id, reason, amount_disputed, status, invoice_id, customer_id");
-  const { data: approvals } = await supabase
-    .from("approval_requests")
-    .select("*")
-    .eq("status", "pending");
-  const { data: pods } = await supabase
-    .from("proof_of_delivery")
-    .select("id, shipment_id, delivered_at, signed_by");
-  const { data: charges } = await supabase
-    .from("shipment_charges")
-    .select("id, shipment_id, amount, approval_status, description");
-  const { data: contracts } = await supabase
-    .from("contracts")
-    .select("id, contract_number, end_date, status, customers(name)");
-  const { data: collectionNotes } =
+  const [
+    { data: shipments },
+    { data: invoices },
+    { data: profit },
+    { data: customers },
+    { data: carriers },
+    { data: payments },
+    { data: disputes },
+    { data: approvals },
+    { data: pods },
+    { data: charges },
+    { data: contracts },
+    { data: collectionNotes },
+  ] = await Promise.all([
+    supabase
+      .from("shipments")
+      .select(
+        "id, load_number, status, customer_rate, carrier_cost, delivery_date, pickup_date, promised_delivery_date, created_at, created_by, carrier_id, customer_id, origin_city, origin_state, dest_city, dest_state, pickup_location, delivery_location, freight_type, customers(name), carriers(name)",
+      ),
+    supabase
+      .from("invoices")
+      .select(
+        "id, invoice_number, status, total, amount_paid, due_date, issue_date, shipment_id, customer_id, customers(name)",
+      ),
+    supabase.from("shipment_profitability").select("*"),
+    supabase.from("customers").select("id, name"),
+    supabase
+      .from("carriers")
+      .select("id, name, rating, insurance_expiration, equipment_type, service_area"),
+    supabase.from("payments").select("amount, payment_date"),
+    supabase
+      .from("disputes")
+      .select("id, reason, amount_disputed, status, invoice_id, customer_id"),
+    supabase.from("approval_requests").select("*").eq("status", "pending"),
+    supabase
+      .from("proof_of_delivery")
+      .select("id, shipment_id, delivered_at, signed_by"),
+    supabase
+      .from("shipment_charges")
+      .select("id, shipment_id, amount, approval_status, description"),
+    supabase
+      .from("contracts")
+      .select("id, contract_number, end_date, status, customers(name)"),
     profile.role === "billing" || profile.role === "manager"
-      ? await supabase
+      ? supabase
           .from("collection_notes")
           .select("invoice_id, note, created_at")
           .order("created_at", { ascending: false })
-      : { data: [] as { invoice_id: string; note: string; created_at: string }[] };
+      : Promise.resolve({
+          data: [] as { invoice_id: string; note: string; created_at: string }[],
+        }),
+  ]);
 
   const customerName = new Map((customers ?? []).map((c) => [c.id, c.name]));
   let shipList = shipments ?? [];

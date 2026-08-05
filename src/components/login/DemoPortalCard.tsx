@@ -1,5 +1,5 @@
 import type { ReactNode } from "react";
-import { enterDemoMode } from "@/lib/actions/auth";
+import { Loader2 } from "lucide-react";
 import { DEMO_USERS, type UserRole } from "@/lib/types";
 
 export type PortalCardVisual = {
@@ -21,37 +21,59 @@ export function demoEmailForRole(role: UserRole): string {
   return user.email;
 }
 
-export function DemoPortalCard({ visual }: { visual: PortalCardVisual }) {
+export function DemoPortalCard({
+  visual,
+  disabled,
+  pending,
+  onSelect,
+}: {
+  visual: PortalCardVisual;
+  disabled?: boolean;
+  pending?: boolean;
+  onSelect: (role: UserRole) => void;
+}) {
   return (
-    <form action={enterDemoMode.bind(null, visual.role)} className="min-w-0">
-      <button
-        type="submit"
-        className={`login-portal-card group flex h-[148px] w-full flex-col items-center overflow-hidden rounded-[12px] border border-[#E2EAF3] px-1.5 pt-2.5 text-center focus:outline-none focus-visible:ring-2 focus-visible:ring-[#0866D9] focus-visible:ring-offset-2 ${visual.tint}`}
-      >
-        {/* Fixed icon slot — identical height/position on every card */}
-        <span className="flex h-9 w-full shrink-0 items-center justify-center" aria-hidden>
-          <span className={`inline-flex h-9 w-9 items-center justify-center rounded-lg ${visual.iconWrap}`}>
-            {visual.icon}
+    <button
+      type="button"
+      disabled={disabled}
+      onClick={() => onSelect(visual.role)}
+      aria-busy={pending || undefined}
+      className={`login-portal-card group relative flex h-[148px] w-full flex-col items-center overflow-hidden rounded-[12px] border border-[#E2EAF3] px-1.5 pt-2.5 text-center focus:outline-none focus-visible:ring-2 focus-visible:ring-[#0866D9] focus-visible:ring-offset-2 disabled:cursor-wait disabled:opacity-60 ${visual.tint}`}
+    >
+      {pending ? (
+        <span className="absolute inset-0 z-10 flex flex-col items-center justify-center gap-1.5 bg-white/80 text-[#0866D9]">
+          <Loader2 className="h-5 w-5 animate-spin" aria-hidden />
+          <span className="text-[10px] font-semibold tracking-wide uppercase">
+            Signing in…
           </span>
         </span>
+      ) : null}
 
-        {/* Fixed title slot */}
-        <span className="mt-2 flex h-[28px] w-full shrink-0 items-start justify-center px-0.5 text-[11px] font-bold leading-[14px] text-[#0A1F3D]">
-          <span className="text-center">
-            {visual.titleLines[0]}
-            <br />
-            {visual.titleLines[1]}
-          </span>
+      {/* Fixed icon slot — identical height/position on every card */}
+      <span className="flex h-9 w-full shrink-0 items-center justify-center" aria-hidden>
+        <span
+          className={`inline-flex h-9 w-9 items-center justify-center rounded-lg ${visual.iconWrap}`}
+        >
+          {visual.icon}
         </span>
+      </span>
 
-        {/* Fixed description slot */}
-        <span className="mt-1.5 flex h-[32px] w-full flex-1 items-start justify-center px-0.5 text-[9px] font-normal leading-[11px] text-[#7A8BA0]">
-          <span className="line-clamp-3 text-center">{visual.description}</span>
+      {/* Fixed title slot */}
+      <span className="mt-2 flex h-[28px] w-full shrink-0 items-start justify-center px-0.5 text-[11px] font-bold leading-[14px] text-[#0A1F3D]">
+        <span className="text-center">
+          {visual.titleLines[0]}
+          <br />
+          {visual.titleLines[1]}
         </span>
+      </span>
 
-        {/* Exact 4px accent bar */}
-        <span className={`portal-bar mt-auto block w-full shrink-0 ${visual.bar}`} aria-hidden />
-      </button>
-    </form>
+      {/* Fixed description slot */}
+      <span className="mt-1.5 flex h-[32px] w-full flex-1 items-start justify-center px-0.5 text-[9px] font-normal leading-[11px] text-[#7A8BA0]">
+        <span className="line-clamp-3 text-center">{visual.description}</span>
+      </span>
+
+      {/* Exact 4px accent bar */}
+      <span className={`portal-bar mt-auto block w-full shrink-0 ${visual.bar}`} aria-hidden />
+    </button>
   );
 }

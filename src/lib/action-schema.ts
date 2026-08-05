@@ -2,7 +2,14 @@ import { z } from "zod";
 
 /** Shared Zod helpers for freight server actions. */
 
-export const uuidSchema = z.string().uuid("Invalid id");
+/** UUID-shaped ids (accepts demo seed ids that are not strict RFC-4122 variants). */
+export const uuidSchema = z
+  .string()
+  .trim()
+  .regex(
+    /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i,
+    "Invalid id",
+  );
 
 export const optionalUuid = z
   .string()

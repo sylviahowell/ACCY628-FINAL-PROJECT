@@ -1,5 +1,7 @@
 "use server";
 
+import { mkdir, writeFile } from "fs/promises";
+import path from "path";
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
@@ -16,6 +18,50 @@ import { logEvent } from "@/lib/log-event";
 import { insuranceRiskStatus } from "@/lib/risk-credit";
 import { payableAmount } from "@/lib/payables";
 import { z } from "zod";
+
+const POD_MAX_BYTES = 8 * 1024 * 1024;
+const POD_MIME = new Set([
+  "application/pdf",
+  "image/jpeg",
+  "image/png",
+  "image/webp",
+]);
+
+function safePodFileName(name: string) {
+  const base = name.replace(/[^a-zA-Z0-9._-]+/g, "_").replace(/_+/g, "_");
+  return (base || "pod").slice(0, 80);
+}
+
+async function persistPodFile(shipmentId: string, file: File, supabase: Awaited<ReturnType<typeof createClient>>) {
+  if (file.size <= 0) {
+    throw new Error("Choose a signed BOL or POD file to upload.");
+  }
+  if (file.size > POD_MAX_BYTES) {
+    throw new Error("POD file must be 8 MB or smaller.");
+  }
+  if (!POD_MIME.has(file.type)) {
+    throw new Error("POD must be a PDF or image (JPEG, PNG, or WebP).");
+  }
+
+  const bytes = Buffer.from(await file.arrayBuffer());
+  const filename = `${Date.now()}-${safePodFileName(file.name)}`;
+  const objectPath = `${shipmentId}/${filename}`;
+
+  const { error: uploadError } = await supabase.storage.from("pods").upload(objectPath, bytes, {
+    contentType: file.type,
+    upsert: false,
+  });
+
+  if (!uploadError) {
+    const { data } = supabase.storage.from("pods").getPublicUrl(objectPath);
+    if (data.publicUrl) return data.publicUrl;
+  }
+
+  const dir = path.join(process.cwd(), "public", "pod-uploads", shipmentId);
+  await mkdir(dir, { recursive: true });
+  await writeFile(path.join(dir, filename), bytes);
+  return `/pod-uploads/${shipmentId}/${filename}`;
+}
 
 /** Hard-block assigning a carrier whose insurance certificate is expired. */
 async function assertCarrierInsuranceCurrent(carrierId: string) {
@@ -447,17 +493,27 @@ export async function uploadPod(formData: FormData) {
   const input = parseForm(
     z.object({
       shipment_id: uuidSchema,
-      file_url: z.string().trim().optional(),
       notes: z.string().trim().max(2000).optional(),
-      signed_by: z.string().trim().max(200).optional(),
+      signed_by: nonEmptyString("Receiver name", 200),
+      replace: z.boolean(),
     }),
     {
       shipment_id: formString(formData, "shipment_id"),
-      file_url: formString(formData, "file_url") || undefined,
       notes: formString(formData, "notes") || undefined,
-      signed_by: formString(formData, "signed_by") || undefined,
+      signed_by: formString(formData, "signed_by"),
+      replace: formData.get("replace") === "1",
     },
   );
+
+  const rawFile = formData.get("pod_file");
+  if (!(rawFile instanceof File)) {
+    redirect(
+      toastErrorPath(
+        `/shipments/${input.shipment_id}#pod-upload`,
+        "Choose a signed BOL or POD file to upload.",
+      ),
+    );
+  }
 
   const supabase = await createClient();
   const { data: shipment, error: shipErr } = await supabase
@@ -486,12 +542,31 @@ export async function uploadPod(formData: FormData) {
     }
   }
 
+  let fileUrl: string;
+  try {
+    fileUrl = await persistPodFile(input.shipment_id, rawFile, supabase);
+  } catch (err) {
+    const message = err instanceof Error ? err.message : "POD upload failed.";
+    redirect(toastErrorPath(`/shipments/${input.shipment_id}#pod-upload`, message));
+  }
+
+  const fileMeta = `File: ${rawFile.name} (${Math.max(1, Math.round(rawFile.size / 1024))} KB)`;
+  const notes = input.notes ? `${input.notes}\n${fileMeta}` : fileMeta;
+
+  if (input.replace) {
+    const { error: delErr } = await supabase
+      .from("proof_of_delivery")
+      .delete()
+      .eq("shipment_id", input.shipment_id);
+    if (delErr) throw new Error(delErr.message);
+  }
+
   const { error } = await supabase.from("proof_of_delivery").insert({
     shipment_id: input.shipment_id,
     uploaded_by: profile.id,
-    file_url: input.file_url || "https://docs.rowanlane.com/pod/signed-bol.pdf",
-    notes: input.notes || null,
-    signed_by: input.signed_by || null,
+    file_url: fileUrl,
+    notes,
+    signed_by: input.signed_by,
     delivered_at: new Date().toISOString(),
   });
   if (error) throw new Error(error.message);
@@ -503,7 +578,12 @@ export async function uploadPod(formData: FormData) {
   revalidatePath("/invoices");
   revalidatePath("/documents");
   revalidatePath("/dashboard");
-  redirect(toastPath(`/shipments/${input.shipment_id}?pod=1`, "Proof of delivery saved"));
+  redirect(
+    toastPath(
+      `/shipments/${input.shipment_id}?pod=1`,
+      input.replace ? "Proof of delivery replaced" : "Proof of delivery saved",
+    ),
+  );
 }
 
 export async function requestAccessorial(formData: FormData) {

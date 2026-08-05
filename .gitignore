@@ -46,3 +46,8 @@ next-env.d.ts
 
 # local tooling
 .cursor/
+
+# uploaded proof-of-delivery files (keep folder via .gitkeep)
+/public/pod-uploads/**
+!/public/pod-uploads/.gitkeep
+

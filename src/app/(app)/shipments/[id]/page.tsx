@@ -11,10 +11,10 @@ import {
   generateInvoice,
   requestAccessorial,
   updateShipmentStatus,
-  uploadPod,
 } from "@/lib/actions/freight";
+import { PodUploadForm } from "@/components/PodUploadForm";
 import { buildC2CTimeline } from "@/lib/c2c-timeline";
-import { DEFAULT_POD_URL, normalizePodUrl, sanitizeDemoText } from "@/lib/display-text";
+import { normalizePodUrl, sanitizeDemoText } from "@/lib/display-text";
 import {
   customerFacingHealth,
   filterTimelineForAudience,
@@ -511,7 +511,12 @@ export default async function ShipmentDetailPage({
                       <div className="opacity-70">{sanitizeDemoText(p.notes)}</div>
                     ) : null}
                     {normalizePodUrl(p.file_url) ? (
-                      <a className="link" href={normalizePodUrl(p.file_url)!}>
+                      <a
+                        className="link"
+                        href={normalizePodUrl(p.file_url)!}
+                        target="_blank"
+                        rel="noreferrer"
+                      >
                         Open delivery document
                       </a>
                     ) : null}
@@ -521,21 +526,12 @@ export default async function ShipmentDetailPage({
             ) : (
               <p className="text-sm opacity-70">No POD on file yet — required before invoicing.</p>
             )}
-            {canOperate && !(pods ?? []).length ? (
-              <form action={uploadPod} className="mt-3 grid gap-2">
-                <input type="hidden" name="shipment_id" value={id} />
-                <input type="hidden" name="file_url" value={DEFAULT_POD_URL} />
-                <input
-                  name="signed_by"
-                  placeholder="Receiver name"
-                  className="input input-bordered input-sm"
-                  required
-                  defaultValue={profile.role === "carrier" ? "Consignee" : ""}
-                />
-                <button className="btn btn-success btn-sm">
-                  Attach signed BOL & confirm delivery
-                </button>
-              </form>
+            {canOperate ? (
+              <PodUploadForm
+                shipmentId={id}
+                defaultSignedBy={profile.role === "carrier" ? "Consignee" : ""}
+                replacing={(pods ?? []).length > 0}
+              />
             ) : null}
           </div>
         </div>

@@ -5,7 +5,6 @@ import {
 } from "@/components/ExecutivePanels";
 import { BillingInsightsPanel, UnbilledQueuePanel } from "@/components/BillingPanels";
 import { BrokerTaskBoard } from "@/components/BrokerTaskBoard";
-import { CarrierScorecardGrid } from "@/components/CarrierScorecards";
 import { CarrierTaskList } from "@/components/CarrierTaskList";
 import { CollectionsWorklist } from "@/components/CollectionsWorklist";
 import { PayablesWorklist } from "@/components/PayablesWorklist";
@@ -13,7 +12,6 @@ import { CustomerFriendlyStatusCard } from "@/components/ShipmentHealthCard";
 import { ProfitabilityHeatmap } from "@/components/ProfitabilityHeatmap";
 import { ShipmentMapLazy } from "@/components/ShipmentMapLazy";
 import { DecideNowRail, type DecideNowItem } from "@/components/DecideNowRail";
-import { StoryActionChips } from "@/components/StoryActionChips";
 import { HorizontalBars, MonthlyBars, StatusPie } from "@/components/Charts";
 import { requirePathAccess } from "@/lib/authz";
 import { bucketByMonth } from "@/lib/analytics";
@@ -34,6 +32,7 @@ import {
 import { toHeatRows } from "@/lib/heatmap";
 import { buildExecutiveKpis, inRange, monthBounds } from "@/lib/kpi";
 import { buildMorningBrief } from "@/lib/morning-brief";
+import { isActiveFinalInvoice } from "@/lib/invoice-helpers";
 import {
   buildCarrierTasks,
   customerFacingHealth,
@@ -68,6 +67,7 @@ export default async function DashboardPage() {
     { data: contracts },
     { data: collectionNotes },
     { data: carrierBills },
+    { data: coverageRequests },
   ] = await Promise.all([
     supabase
       .from("shipments")
@@ -113,8 +113,26 @@ export default async function DashboardPage() {
             "id, bill_number, status, total, amount_paid, due_date, shipment_id, carrier_id, carriers(name), shipments(load_number)",
           )
       : Promise.resolve({ data: [] as never[] }),
+    profile.role === "manager" || profile.role === "broker" || profile.role === "customer"
+      ? (() => {
+          let q = supabase
+            .from("coverage_requests")
+            .select(
+              "id, status, pickup_location, delivery_location, pickup_date, customer_id, customers(name)",
+            )
+            .eq("status", "pending")
+            .order("created_at", { ascending: true })
+            .limit(20);
+          if (profile.role === "customer" && profile.customer_id) {
+            q = q.eq("customer_id", profile.customer_id);
+          }
+          return q;
+        })()
+      : Promise.resolve({ data: [] as never[] }),
   ]);
 
+  const pendingCoverage = coverageRequests ?? [];
+  const pendingCoverageCount = pendingCoverage.length;
   const customerName = new Map((customers ?? []).map((c) => [c.id, c.name]));
   let shipList = shipments ?? [];
   let invList = invoices ?? [];
@@ -360,7 +378,7 @@ export default async function DashboardPage() {
 
     const podSet = new Set(podList.map((p) => p.shipment_id));
     const billedSet = new Set(
-      invList.filter((i) => i.status !== "cancelled" && i.shipment_id).map((i) => i.shipment_id),
+      invList.filter((i) => isActiveFinalInvoice(i) && i.shipment_id).map((i) => i.shipment_id),
     );
     const unbilledDelivered = shipList.filter(
       (s) =>
@@ -519,6 +537,17 @@ export default async function DashboardPage() {
     }
 
     const decideNowItems: DecideNowItem[] = [];
+    if (pendingCoverageCount > 0) {
+      decideNowItems.push({
+        id: "coverage",
+        title: "Coverage requests",
+        metric: String(pendingCoverageCount),
+        detail: "Shippers waiting for ops to book a load, then assign a carrier",
+        href: "/coverage",
+        tone: "warning",
+        cta: "Review",
+      });
+    }
     if (pendingApprovals.length > 0) {
       decideNowItems.push({
         id: "approvals",
@@ -608,6 +637,24 @@ export default async function DashboardPage() {
             </Link>
           }
         />
+        <div className="rounded-box border border-primary/20 bg-base-100 px-4 py-3 text-sm shadow-sm">
+          <p className="font-semibold">Shipper coverage process</p>
+          <ol className="mt-1 list-decimal space-y-0.5 pl-5 opacity-80">
+            <li>Shipper submits a coverage request (lane + dates).</li>
+            <li>Broker or manager books an unassigned load from the request.</li>
+            <li>Ops assigns a Preferred / Approved carrier from scorecards.</li>
+            <li>Shipper tracks the load on My Shipments.</li>
+          </ol>
+          {pendingCoverageCount > 0 ? (
+            <Link href="/coverage" className="btn btn-warning btn-sm mt-3">
+              {pendingCoverageCount} pending request{pendingCoverageCount === 1 ? "" : "s"}
+            </Link>
+          ) : (
+            <Link href="/coverage" className="link link-primary mt-2 inline-block text-xs">
+              Open coverage inbox →
+            </Link>
+          )}
+        </div>
         <DecideNowRail items={decideNowItems.slice(0, 5)} />
         <MorningBriefCard
           greeting={brief.greeting}
@@ -693,7 +740,6 @@ export default async function DashboardPage() {
       podShipmentIds: podSet,
     });
     const stats = brokerTaskStats(brokerTasks);
-    const inTransit = shipList.filter((s) => s.status === "in_transit");
 
     const profitMap = new Map(
       profitList.map((p) => [
@@ -773,12 +819,21 @@ export default async function DashboardPage() {
       });
 
     const watchActions = [
+      ...(pendingCoverageCount
+        ? [
+            {
+              title: `${pendingCoverageCount} shipper coverage request(s)`,
+              action: "Book a load from the request, then assign from scorecards",
+              href: "/coverage",
+            },
+          ]
+        : []),
       ...(stats.delayed
         ? [
             {
               title: `${stats.delayed} delayed load(s)`,
               action: "Call carriers for ETAs and notify customers",
-              href: "/warnings",
+              href: "/warnings?severity=critical",
             },
           ]
         : []),
@@ -787,7 +842,7 @@ export default async function DashboardPage() {
             {
               title: `${stats.unassigned} unassigned load(s)`,
               action: "Cover with a Preferred / Approved carrier from scorecards",
-              href: "/carriers",
+              href: "/shipments?filter=unassigned",
             },
           ]
         : []),
@@ -796,7 +851,7 @@ export default async function DashboardPage() {
             {
               title: `${stats.accessorial} accessorial(s) awaiting manager approval`,
               action: "Escalate to a manager — only managers can approve or reject",
-              href: "/warnings",
+              href: "/warnings?severity=info",
             },
           ]
         : []),
@@ -814,16 +869,38 @@ export default async function DashboardPage() {
     return (
       <div className="space-y-6">
         <Header
-          title="Operations Dashboard"
-          subtitle="Task board for coverage, delays, and daily freight work"
+          title="Broker Operations"
+          subtitle="Intake shipper requests, cover loads, clear delays, keep freight moving"
           action={
-            <Link href="/shipments/new" className="btn btn-primary btn-sm">
-              New shipment
-            </Link>
+            <div className="flex flex-wrap gap-2">
+              <Link href="/coverage" className="btn btn-outline btn-sm">
+                Coverage requests
+                {pendingCoverageCount > 0 ? (
+                  <span className="badge badge-warning badge-sm">{pendingCoverageCount}</span>
+                ) : null}
+              </Link>
+              <Link href="/shipments/new" className="btn btn-primary btn-sm">
+                New shipment
+              </Link>
+            </div>
           }
         />
-        <StoryActionChips role="broker" />
-        <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
+        <div className="rounded-box border border-primary/20 bg-base-100 px-4 py-3 text-sm shadow-sm">
+          <p className="font-semibold">Coverage process</p>
+          <ol className="mt-1 list-decimal space-y-0.5 pl-5 opacity-80">
+            <li>Shipper submits a coverage request (lane + dates).</li>
+            <li>You review and book an unassigned load from the request.</li>
+            <li>Assign a Preferred / Approved carrier from scorecards.</li>
+            <li>Shipper tracks the load on My Shipments.</li>
+          </ol>
+        </div>
+        <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-6">
+          <Stat
+            title="Coverage requests"
+            value={String(pendingCoverageCount)}
+            warn={pendingCoverageCount > 0}
+            href="/coverage"
+          />
           <Stat
             title="Today's pickups"
             value={String(stats.pickupsToday)}
@@ -847,31 +924,16 @@ export default async function DashboardPage() {
             href="/shipments?filter=delayed"
           />
           <Stat
-            title="Customer contact"
-            value={String(stats.customerContact)}
-            href="/warnings"
-          />
-          <Stat
-            title="Carrier follow-ups"
-            value={String(stats.carrierPending)}
-            href="/carriers"
-          />
-          <Stat
-            title="Accessorials to review"
+            title="Waiting on manager"
             value={String(stats.accessorial)}
-            href="/warnings"
-          />
-          <Stat
-            title="Contract deadlines"
-            value={String(stats.contracts)}
-            href="/contracts?filter=expiring"
+            href="/warnings?severity=info"
           />
         </div>
 
         {watchActions.length > 0 ? (
           <Panel title="Recommended actions">
             <ul className="space-y-2">
-              {watchActions.map((w, i) => (
+              {watchActions.slice(0, 3).map((w, i) => (
                 <li
                   key={`${w.href}-${w.title}-${i}`}
                   className="flex flex-wrap items-center justify-between gap-2 rounded-box border border-warning/30 bg-warning/10 px-3 py-2"
@@ -898,22 +960,16 @@ export default async function DashboardPage() {
 
         <BrokerTaskBoard tasks={brokerTasks} profileId={profile.id} today={today} />
         <ShipmentMapLazy shipments={mapShipments} today={today} />
-        <Panel title="In transit now">
-          <ShipmentList rows={inTransit} empty="Nothing in transit." />
-        </Panel>
-        <div>
-          <div className="mb-3 flex flex-wrap items-end justify-between gap-2">
-            <div>
-              <h2 className="text-lg font-bold">Carrier scorecards</h2>
-              <p className="text-sm opacity-70">
-                Performance tiers for coverage decisions. Full detail also on Carriers.
-              </p>
-            </div>
-            <Link href="/carriers" className="btn btn-outline btn-sm">
-              Open carriers
-            </Link>
+        <div className="flex flex-wrap items-center justify-between gap-3 rounded-box border border-base-300 bg-base-100 px-4 py-3">
+          <div>
+            <p className="font-semibold">Carrier scorecards</p>
+            <p className="text-sm opacity-70">
+              Prefer Preferred / Approved carriers; Suspended (expired insurance) are blocked.
+            </p>
           </div>
-          <CarrierScorecardGrid scorecards={scorecards.slice(0, 4)} showComparison />
+          <Link href="/carriers" className="btn btn-outline btn-sm">
+            Open carriers
+          </Link>
         </div>
       </div>
     );
@@ -940,7 +996,7 @@ export default async function DashboardPage() {
     const podSet = new Set(podList.map((p) => p.shipment_id));
     const billedSet = new Set(
       invList
-        .filter((i) => i.status !== "cancelled" && i.shipment_id)
+        .filter((i) => isActiveFinalInvoice(i) && i.shipment_id)
         .map((i) => i.shipment_id as string),
     );
     const { ready, awaitingDocs } = buildUnbilledQueues({
@@ -1032,7 +1088,6 @@ export default async function DashboardPage() {
             </div>
           }
         />
-        <StoryActionChips role="billing" />
         <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
           <Stat title="Total AR" value={money(ar)} href="/ar" />
           <Stat title="Current AR" value={money(aging.current)} href="/ar?filter=current" />
@@ -1179,6 +1234,12 @@ export default async function DashboardPage() {
     });
 
     const attention = [
+      ...pendingCoverage.slice(0, 2).map((r) => ({
+        key: `coverage-${r.id}`,
+        title: "Coverage request pending",
+        detail: `${r.pickup_location} → ${r.delivery_location}`,
+        href: "/coverage",
+      })),
       ...current
         .filter(
           (s) =>
@@ -1212,12 +1273,26 @@ export default async function DashboardPage() {
           title="My Dashboard"
           subtitle="Your shipments, deliveries, invoices, and balances — only your account"
           action={
-            <Link href="/warnings" className="btn btn-outline btn-sm">
-              My alerts
-            </Link>
+            <div className="flex flex-wrap gap-2">
+              <Link href="/coverage" className="btn btn-primary btn-sm">
+                Request coverage
+              </Link>
+              <Link href="/warnings" className="btn btn-outline btn-sm">
+                My alerts
+              </Link>
+            </div>
           }
         />
-        <StoryActionChips role="customer" />
+        <div className="rounded-box border border-primary/20 bg-base-100 px-4 py-3 text-sm shadow-sm">
+          <p className="font-semibold">Need a carrier?</p>
+          <p className="mt-1 opacity-80">
+            Submit a coverage request with your lane and dates. Broker Operations books the load,
+            assigns a carrier, then you track it on My Shipments.
+          </p>
+          <Link href="/coverage" className="btn btn-primary btn-sm mt-3">
+            Open request form
+          </Link>
+        </div>
         <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
           <Stat
             title="Current shipments"
@@ -1359,7 +1434,6 @@ export default async function DashboardPage() {
           </Link>
         }
       />
-      <StoryActionChips role="carrier" />
       <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
         <Stat
           title="Assigned loads"

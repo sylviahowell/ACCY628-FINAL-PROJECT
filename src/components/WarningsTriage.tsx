@@ -132,7 +132,7 @@ function WarningsBody({ alerts, filter }: { alerts: AppAlert[]; filter: Filter }
             <p className="mt-0.5 text-xs opacity-50">{a.action}</p>
           </div>
           <Link href={a.href} className="btn btn-primary btn-sm shrink-0" title={a.action}>
-            Resolve
+            {/escalat/i.test(a.action) ? "Escalate" : "Open"}
           </Link>
         </li>
       ))}

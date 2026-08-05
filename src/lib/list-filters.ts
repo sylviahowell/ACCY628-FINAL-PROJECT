@@ -31,8 +31,9 @@ export function shipmentFilterLabel(filter: string | undefined): string | null {
       return "POD-ready unbilled loads";
     case "awaiting-docs":
       return "delivered loads awaiting POD";
+    case "needs-pod":
     case "missing-pod":
-      return "completed loads still missing POD";
+      return "loads still missing POD";
     default:
       return null;
   }
@@ -111,6 +112,7 @@ export function filterShipments<T extends ShipmentFilterRow>(
           !billedSet.has(s.id),
       );
       break;
+    case "needs-pod":
     case "missing-pod":
       next = rows.filter(
         (s) => ["delivered", "completed"].includes(s.status) && !podSet.has(s.id),
@@ -141,7 +143,7 @@ function sortShipments<T extends ShipmentFilterRow>(
     copy.sort((a, b) => (a.pickup_date ?? "").localeCompare(b.pickup_date ?? ""));
     return copy;
   }
-  if (filter === "missing-pod" || filter === "awaiting-docs" || filter === "ready-to-bill") {
+  if (filter === "missing-pod" || filter === "awaiting-docs" || filter === "ready-to-bill" || filter === "needs-pod") {
     copy.sort((a, b) =>
       (b.delivery_date ?? "").localeCompare(a.delivery_date ?? ""),
     );

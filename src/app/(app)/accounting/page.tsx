@@ -7,6 +7,7 @@ import {
   type AccountingEntryType,
 } from "@/lib/accounting-entries";
 import { rollupAccountActivity } from "@/lib/chart-of-accounts";
+import { isActiveFinalInvoice } from "@/lib/invoice-helpers";
 import { requireRoles } from "@/lib/authz";
 import { createClient } from "@/lib/supabase/server";
 import { money, statusBadge } from "@/lib/types";
@@ -145,7 +146,7 @@ export default async function AccountingPage({
 
   const billedShipmentIds = new Set(
     (invoices ?? [])
-      .filter((i) => i.status !== "cancelled" && i.shipment_id)
+      .filter((i) => isActiveFinalInvoice(i) && i.shipment_id)
       .map((i) => i.shipment_id as string),
   );
   const podShipments = new Set((pods ?? []).map((p) => p.shipment_id));

@@ -13,6 +13,9 @@ export type ContractTermsInfo = {
   shipping_rates: string | null;
   status: string;
   renewal_option: boolean | null;
+  downpayment_pct?: number | null;
+  customer_rate_per_mile?: number | null;
+  carrier_rate_per_mile?: number | null;
 };
 
 /** Parse "Net 30", "net-15", "NET45" → days. Defaults to 30. */

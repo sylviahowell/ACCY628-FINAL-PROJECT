@@ -231,10 +231,10 @@ export function buildBrokerTasks(input: {
       deadline: null,
       status: "pending_accessorial",
       priority: Number(c.amount) >= 250 ? "high" : "medium",
-      action: `Review accessorial: ${c.description} ($${Number(c.amount).toFixed(0)})`,
+      action: `Waiting on manager — ${c.description} ($${Number(c.amount).toFixed(0)})`,
       category: "accessorial",
       createdBy: s.created_by,
-      href: "/approvals",
+      href: `/shipments/${s.id}`,
     });
   }
 
@@ -245,7 +245,7 @@ export function buildBrokerTasks(input: {
         new Date(today + "T00:00:00Z").getTime()) /
         (1000 * 60 * 60 * 24),
     );
-    if (days >= 0 && days <= 45) {
+    if (days >= 0 && days <= 30) {
       tasks.push({
         id: `ctr-${ct.id}`,
         shipmentId: "",

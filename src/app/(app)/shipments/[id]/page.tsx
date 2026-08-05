@@ -8,19 +8,24 @@ import {
 import { requirePathAccess } from "@/lib/authz";
 import {
   assignCarrier,
+  cancelShipment,
+  generateCarrierBill,
   generateInvoice,
+  logDelayUpdate,
   requestAccessorial,
   updateShipmentStatus,
 } from "@/lib/actions/freight";
 import { PodUploadForm } from "@/components/PodUploadForm";
 import { buildC2CTimeline } from "@/lib/c2c-timeline";
 import { normalizePodUrl, sanitizeDemoText } from "@/lib/display-text";
+import { isActiveFinalInvoice, isDepositInvoice } from "@/lib/invoice-helpers";
 import {
   customerFacingHealth,
   filterTimelineForAudience,
 } from "@/lib/portal-views";
 import { canManageBilling } from "@/lib/roles";
 import { insuranceRiskStatus } from "@/lib/risk-credit";
+import { buildCarrierScorecards, suggestCarriersForLoad, tierBadge } from "@/lib/carrier-scorecard";
 import { isControlOverrideNote } from "@/lib/control-activity";
 import { computeShipmentHealth } from "@/lib/shipment-health";
 import { createClient } from "@/lib/supabase/server";
@@ -47,6 +52,13 @@ export default async function ShipmentDetailPage({
     .maybeSingle();
   if (!s) notFound();
 
+  if (isCustomer) {
+    if (!profile.customer_id || s.customer_id !== profile.customer_id) notFound();
+  }
+  if (isCarrier) {
+    if (!profile.carrier_id || s.carrier_id !== profile.carrier_id) notFound();
+  }
+
   const { data: profit } = showInternalFinance
     ? await supabase.from("shipment_profitability").select("*").eq("shipment_id", id).maybeSingle()
     : { data: null };
@@ -67,6 +79,13 @@ export default async function ShipmentDetailPage({
     isCarrier
       ? { data: [] as { id: string; invoice_number: string; status: string; amount_paid: number; total: number; created_at: string; due_date: string }[] }
       : await supabase.from("invoices").select("*").eq("shipment_id", id);
+  const { data: carrierBills } = canManageBilling(profile.role)
+    ? await supabase
+        .from("carrier_bills")
+        .select("id, bill_number, status")
+        .eq("shipment_id", id)
+        .neq("status", "cancelled")
+    : { data: [] as { id: string; bill_number: string; status: string }[] };
   const invoiceIds = (invoices ?? []).map((inv) => inv.id);
   const { data: disputes } =
     invoiceIds.length > 0
@@ -78,9 +97,18 @@ export default async function ShipmentDetailPage({
   const { data: allCarriers } = isOperations(profile.role)
     ? await supabase
         .from("carriers")
-        .select("id, name, insurance_expiration")
+        .select("id, name, insurance_expiration, equipment_type, service_area, rating")
         .order("name")
-    : { data: [] as { id: string; name: string; insurance_expiration: string | null }[] };
+    : {
+        data: [] as {
+          id: string;
+          name: string;
+          insurance_expiration: string | null;
+          equipment_type: string | null;
+          service_area: string | null;
+          rating: number | null;
+        }[],
+      };
 
   const today = new Date().toISOString().slice(0, 10);
 
@@ -111,8 +139,13 @@ export default async function ShipmentDetailPage({
   const pendingAccessorials = (charges ?? []).filter(
     (c) => c.approval_status === "pending",
   ).length;
-  const primaryInvoice = (invoices ?? []).find((inv) => inv.status !== "cancelled") ?? null;
-  const billed = Boolean(primaryInvoice);
+  const finalInvoices = (invoices ?? []).filter((inv) => isActiveFinalInvoice(inv));
+  const depositInvoices = (invoices ?? []).filter(
+    (inv) => inv.status !== "cancelled" && isDepositInvoice(inv),
+  );
+  const primaryInvoice = finalInvoices[0] ?? depositInvoices[0] ?? null;
+  const billed = finalInvoices.length > 0;
+  const hasCarrierBill = (carrierBills ?? []).length > 0;
   let daysSinceDeliveryUnbilled: number | null = null;
   if (["delivered", "completed"].includes(s.status) && !billed && s.delivery_date) {
     daysSinceDeliveryUnbilled = Math.floor(
@@ -188,21 +221,92 @@ export default async function ShipmentDetailPage({
     !["delivered", "completed", "cancelled"].includes(s.status);
   const showCharges =
     showInternalFinance || isCarrier || (isCustomer && (charges ?? []).some((c) => c.billable_to_customer));
+  const isDelayed =
+    Boolean(s.promised_delivery_date) &&
+    (s.promised_delivery_date as string) < today &&
+    !["delivered", "completed", "cancelled"].includes(s.status);
 
-  let nextAction: { label: string; href?: string; form?: "invoice" | "pod" | "assign" } | null =
-    null;
+  let suggestedCarriers: ReturnType<typeof suggestCarriersForLoad> = [];
+  if (canAssign && (allCarriers ?? []).length) {
+    const [{ data: networkShips }, { data: networkPods }, { data: networkProfit }, { data: networkCharges }] =
+      await Promise.all([
+        supabase
+          .from("shipments")
+          .select(
+            "id, carrier_id, status, pickup_date, delivery_date, promised_delivery_date, carrier_cost, customer_rate",
+          ),
+        supabase.from("proof_of_delivery").select("shipment_id"),
+        supabase.from("shipment_profitability").select("shipment_id, margin, carrier_cost"),
+        supabase.from("shipment_charges").select("shipment_id"),
+      ]);
+    const profitMap = new Map(
+      (networkProfit ?? []).map((p) => [
+        p.shipment_id as string,
+        { margin: Number(p.margin), carrier_cost: Number(p.carrier_cost) },
+      ]),
+    );
+    const chargeCount = new Map<string, number>();
+    for (const ch of networkCharges ?? []) {
+      chargeCount.set(ch.shipment_id, (chargeCount.get(ch.shipment_id) ?? 0) + 1);
+    }
+    const scorecards = buildCarrierScorecards({
+      carriers: (allCarriers ?? []).map((c) => ({
+        id: c.id,
+        name: c.name,
+        equipment_type: c.equipment_type ?? null,
+        service_area: c.service_area ?? null,
+        rating: c.rating == null ? null : Number(c.rating),
+        insurance_expiration: c.insurance_expiration ?? null,
+      })),
+      shipments: (networkShips ?? []).map((row) => ({
+        id: row.id,
+        carrier_id: row.carrier_id,
+        status: row.status,
+        pickup_date: row.pickup_date,
+        delivery_date: row.delivery_date,
+        promised_delivery_date: row.promised_delivery_date,
+        carrier_cost: Number(row.carrier_cost),
+        customer_rate: Number(row.customer_rate),
+      })),
+      profitByShipment: profitMap,
+      podShipmentIds: new Set((networkPods ?? []).map((p) => p.shipment_id)),
+      chargesByShipment: chargeCount,
+      today,
+    });
+    suggestedCarriers = suggestCarriersForLoad(scorecards, {
+      equipmentHint: s.freight_type,
+      preferLowCost: true,
+    }).filter((c) => assignableCarriers.some((a) => a.id === c.carrierId));
+  }
+
+  let nextAction: {
+    label: string;
+    href?: string;
+    form?: "invoice" | "pod" | "assign" | "carrier_bill";
+  } | null = null;
   if (canAssign && !s.carrier_id) {
     nextAction = { label: "Assign a carrier to cover this load", form: "assign" };
   } else if (canOperate && ["delivered", "completed"].includes(s.status) && !hasPod) {
     nextAction = { label: "Confirm delivery and attach proof of delivery", form: "pod" };
   } else if (canBill && ["delivered", "completed"].includes(s.status) && hasPod && !billed) {
     nextAction = { label: "Generate customer invoice — POD is on file", form: "invoice" };
+  } else if (
+    canBill &&
+    ["delivered", "completed"].includes(s.status) &&
+    hasPod &&
+    s.carrier_id &&
+    !hasCarrierBill
+  ) {
+    nextAction = {
+      label: "Ready for carrier bill — create AP payable",
+      form: "carrier_bill",
+    };
   } else if (profile.role === "manager" && pendingAccessorials > 0) {
     nextAction = { label: "Review pending accessorial in Approvals", href: "/approvals" };
   } else if (profile.role === "broker" && pendingAccessorials > 0) {
     nextAction = {
-      label: "Escalate accessorial — managers approve from Approvals",
-      href: "/warnings",
+      label: "Accessorial waiting on manager — escalate from Warnings if needed",
+      href: "/warnings?severity=info",
     };
   } else if (isCustomer && hasOverdueInvoice) {
     nextAction = { label: "Review past-due balance on My Invoices", href: "/invoices" };
@@ -230,27 +334,57 @@ export default async function ShipmentDetailPage({
         </div>
         {canOperate || canBill ? (
           <div className="flex flex-wrap gap-2">
-            {canOperate &&
-            (s.status === "scheduled" || s.status === "assigned" || s.status === "booked") ? (
+            {canOperate && ["assigned", "booked"].includes(s.status) ? (
               <form action={setStatus.bind(null, "picked_up")}>
                 <button className="btn btn-sm">Confirm pickup</button>
               </form>
             ) : null}
-            {canOperate && ["picked_up", "assigned", "booked"].includes(s.status) ? (
+            {canOperate && s.status === "picked_up" ? (
               <form action={setStatus.bind(null, "in_transit")}>
                 <button className="btn btn-sm btn-outline">Mark in transit</button>
               </form>
             ) : null}
-            {canBill && ["delivered", "completed"].includes(s.status) ? (
+            {canBill &&
+            ["delivered", "completed"].includes(s.status) &&
+            hasPod &&
+            !billed ? (
               <form action={generateInvoice.bind(null, id)}>
                 <button className="btn btn-sm btn-primary">Generate invoice</button>
               </form>
+            ) : null}
+            {canBill &&
+            ["delivered", "completed"].includes(s.status) &&
+            hasPod &&
+            s.carrier_id &&
+            !hasCarrierBill ? (
+              <form action={generateCarrierBill.bind(null, id)}>
+                <button className="btn btn-sm btn-outline">Create carrier bill</button>
+              </form>
+            ) : null}
+            {isOperations(profile.role) &&
+            !["delivered", "completed", "cancelled"].includes(s.status) ? (
+              <details className="dropdown dropdown-end">
+                <summary className="btn btn-ghost btn-sm">Cancel load…</summary>
+                <div className="dropdown-content z-10 mt-1 w-72 rounded-box border border-base-300 bg-base-100 p-3 shadow">
+                  <form action={cancelShipment} className="flex flex-col gap-2">
+                    <input type="hidden" name="shipment_id" value={id} />
+                    <input
+                      name="reason"
+                      required
+                      minLength={3}
+                      placeholder="Reason for cancel"
+                      className="input input-bordered input-sm"
+                    />
+                    <button className="btn btn-error btn-sm">Confirm cancel</button>
+                  </form>
+                </div>
+              </details>
             ) : null}
           </div>
         ) : null}
       </div>
 
-      {showInternalFinance && margin < 0 ? (
+      {showInternalFinance && profile.role !== "broker" && margin < 0 ? (
         <div className="alert alert-warning">
           <span>
             Warning: this shipment is currently unprofitable ({money(margin)} margin). Booking is
@@ -262,7 +396,7 @@ export default async function ShipmentDetailPage({
       {showInternalFinance && overrideEvents.length > 0 ? (
         <div className="rounded-box border border-warning/40 bg-warning/10 px-4 py-3">
           <p className="text-xs font-semibold tracking-wide text-warning-content uppercase opacity-80">
-            Control overrides
+            {profile.role === "broker" ? "Manager override logged" : "Control overrides"}
           </p>
           <ul className="mt-2 space-y-2 text-sm">
             {overrideEvents.map((t) => (
@@ -311,6 +445,11 @@ export default async function ShipmentDetailPage({
                 <button className="btn btn-primary btn-sm">Generate invoice</button>
               </form>
             ) : null}
+            {nextAction.form === "carrier_bill" ? (
+              <form action={generateCarrierBill.bind(null, id)}>
+                <button className="btn btn-primary btn-sm">Create carrier bill</button>
+              </form>
+            ) : null}
             {nextAction.form === "pod" ? (
               <a href="#pod-upload" className="btn btn-success btn-sm">
                 Upload POD
@@ -321,6 +460,42 @@ export default async function ShipmentDetailPage({
                 Assign carrier
               </a>
             ) : null}
+          </div>
+        </div>
+      ) : null}
+
+      {canOperate && isDelayed && isOperations(profile.role) ? (
+        <div className="card border border-error/30 bg-error/5 shadow-sm">
+          <div className="card-body gap-3 py-4">
+            <div>
+              <h2 className="card-title text-base text-error">Delayed — update ETA</h2>
+              <p className="text-sm opacity-70">
+                Log the carrier ETA and customer outreach. Optionally revise the promised delivery
+                date.
+              </p>
+            </div>
+            <form action={logDelayUpdate} className="grid gap-2 md:grid-cols-2">
+              <input type="hidden" name="shipment_id" value={id} />
+              <input
+                name="note"
+                required
+                minLength={3}
+                placeholder="ETA / customer note (required)"
+                className="input input-bordered input-sm md:col-span-2"
+              />
+              <label className="form-control w-full">
+                <span className="label-text text-xs">Revised promised delivery (optional)</span>
+                <input
+                  name="promised_delivery_date"
+                  type="date"
+                  defaultValue={s.promised_delivery_date ?? ""}
+                  className="input input-bordered input-sm"
+                />
+              </label>
+              <div className="flex items-end">
+                <button className="btn btn-error btn-sm">Log delay update</button>
+              </div>
+            </form>
           </div>
         </div>
       ) : null}
@@ -360,31 +535,33 @@ export default async function ShipmentDetailPage({
               </div>
             </div>
           </div>
-          <div className="card bg-base-100 shadow-sm">
-            <div className="card-body py-4">
-              <h2 className="card-title text-base">Cost & revenue build-up</h2>
-              <div className="grid gap-2 text-sm sm:grid-cols-2 lg:grid-cols-4">
-                <div>
-                  <p className="opacity-60">Billable accessorials / fuel</p>
-                  <p className="font-medium">{money(profit?.billable_accessorials)}</p>
-                </div>
-                <div>
-                  <p className="opacity-60">Payable to carrier</p>
-                  <p className="font-medium">{money(profit?.payable_accessorials)}</p>
-                </div>
-                <div>
-                  <p className="opacity-60">Discount</p>
-                  <p className="font-medium">{money(s.discount_amount)}</p>
-                </div>
-                <div>
-                  <p className="opacity-60">Direct COGS</p>
-                  <p className="font-medium">
-                    {money(Number(s.carrier_cost) + Number(profit?.payable_accessorials ?? 0))}
-                  </p>
+          {profile.role !== "broker" ? (
+            <div className="card bg-base-100 shadow-sm">
+              <div className="card-body py-4">
+                <h2 className="card-title text-base">Cost & revenue build-up</h2>
+                <div className="grid gap-2 text-sm sm:grid-cols-2 lg:grid-cols-4">
+                  <div>
+                    <p className="opacity-60">Billable accessorials / fuel</p>
+                    <p className="font-medium">{money(profit?.billable_accessorials)}</p>
+                  </div>
+                  <div>
+                    <p className="opacity-60">Payable to carrier</p>
+                    <p className="font-medium">{money(profit?.payable_accessorials)}</p>
+                  </div>
+                  <div>
+                    <p className="opacity-60">Discount</p>
+                    <p className="font-medium">{money(s.discount_amount)}</p>
+                  </div>
+                  <div>
+                    <p className="opacity-60">Direct COGS</p>
+                    <p className="font-medium">
+                      {money(Number(s.carrier_cost) + Number(profit?.payable_accessorials ?? 0))}
+                    </p>
+                  </div>
                 </div>
               </div>
             </div>
-          </div>
+          ) : null}
         </>
       ) : null}
 
@@ -448,6 +625,30 @@ export default async function ShipmentDetailPage({
                 className="mt-4 grid gap-2 border-t border-base-200 pt-3"
               >
                 <input type="hidden" name="shipment_id" value={id} />
+                <p className="text-xs opacity-60">
+                  Match using scorecards → confirm insurance → assign → book rate. Prefer
+                  Preferred / Approved carriers.
+                </p>
+                {suggestedCarriers.length > 0 ? (
+                  <div className="rounded-box border border-primary/30 bg-primary/5 p-3">
+                    <p className="text-xs font-semibold uppercase tracking-wide text-primary">
+                      Suggested for this load
+                    </p>
+                    <ul className="mt-2 space-y-1.5 text-sm">
+                      {suggestedCarriers.map((c) => (
+                        <li key={c.carrierId} className="flex flex-wrap items-center gap-2">
+                          <span className={`badge badge-sm ${tierBadge(c.tier)}`}>{c.tier}</span>
+                          <span className="font-medium">{c.name}</span>
+                          <span className="text-xs opacity-60">
+                            OTD {c.onTimeDeliveryPct ?? "—"}%
+                            {c.avgCarrierCost != null ? ` · avg cost ${money(c.avgCarrierCost)}` : ""}
+                            {c.insuranceExpiration ? ` · insured thru ${c.insuranceExpiration}` : ""}
+                          </span>
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+                ) : null}
                 <label className="form-control w-full">
                   <span className="label-text text-xs">Assign / reassign carrier</span>
                   <select
@@ -463,11 +664,23 @@ export default async function ShipmentDetailPage({
                           insuranceRiskStatus(c.insurance_expiration ?? null, today).status !==
                             "expired",
                       )
-                      .map((c) => (
-                        <option key={c.id} value={c.id}>
-                          {c.name}
-                        </option>
-                      ))}
+                      .map((c) => {
+                        const risk = insuranceRiskStatus(c.insurance_expiration ?? null, today);
+                        const insuranceLabel =
+                          risk.status === "expiring"
+                            ? ` · insurance ${c.insurance_expiration} (≤30d)`
+                            : risk.status === "unknown"
+                              ? " · insurance unknown"
+                              : c.insurance_expiration
+                                ? ` · insured thru ${c.insurance_expiration}`
+                                : "";
+                        return (
+                          <option key={c.id} value={c.id}>
+                            {c.name}
+                            {insuranceLabel}
+                          </option>
+                        );
+                      })}
                   </select>
                   <span className="label-text-alt opacity-60">
                     Suspended carriers (expired insurance) are hidden and blocked server-side.
@@ -580,7 +793,29 @@ export default async function ShipmentDetailPage({
       ) : null}
 
       <div className="grid gap-4 lg:grid-cols-2">
-        {!isCarrier ? (
+        {profile.role === "broker" ? (
+          <div className="card bg-base-100 shadow-sm">
+            <div className="card-body">
+              <h2 className="card-title text-base">Billing status</h2>
+              {(invoices ?? []).length === 0 ? (
+                <p className="text-sm opacity-70">
+                  Not invoiced yet. After POD, Billing invoices the customer (AR) and pays the
+                  carrier (AP). Brokers do not run bill/pay from this portal.
+                </p>
+              ) : (
+                <ul className="space-y-2 text-sm">
+                  {(invoices ?? []).map((inv) => (
+                    <li key={inv.id}>
+                      <span className="font-medium">{inv.invoice_number}</span>{" "}
+                      <span className={`badge ${statusBadge(inv.status)}`}>{inv.status}</span>{" "}
+                      {money(inv.amount_paid)} / {money(inv.total)}
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </div>
+          </div>
+        ) : !isCarrier ? (
           <div className="card bg-base-100 shadow-sm">
             <div className="card-body">
               <h2 className="card-title text-base">Invoices</h2>

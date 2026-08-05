@@ -6,13 +6,18 @@ import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
 import { getCurrentProfile } from "@/lib/actions/auth";
-import { isOperations, type ShipmentStatus } from "@/lib/types";
+import { isOperations, money, SHIPMENT_FLOW, type ShipmentStatus } from "@/lib/types";
 import { canManageBilling, canManageOperations } from "@/lib/roles";
 import {
   dueDateFromTerms,
   fuelSurchargeAmount,
   isDateOutsideContractWindow,
 } from "@/lib/contract-terms";
+import {
+  depositAmountDue,
+  isActiveFinalInvoice,
+  isDepositInvoice,
+} from "@/lib/invoice-helpers";
 import { formString, moneyAmount, nonEmptyString, parseForm, uuidSchema } from "@/lib/action-schema";
 import { logEvent } from "@/lib/log-event";
 import { insuranceRiskStatus } from "@/lib/risk-credit";
@@ -24,6 +29,7 @@ import {
   isOnCreditHold,
   pastDueBalanceFromInvoices,
 } from "@/lib/credit-hold";
+import { expirePastEndContracts } from "@/lib/actions/contracts-lifecycle";
 import { z } from "zod";
 
 const POD_MAX_BYTES = 8 * 1024 * 1024;
@@ -99,6 +105,73 @@ function toastErrorPath(path: string, message: string) {
   const join = path.includes("?") ? "&" : "?";
   return `${path}${join}toastError=${encodeURIComponent(message)}`;
 }
+
+async function insertDepositInvoice(opts: {
+  supabase: Awaited<ReturnType<typeof createClient>>;
+  shipmentId: string;
+  customerId: string;
+  customerRate: number;
+  downpaymentPct: number;
+  paymentTerms?: string | null;
+}) {
+  const amount = depositAmountDue(opts.customerRate, opts.downpaymentPct);
+  if (!(amount > 0)) return null;
+
+  const issueDate = new Date().toISOString().slice(0, 10);
+  // Downpayment is due on booking (Net 0).
+  const dueDate = issueDate;
+  const invoiceNumber = `DEP-${Date.now().toString().slice(-8)}`;
+  const { error } = await opts.supabase.from("invoices").insert({
+    invoice_number: invoiceNumber,
+    customer_id: opts.customerId,
+    shipment_id: opts.shipmentId,
+    status: "sent",
+    issue_date: issueDate,
+    due_date: dueDate,
+    subtotal: amount,
+    total: amount,
+    amount_paid: 0,
+  });
+  if (error) throw new Error(error.message);
+  return invoiceNumber;
+}
+
+function normalizeFlowStatus(status: string): ShipmentStatus | null {
+  if (status === "draft") return "scheduled";
+  if (status === "booked") return "assigned";
+  if ((SHIPMENT_FLOW as string[]).includes(status)) return status as ShipmentStatus;
+  return null;
+}
+
+/** Non-managers may only advance one step along SHIPMENT_FLOW (managers may jump). */
+function assertStatusTransition(
+  fromStatus: string,
+  toStatus: ShipmentStatus,
+  role: string,
+) {
+  if (fromStatus === toStatus) return;
+  if (toStatus === "cancelled") {
+    throw new Error("Use cancel load to cancel a shipment.");
+  }
+  if (fromStatus === "cancelled") {
+    throw new Error("Cancelled loads cannot change status.");
+  }
+  if (role === "manager") return;
+
+  const from = normalizeFlowStatus(fromStatus);
+  const to = normalizeFlowStatus(toStatus);
+  if (!from || !to) {
+    throw new Error(`Cannot move from ${fromStatus} to ${toStatus}.`);
+  }
+  const i = SHIPMENT_FLOW.indexOf(from);
+  const j = SHIPMENT_FLOW.indexOf(to);
+  if (j !== i + 1) {
+    throw new Error(
+      `Invalid status jump (${fromStatus} → ${toStatus}). Advance one step at a time, or ask a manager.`,
+    );
+  }
+}
+
 async function logStatus(
   shipmentId: string,
   fromStatus: string | null,
@@ -177,6 +250,9 @@ export async function createContract(formData: FormData) {
     payment_terms: String(formData.get("payment_terms") || "Net 30"),
     fuel_surcharge_pct: Number(formData.get("fuel_surcharge_pct") || 0),
     shipping_rates: String(formData.get("shipping_rates") || "").trim() || null,
+    downpayment_pct: Number(formData.get("downpayment_pct") || 20),
+    customer_rate_per_mile: Number(formData.get("customer_rate_per_mile") || 0) || null,
+    carrier_rate_per_mile: Number(formData.get("carrier_rate_per_mile") || 0) || null,
     renewal_option: formData.get("renewal_option") === "on",
     notes: String(formData.get("notes") || "").trim() || null,
     status: "active",
@@ -273,6 +349,7 @@ export async function createShipment(formData: FormData) {
 
   const status: ShipmentStatus = carrierId ? "assigned" : "scheduled";
   const supabase = await createClient();
+  await expirePastEndContracts();
 
   if (carrierId) {
     try {
@@ -322,6 +399,8 @@ export async function createShipment(formData: FormData) {
     }
   }
 
+  let contractDownpaymentPct = 0;
+  let contractPaymentTerms: string | null = null;
   if (contractId) {
     const { data: contract } = await supabase
       .from("contracts")
@@ -348,6 +427,8 @@ export async function createShipment(formData: FormData) {
         ),
       );
     }
+    contractDownpaymentPct = Number(contract.downpayment_pct ?? 0);
+    contractPaymentTerms = contract.payment_terms || contract.billing_terms || null;
   }
 
   const { data, error } = await supabase
@@ -406,7 +487,27 @@ export async function createShipment(formData: FormData) {
     await logStatus(data.id, null, status, profile.id, "Shipment created");
   }
 
+  const depositNumber = await insertDepositInvoice({
+    supabase,
+    shipmentId: data.id,
+    customerId,
+    customerRate,
+    downpaymentPct: contractDownpaymentPct,
+    paymentTerms: contractPaymentTerms,
+  });
+  if (depositNumber) {
+    await logStatus(
+      data.id,
+      status,
+      status,
+      profile.id,
+      `Downpayment invoice ${depositNumber} created (${contractDownpaymentPct}% of customer rate)`,
+    );
+  }
+
   revalidatePath("/shipments");
+  revalidatePath("/invoices");
+  revalidatePath("/ar");
   revalidatePath("/dashboard");
   return data.id as string;
 }
@@ -468,7 +569,11 @@ export async function assignCarrier(formData: FormData) {
   revalidatePath("/dashboard");
 }
 
-export async function updateShipmentStatus(shipmentId: string, toStatus: ShipmentStatus) {
+export async function updateShipmentStatus(
+  shipmentId: string,
+  toStatus: ShipmentStatus,
+  opts?: { force?: boolean; note?: string },
+) {
   const profile = await getCurrentProfile();
   if (!profile) throw new Error("Not signed in");
 
@@ -484,6 +589,10 @@ export async function updateShipmentStatus(shipmentId: string, toStatus: Shipmen
     throw new Error("Carriers can only update their assigned loads.");
   }
   if (profile.role === "customer") throw new Error("Customers cannot change shipment status.");
+
+  if (!opts?.force) {
+    assertStatusTransition(shipment.status, toStatus, profile.role);
+  }
 
   if (toStatus === "completed" && !shipment.carrier_id) {
     throw new Error("Cannot complete a shipment without an assigned carrier.");
@@ -509,10 +618,118 @@ export async function updateShipmentStatus(shipmentId: string, toStatus: Shipmen
   const { error } = await supabase.from("shipments").update(patch).eq("id", shipmentId);
   if (error) throw new Error(error.message);
 
-  await logStatus(shipmentId, shipment.status, toStatus, profile.id);
+  await logStatus(shipmentId, shipment.status, toStatus, profile.id, opts?.note);
   revalidatePath("/shipments");
   revalidatePath(`/shipments/${shipmentId}`);
   revalidatePath("/dashboard");
+}
+
+/** Ops cancels a load that has not yet been delivered / completed. */
+export async function cancelShipment(formData: FormData) {
+  const profile = await getCurrentProfile();
+  if (!profile || !isOperations(profile.role)) {
+    throw new Error("Only operations staff can cancel loads.");
+  }
+
+  const shipmentId = parseForm(z.object({ id: uuidSchema }), {
+    id: formString(formData, "shipment_id"),
+  }).id;
+  const reason = parseForm(z.object({ reason: nonEmptyString("Cancel reason", 1000) }), {
+    reason: formString(formData, "reason"),
+  }).reason;
+
+  const supabase = await createClient();
+  const { data: shipment } = await supabase
+    .from("shipments")
+    .select("id, status, load_number")
+    .eq("id", shipmentId)
+    .single();
+  if (!shipment) throw new Error("Shipment not found");
+  if (["delivered", "completed", "cancelled"].includes(shipment.status)) {
+    throw new Error("Delivered, completed, or already-cancelled loads cannot be cancelled.");
+  }
+
+  const { data: finals } = await supabase
+    .from("invoices")
+    .select("id, invoice_number, status")
+    .eq("shipment_id", shipmentId)
+    .neq("status", "cancelled");
+  if ((finals ?? []).some((inv) => isActiveFinalInvoice(inv))) {
+    throw new Error("Cancel the final customer invoice first, or leave the load delivered.");
+  }
+
+  const { error } = await supabase
+    .from("shipments")
+    .update({ status: "cancelled" })
+    .eq("id", shipmentId);
+  if (error) throw new Error(error.message);
+
+  await logStatus(shipmentId, shipment.status, "cancelled", profile.id, `Cancelled: ${reason}`);
+
+  // Void unpaid deposit invoices so AR does not keep a dead balance.
+  for (const inv of finals ?? []) {
+    if (isDepositInvoice(inv) && inv.status !== "paid") {
+      await supabase.from("invoices").update({ status: "cancelled" }).eq("id", inv.id);
+    }
+  }
+
+  revalidatePath(`/shipments/${shipmentId}`);
+  revalidatePath("/shipments");
+  revalidatePath("/invoices");
+  revalidatePath("/dashboard");
+  revalidatePath("/warnings");
+  redirect(toastPath("/shipments", `Load ${shipment.load_number} cancelled`));
+}
+
+/** Ops note for delayed loads — optional revised promised delivery date. */
+export async function logDelayUpdate(formData: FormData) {
+  const profile = await getCurrentProfile();
+  if (!profile || !isOperations(profile.role)) {
+    throw new Error("Only operations staff can log delay updates.");
+  }
+
+  const shipmentId = formString(formData, "shipment_id");
+  const note = formString(formData, "note");
+  const revisedEta = formString(formData, "promised_delivery_date");
+  if (!shipmentId || note.length < 3) {
+    throw new Error("Shipment and a short ETA / customer note are required.");
+  }
+
+  parseForm(z.object({ id: uuidSchema }), { id: shipmentId });
+
+  const supabase = await createClient();
+  const { data: shipment } = await supabase
+    .from("shipments")
+    .select("id, status, promised_delivery_date")
+    .eq("id", shipmentId)
+    .single();
+  if (!shipment) throw new Error("Shipment not found");
+  if (["delivered", "completed", "cancelled"].includes(shipment.status)) {
+    throw new Error("Cannot update ETA on a closed load.");
+  }
+
+  if (revisedEta) {
+    const { error } = await supabase
+      .from("shipments")
+      .update({ promised_delivery_date: revisedEta })
+      .eq("id", shipmentId);
+    if (error) throw new Error(error.message);
+  }
+
+  const etaBit = revisedEta ? ` Revised promised delivery: ${revisedEta}.` : "";
+  await logStatus(
+    shipmentId,
+    shipment.status,
+    shipment.status,
+    profile.id,
+    `Delay update: ${note}${etaBit}`,
+  );
+
+  revalidatePath(`/shipments/${shipmentId}`);
+  revalidatePath("/shipments");
+  revalidatePath("/dashboard");
+  revalidatePath("/warnings");
+  redirect(toastPath(`/shipments/${shipmentId}`, "Delay update logged"));
 }
 
 export async function uploadPod(formData: FormData) {
@@ -549,11 +766,14 @@ export async function uploadPod(formData: FormData) {
   const supabase = await createClient();
   const { data: shipment, error: shipErr } = await supabase
     .from("shipments")
-    .select("id, carrier_id")
+    .select("id, carrier_id, status")
     .eq("id", input.shipment_id)
     .maybeSingle();
   if (shipErr) throw new Error(shipErr.message);
   if (!shipment) throw new Error("Shipment not found.");
+  if (shipment.status === "cancelled") {
+    throw new Error("Cannot upload POD on a cancelled load.");
+  }
 
   if (profile.role === "carrier") {
     if (!profile.carrier_id || shipment.carrier_id !== profile.carrier_id) {
@@ -602,7 +822,12 @@ export async function uploadPod(formData: FormData) {
   });
   if (error) throw new Error(error.message);
 
-  await updateShipmentStatus(input.shipment_id, "delivered");
+  if (!["delivered", "completed"].includes(shipment.status)) {
+    await updateShipmentStatus(input.shipment_id, "delivered", {
+      force: true,
+      note: "POD uploaded — marked delivered",
+    });
+  }
   revalidatePath("/", "layout");
   revalidatePath(`/shipments/${input.shipment_id}`);
   revalidatePath("/shipments");
@@ -719,10 +944,16 @@ export async function generateInvoice(shipmentId: string, _formData?: FormData) 
 
   const { data: existing } = await supabase
     .from("invoices")
-    .select("id")
+    .select("id, invoice_number, status, total")
     .eq("shipment_id", shipmentId)
     .neq("status", "cancelled");
-  if (existing?.length) throw new Error("An invoice already exists for this shipment.");
+  if ((existing ?? []).some((inv) => isActiveFinalInvoice(inv))) {
+    throw new Error("An invoice already exists for this shipment.");
+  }
+
+  const depositTotal = (existing ?? [])
+    .filter((inv) => isDepositInvoice(inv))
+    .reduce((sum, inv) => sum + Number(inv.total), 0);
 
   // Contract / customer terms drive fuel % and Net due date
   let paymentTerms = "Net 30";
@@ -780,10 +1011,30 @@ export async function generateInvoice(shipmentId: string, _formData?: FormData) 
     shipment.discount_approved || profile.role === "manager"
       ? Number(shipment.discount_amount || 0)
       : 0;
-  const subtotal = Number(shipment.customer_rate) - discount + accessorials;
+  const fullSubtotal = Number(shipment.customer_rate) - discount + accessorials;
+  // Balance invoice after downpayment already billed at booking.
+  const subtotal = Math.max(0, Math.round((fullSubtotal - depositTotal) * 100) / 100);
   const total = subtotal;
   const issueDate = new Date().toISOString().slice(0, 10);
   const dueDate = dueDateFromTerms(paymentTerms, new Date(issueDate + "T00:00:00Z"));
+
+  if (total <= 0) {
+    await supabase
+      .from("shipments")
+      .update({ status: "completed" })
+      .eq("id", shipmentId);
+    revalidatePath("/invoices");
+    revalidatePath(`/shipments/${shipmentId}`);
+    revalidatePath("/dashboard");
+    redirect(
+      toastPath(
+        "/invoices",
+        depositTotal > 0
+          ? "Shipment completed — downpayment already covers the customer balance"
+          : "Shipment completed with no balance to invoice",
+      ),
+    );
+  }
 
   const invoiceNumber = `INV-${Date.now().toString().slice(-8)}`;
   const { data: createdInvoice, error } = await supabase
@@ -792,7 +1043,7 @@ export async function generateInvoice(shipmentId: string, _formData?: FormData) 
       invoice_number: invoiceNumber,
       customer_id: shipment.customer_id,
       shipment_id: shipment.id,
-      status: "pending",
+      status: "sent",
       issue_date: issueDate,
       due_date: dueDate,
       subtotal,
@@ -813,7 +1064,7 @@ export async function generateInvoice(shipmentId: string, _formData?: FormData) 
       entityType: "invoice",
       entityId: createdInvoice.id,
       fromStatus: null,
-      toStatus: "pending",
+      toStatus: "sent",
       changedBy: profile.id,
       note: `Invoice ${invoiceNumber} generated`,
     });
@@ -827,7 +1078,13 @@ export async function generateInvoice(shipmentId: string, _formData?: FormData) 
   revalidatePath("/invoices");
   revalidatePath(`/shipments/${shipmentId}`);
   revalidatePath("/dashboard");
-  redirect(toastPath("/invoices", `Invoice ${invoiceNumber} generated`));
+  const depositNote =
+    depositTotal > 0
+      ? ` (balance after ${money(depositTotal)} downpayment)`
+      : "";
+  redirect(
+    toastPath("/invoices", `Invoice ${invoiceNumber} generated${depositNote}`),
+  );
 }
 
 export async function recordPayment(formData: FormData) {
@@ -902,6 +1159,64 @@ export async function recordPayment(formData: FormData) {
   revalidatePath("/ar");
   revalidatePath("/dashboard");
   revalidatePath("/controls");
+}
+
+/** Shipper demo: mark an open invoice on their account as paid in full. */
+export async function shipperMarkInvoicePaid(formData: FormData) {
+  const profile = await getCurrentProfile();
+  if (!profile || profile.role !== "customer" || !profile.customer_id) {
+    throw new Error("Only shippers can mark their own invoices paid.");
+  }
+
+  const invoiceId = parseForm(z.object({ id: uuidSchema }), {
+    id: formString(formData, "invoice_id"),
+  }).id;
+
+  const supabase = await createClient();
+  const { data: invoice } = await supabase
+    .from("invoices")
+    .select("*")
+    .eq("id", invoiceId)
+    .maybeSingle();
+  if (!invoice || invoice.customer_id !== profile.customer_id) {
+    redirect(toastErrorPath("/invoices", "That invoice is not on your account."));
+  }
+  if (invoice.status === "disputed") {
+    throw new Error("Resolve the dispute before paying this invoice.");
+  }
+  if (["paid", "cancelled"].includes(invoice.status)) {
+    throw new Error("Invoice is already closed.");
+  }
+
+  const balance = Math.max(0, Number(invoice.total) - Number(invoice.amount_paid));
+  if (!(balance > 0)) {
+    throw new Error("Nothing left to pay on this invoice.");
+  }
+
+  const paymentDate = new Date().toISOString().slice(0, 10);
+  const { error } = await supabase.from("payments").insert({
+    invoice_id: invoiceId,
+    amount: balance,
+    payment_date: paymentDate,
+    method: "ach_simulated",
+    reference: "Shipper portal — mark paid",
+    recorded_by: profile.id,
+  });
+  if (error) throw new Error(error.message);
+
+  await supabase
+    .from("invoices")
+    .update({
+      amount_paid: Number(invoice.amount_paid) + balance,
+      status: "paid",
+    })
+    .eq("id", invoiceId);
+
+  revalidatePath("/invoices");
+  revalidatePath("/payments");
+  revalidatePath("/ar");
+  revalidatePath("/dashboard");
+  redirect(toastPath("/invoices", `Payment recorded for ${invoice.invoice_number}`));
 }
 
 export async function openDispute(formData: FormData) {
@@ -1322,4 +1637,51 @@ export async function recordCarrierPayment(formData: FormData) {
   revalidatePath("/accounting");
   revalidatePath("/dashboard");
   revalidatePath("/payments");
+}
+
+/** Place or release an AP hold on a carrier bill. */
+export async function setCarrierBillHold(formData: FormData) {
+  const profile = await getCurrentProfile();
+  if (!profile || !canManageBilling(profile.role)) {
+    throw new Error("Only billing or managers can change AP holds.");
+  }
+
+  const billId = parseForm(z.object({ id: uuidSchema }), {
+    id: formString(formData, "carrier_bill_id"),
+  }).id;
+  const hold = formData.get("hold") === "1";
+
+  const supabase = await createClient();
+  const { data: bill } = await supabase
+    .from("carrier_bills")
+    .select("id, status, amount_paid, total")
+    .eq("id", billId)
+    .single();
+  if (!bill) throw new Error("Carrier bill not found");
+  if (bill.status === "cancelled" || bill.status === "paid") {
+    throw new Error("Cannot change hold on a closed bill.");
+  }
+
+  let nextStatus: string;
+  if (hold) {
+    nextStatus = "on_hold";
+  } else {
+    const paid = Number(bill.amount_paid);
+    const total = Number(bill.total);
+    if (paid <= 0) nextStatus = "pending";
+    else if (paid < total) nextStatus = "partial";
+    else nextStatus = "paid";
+  }
+
+  const { error } = await supabase
+    .from("carrier_bills")
+    .update({ status: nextStatus })
+    .eq("id", billId);
+  if (error) throw new Error(error.message);
+
+  revalidatePath("/ap");
+  revalidatePath("/accounting");
+  redirect(
+    toastPath("/ap", hold ? "Carrier bill placed on hold" : "Carrier bill hold released"),
+  );
 }

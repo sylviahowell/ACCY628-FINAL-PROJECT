@@ -120,6 +120,11 @@ export default async function SupportPage() {
             <p className="text-xs opacity-60">
               Support hours Mon–Fri 8am–6pm CT · tickets are routed to your account team.
             </p>
+            <p className="mt-2 text-sm opacity-80">
+              Contract changes (renewal, end date, rates) are managed by RowanLane operations —
+              shippers cannot cancel shipping agreements from this portal. Contact Support to
+              request a change.
+            </p>
           </div>
         </div>
       </div>

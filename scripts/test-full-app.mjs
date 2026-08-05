@@ -12,6 +12,7 @@ const ALLOWED = {
     "/warnings",
     "/approvals",
     "/controls",
+    "/coverage",
     "/customers",
     "/carriers",
     "/contracts",
@@ -29,6 +30,7 @@ const ALLOWED = {
   broker: [
     "/dashboard",
     "/warnings",
+    "/coverage",
     "/customers",
     "/contracts",
     "/shipments",
@@ -47,7 +49,7 @@ const ALLOWED = {
     "/profitability",
     "/settings",
   ],
-  customer: ["/dashboard", "/warnings", "/shipments", "/invoices", "/support", "/settings"],
+  customer: ["/dashboard", "/warnings", "/shipments", "/invoices", "/coverage", "/support", "/settings"],
   carrier: ["/dashboard", "/warnings", "/shipments", "/documents", "/settings"],
 };
 
@@ -71,13 +73,13 @@ const ROLES = [
     cardIndex: 2,
     name: "Bailey Billing",
     dashboardHint: /Billing|Invoice|AR|Collection|Unbilled|Receivable/i,
-    forbidden: ["/customers", "/carriers", "/contracts", "/support", "/documents", "/approvals", "/controls", "/risk"],
+    forbidden: ["/customers", "/carriers", "/contracts", "/support", "/documents", "/approvals", "/controls", "/risk", "/coverage"],
   },
   {
     role: "customer",
     cardIndex: 3,
     name: "Casey Customer",
-    dashboardHint: /Shipper|Shipment|Invoice|My |Track/i,
+    dashboardHint: /Shipper|Shipment|Invoice|My |Track|coverage/i,
     forbidden: ["/approvals", "/customers", "/carriers", "/ar", "/profitability", "/documents", "/accounting", "/controls", "/risk"],
   },
   {
@@ -85,7 +87,7 @@ const ROLES = [
     cardIndex: 4,
     name: "Chris Carrier",
     dashboardHint: /Carrier|Load|Deliver|Assigned|Document|Pickup/i,
-    forbidden: ["/approvals", "/customers", "/invoices", "/ar", "/profitability", "/support", "/accounting", "/controls", "/risk"],
+    forbidden: ["/approvals", "/customers", "/invoices", "/ar", "/profitability", "/support", "/accounting", "/controls", "/risk", "/coverage"],
   },
 ];
 

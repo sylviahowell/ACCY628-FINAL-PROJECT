@@ -6,6 +6,7 @@ import { StatusPie } from "@/components/Charts";
 import {
   generateCarrierBill,
   recordCarrierPayment,
+  setCarrierBillHold,
 } from "@/lib/actions/freight";
 import { requireRoles } from "@/lib/authz";
 import { agingChartData } from "@/lib/collections";
@@ -107,8 +108,9 @@ export default async function AccountsPayablePage() {
 
   const openBills = billList.filter((b) => {
     const bal = Number(b.total) - Number(b.amount_paid);
-    return bal > 0 && !["cancelled", "paid"].includes(b.status);
+    return bal > 0 && !["cancelled", "paid", "on_hold"].includes(b.status);
   });
+  const heldBills = billList.filter((b) => b.status === "on_hold");
 
   const agingChart = agingChartData(aging);
 
@@ -219,6 +221,12 @@ export default async function AccountsPayablePage() {
               />
               <button className="btn btn-primary">Save carrier payment</button>
             </form>
+            {heldBills.length > 0 ? (
+              <p className="mt-2 text-xs opacity-60">
+                {heldBills.length} bill{heldBills.length === 1 ? "" : "s"} on hold — release
+                from the table below before paying.
+              </p>
+            ) : null}
           </div>
         </div>
       </div>
@@ -346,11 +354,14 @@ export default async function AccountsPayablePage() {
                     <th>Paid</th>
                     <th>Balance</th>
                     <th>Due</th>
+                    <th>Hold</th>
                   </tr>
                 </thead>
                 <tbody>
                   {billList.map((b) => {
                     const bal = Number(b.total) - Number(b.amount_paid);
+                    const canHold =
+                      bal > 0 && !["cancelled", "paid"].includes(b.status);
                     return (
                       <tr key={b.id}>
                         <td>{b.bill_number}</td>
@@ -370,6 +381,23 @@ export default async function AccountsPayablePage() {
                         <td>{money(b.amount_paid)}</td>
                         <td>{money(bal)}</td>
                         <td>{b.due_date}</td>
+                        <td>
+                          {canHold ? (
+                            <form action={setCarrierBillHold}>
+                              <input type="hidden" name="carrier_bill_id" value={b.id} />
+                              <input
+                                type="hidden"
+                                name="hold"
+                                value={b.status === "on_hold" ? "0" : "1"}
+                              />
+                              <button className="btn btn-ghost btn-xs">
+                                {b.status === "on_hold" ? "Release" : "Hold"}
+                              </button>
+                            </form>
+                          ) : (
+                            "—"
+                          )}
+                        </td>
                       </tr>
                     );
                   })}

@@ -30,6 +30,7 @@ export function allowedPaths(role: UserRole): string[] {
         "/risk",
         "/approvals",
         "/controls",
+        "/coverage",
         "/customers",
         "/carriers",
         "/contracts",
@@ -48,6 +49,7 @@ export function allowedPaths(role: UserRole): string[] {
       return [
         "/dashboard",
         "/warnings",
+        "/coverage",
         "/customers",
         "/contracts",
         "/shipments",
@@ -74,6 +76,7 @@ export function allowedPaths(role: UserRole): string[] {
         "/warnings",
         "/shipments",
         "/invoices",
+        "/coverage",
         "/support",
         "/settings",
       ];

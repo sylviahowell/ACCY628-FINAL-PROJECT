@@ -1,11 +1,11 @@
 import { redirect } from "next/navigation";
 import { requirePathAccess } from "@/lib/authz";
 import { createShipment } from "@/lib/actions/freight";
+import { CreateShipmentForm } from "@/components/CreateShipmentForm";
 import { createClient } from "@/lib/supabase/server";
 import { isOperations, money } from "@/lib/types";
-import { ContractGuidedFields } from "@/components/ContractGuidedFields";
 import type { ContractTermsInfo } from "@/lib/contract-terms";
-import { insuranceRiskStatus } from "@/lib/risk-credit";
+import { openArFromInvoices, insuranceRiskStatus } from "@/lib/risk-credit";
 import {
   isOnCreditHold,
   PAST_DUE_CREDIT_HOLD_THRESHOLD,
@@ -18,7 +18,10 @@ export default async function NewShipmentPage() {
 
   const supabase = await createClient();
   const today = new Date().toISOString().slice(0, 10);
-  const { data: customers } = await supabase.from("customers").select("id, name").order("name");
+  const { data: customers } = await supabase
+    .from("customers")
+    .select("id, name, credit_limit")
+    .order("name");
   const { data: carriers } = await supabase
     .from("carriers")
     .select("id, name, insurance_expiration")
@@ -26,7 +29,7 @@ export default async function NewShipmentPage() {
   const { data: contracts } = await supabase
     .from("contracts")
     .select(
-      "id, contract_number, title, customer_id, start_date, end_date, payment_terms, billing_terms, fuel_surcharge_pct, shipping_rates, status, renewal_option",
+      "id, contract_number, title, customer_id, start_date, end_date, payment_terms, billing_terms, fuel_surcharge_pct, shipping_rates, status, renewal_option, downpayment_pct, customer_rate_per_mile, carrier_rate_per_mile",
     )
     .eq("status", "active");
   const { data: invoices } = await supabase
@@ -34,16 +37,17 @@ export default async function NewShipmentPage() {
     .select("customer_id, total, amount_paid, status, due_date")
     .neq("status", "cancelled");
 
+  const openArByCustomer = new Map<string, number>();
   const pastDueByCustomer = new Map<string, number>();
   for (const c of customers ?? []) {
     const invs = (invoices ?? []).filter((i) => i.customer_id === c.id);
+    openArByCustomer.set(c.id, openArFromInvoices(invs));
     pastDueByCustomer.set(c.id, pastDueBalanceFromInvoices(invs, today));
   }
   const heldCustomers = (customers ?? []).filter((c) =>
     isOnCreditHold(pastDueByCustomer.get(c.id) ?? 0),
   );
 
-  // Suspended tier = expired insurance — hide from booking picker
   const assignableCarriers = (carriers ?? []).filter(
     (c) => insuranceRiskStatus(c.insurance_expiration ?? null, today).status !== "expired",
   );
@@ -79,83 +83,20 @@ export default async function NewShipmentPage() {
         </div>
       ) : null}
 
-      <form action={action} className="card bg-base-100 shadow-sm">
-        <div className="card-body grid gap-3 md:grid-cols-2">
-          <input
-            name="load_number"
-            required
-            placeholder="Shipment number (LD-2001)"
-            className="input input-bordered"
-          />
-          <select name="customer_id" required className="select select-bordered">
-            <option value="">Customer…</option>
-            {(customers ?? []).map((c) => {
-              const held = isOnCreditHold(pastDueByCustomer.get(c.id) ?? 0);
-              return (
-                <option key={c.id} value={c.id}>
-                  {c.name}
-                  {held ? " · CREDIT HOLD" : ""}
-                </option>
-              );
-            })}
-          </select>
-          <select name="carrier_id" className="select select-bordered">
-            <option value="">Carrier (optional)…</option>
-            {assignableCarriers.map((c) => (
-              <option key={c.id} value={c.id}>
-                {c.name}
-              </option>
-            ))}
-          </select>
-          <ContractGuidedFields contracts={(contracts ?? []) as ContractTermsInfo[]} />
-          <input
-            name="pickup_location"
-            required
-            placeholder="Pickup location (City, ST)"
-            className="input input-bordered"
-          />
-          <input
-            name="delivery_location"
-            required
-            placeholder="Delivery location (City, ST)"
-            className="input input-bordered"
-          />
-          <input name="freight_type" placeholder="Freight type" className="input input-bordered" />
-          <input
-            name="weight_lbs"
-            type="number"
-            placeholder="Weight (lbs)"
-            className="input input-bordered"
-          />
-          <input
-            name="carrier_cost"
-            type="number"
-            step="0.01"
-            required
-            placeholder="Carrier cost"
-            className="input input-bordered"
-          />
-          <input
-            name="discount_amount"
-            type="number"
-            step="0.01"
-            defaultValue={0}
-            placeholder="Discount (needs manager approval)"
-            className="input input-bordered"
-          />
-          {profile.role === "manager" ? (
-            <p className="md:col-span-2 text-xs opacity-60">
-              Managers may override credit limit and past-due credit holds; overrides are logged.
-            </p>
-          ) : (
-            <p className="md:col-span-2 text-xs opacity-60">
-              Booking is blocked if open AR + this rate exceeds the credit limit, or if past-due AR
-              meets the credit-hold threshold.
-            </p>
-          )}
-          <button className="btn btn-primary md:col-span-2">Create shipment</button>
-        </div>
-      </form>
+      <CreateShipmentForm
+        customers={(customers ?? []).map((c) => ({
+          id: c.id,
+          name: c.name,
+          creditLimit: Number(c.credit_limit ?? 0),
+          openAr: openArByCustomer.get(c.id) ?? 0,
+          pastDue: pastDueByCustomer.get(c.id) ?? 0,
+          onCreditHold: isOnCreditHold(pastDueByCustomer.get(c.id) ?? 0),
+        }))}
+        carriers={assignableCarriers.map((c) => ({ id: c.id, name: c.name }))}
+        contracts={(contracts ?? []) as ContractTermsInfo[]}
+        isManager={profile.role === "manager"}
+        action={action}
+      />
     </div>
   );
 }

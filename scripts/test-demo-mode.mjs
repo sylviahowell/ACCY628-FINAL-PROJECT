@@ -38,7 +38,7 @@ async function main() {
     } else fail("Normal email/password login form still present");
 
     // Portal cards (5)
-    const portalButtons = page.locator("form button.login-portal-card");
+    const portalButtons = page.locator("button.login-portal-card");
     const portalCount = await portalButtons.count();
     if (portalCount === 5) ok("Five demo portal cards present", String(portalCount));
     else fail("Five demo portal cards present", `got ${portalCount}`);

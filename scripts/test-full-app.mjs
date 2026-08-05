@@ -11,6 +11,7 @@ const ALLOWED = {
     "/dashboard",
     "/warnings",
     "/approvals",
+    "/controls",
     "/customers",
     "/carriers",
     "/contracts",
@@ -22,6 +23,7 @@ const ALLOWED = {
     "/accounting",
     "/reports",
     "/profitability",
+    "/risk",
     "/settings",
   ],
   broker: [
@@ -62,28 +64,28 @@ const ROLES = [
     cardIndex: 1,
     name: "Blake Broker",
     dashboardHint: /Broker|Operations|Task|Shipment|Carrier/i,
-    forbidden: ["/invoices", "/ar", "/profitability", "/support", "/documents", "/approvals"],
+    forbidden: ["/invoices", "/ar", "/profitability", "/support", "/documents", "/approvals", "/controls", "/risk"],
   },
   {
     role: "billing",
     cardIndex: 2,
     name: "Bailey Billing",
     dashboardHint: /Billing|Invoice|AR|Collection|Unbilled|Receivable/i,
-    forbidden: ["/customers", "/carriers", "/contracts", "/support", "/documents", "/approvals"],
+    forbidden: ["/customers", "/carriers", "/contracts", "/support", "/documents", "/approvals", "/controls", "/risk"],
   },
   {
     role: "customer",
     cardIndex: 3,
     name: "Casey Customer",
     dashboardHint: /Shipper|Shipment|Invoice|My |Track/i,
-    forbidden: ["/approvals", "/customers", "/carriers", "/ar", "/profitability", "/documents", "/accounting"],
+    forbidden: ["/approvals", "/customers", "/carriers", "/ar", "/profitability", "/documents", "/accounting", "/controls", "/risk"],
   },
   {
     role: "carrier",
     cardIndex: 4,
     name: "Chris Carrier",
     dashboardHint: /Carrier|Load|Deliver|Assigned|Document|Pickup/i,
-    forbidden: ["/approvals", "/customers", "/invoices", "/ar", "/profitability", "/support", "/accounting"],
+    forbidden: ["/approvals", "/customers", "/invoices", "/ar", "/profitability", "/support", "/accounting", "/controls", "/risk"],
   },
 ];
 
@@ -161,7 +163,7 @@ async function enterDemoViaCard(page, cardIndex) {
     }
   }
   await page.goto(`${BASE}/login`, { waitUntil: "networkidle" });
-  await page.locator("form button.login-portal-card").nth(cardIndex).click();
+  await page.locator("button.login-portal-card").nth(cardIndex).click();
   await page.waitForURL(/\/dashboard/, { timeout: 90000 });
   await page.waitForFunction(
     () => (document.body?.innerText || "").length > 80,
@@ -194,7 +196,7 @@ async function main() {
     /Today.?s Snapshot|Move freight/i.test(loginText)
       ? ok("Login: hero content")
       : fail("Login: hero content");
-    (await page.locator("form button.login-portal-card").count()) === 5
+    (await page.locator("button.login-portal-card").count()) === 5
       ? ok("Login: 5 portal cards")
       : fail("Login: 5 portal cards");
 

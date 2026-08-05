@@ -1,10 +1,12 @@
 import Link from "next/link";
 import { AccountingEntriesPanel } from "@/components/AccountingEntriesPanel";
+import { ChartOfAccountsPanel } from "@/components/ChartOfAccountsPanel";
 import { resolveSearchParams } from "@/components/FilterBanner";
 import {
   buildAccountingEntries,
   type AccountingEntryType,
 } from "@/lib/accounting-entries";
+import { rollupAccountActivity } from "@/lib/chart-of-accounts";
 import { requireRoles } from "@/lib/authz";
 import { createClient } from "@/lib/supabase/server";
 import { money, statusBadge } from "@/lib/types";
@@ -228,12 +230,17 @@ export default async function AccountingPage({
       <div>
         <h1 className="text-2xl font-bold">Accounting</h1>
         <p className="text-sm opacity-70">
-          Revenue earned at delivery with POD, open AR, cash collected, and the journal entries
-          those events imply — in one workspace.
+          Chart of accounts, revenue earned at delivery with POD, open AR / AP, and the journal
+          entries those events imply — in one workspace.
         </p>
-        <Link href="#accounting-entries" className="link link-primary text-sm">
-          Jump to accounting entries
-        </Link>
+        <div className="flex flex-wrap gap-3 text-sm">
+          <Link href="#chart-of-accounts" className="link link-primary">
+            Jump to chart of accounts
+          </Link>
+          <Link href="#accounting-entries" className="link link-primary">
+            Jump to accounting entries
+          </Link>
+        </div>
       </div>
 
       <div className="card bg-base-100 shadow-sm">
@@ -471,6 +478,10 @@ export default async function AccountingPage({
           </Link>
         </div>
       </div>
+
+      <ChartOfAccountsPanel
+        activity={rollupAccountActivity(journalEntries.flatMap((e) => e.lines))}
+      />
 
       <AccountingEntriesPanel entries={journalEntries} activeFilter={entriesFilter} />
 

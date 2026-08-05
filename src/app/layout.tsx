@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import { Source_Sans_3 } from "next/font/google";
+import Script from "next/script";
 import "./globals.css";
 
 const sans = Source_Sans_3({
@@ -37,10 +38,10 @@ export default function RootLayout({
       className={`${sans.variable} h-full`}
       suppressHydrationWarning
     >
-      <head>
-        <script dangerouslySetInnerHTML={{ __html: appearanceBootScript }} />
-      </head>
       <body className="min-h-full bg-base-200 text-base-content antialiased">
+        <Script id="freightflow-appearance-boot" strategy="beforeInteractive">
+          {appearanceBootScript}
+        </Script>
         {children}
       </body>
     </html>

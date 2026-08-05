@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, type ReactNode } from "react";
+import { useEffect, useState, useSyncExternalStore, type ReactNode } from "react";
 import {
   Bar,
   BarChart,
@@ -72,13 +72,13 @@ function useChartColors() {
   return colors;
 }
 
-/** Recharts measures the DOM; render only after mount to avoid hydration mismatches. */
+/** Recharts measures the DOM; render only after client mount to avoid hydration mismatches. */
 function useChartReady() {
-  const [ready, setReady] = useState(false);
-  useEffect(() => {
-    setReady(true);
-  }, []);
-  return ready;
+  return useSyncExternalStore(
+    () => () => {},
+    () => true,
+    () => false,
+  );
 }
 
 function ChartFrame({ children }: { children: ReactNode }) {

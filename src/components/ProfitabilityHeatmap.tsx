@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { Suspense, useEffect, useMemo, useState } from "react";
+import { Suspense, useMemo, useState } from "react";
 import { useSearchParams } from "next/navigation";
 import {
   bandClasses,
@@ -127,14 +127,13 @@ function ProfitabilityHeatmapInner({
 
   const [dimension, setDimension] = useState<HeatDimension>(dimFromUrl);
   const [bandFilter, setBandFilter] = useState<MarginBand | null>(bandFromUrl);
-
-  useEffect(() => {
-    const b = parseBandParam(params.get("band"));
-    const d = parseDimParam(params.get("dim"));
-    setBandFilter(b);
-    if (d) setDimension(d);
-    else if (b) setDimension("shipment");
-  }, [params]);
+  const [prevUrlKey, setPrevUrlKey] = useState(`${dimFromUrl}|${bandFromUrl ?? ""}`);
+  const urlKey = `${dimFromUrl}|${bandFromUrl ?? ""}`;
+  if (urlKey !== prevUrlKey) {
+    setPrevUrlKey(urlKey);
+    setBandFilter(bandFromUrl);
+    setDimension(dimFromUrl);
+  }
 
   return (
     <HeatmapBody

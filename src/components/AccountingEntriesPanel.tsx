@@ -12,6 +12,7 @@ const FILTERS: { key: "all" | AccountingEntryType; label: string }[] = [
   { key: "recognize", label: "Recognize" },
   { key: "bill", label: "Bill" },
   { key: "collect", label: "Collect" },
+  { key: "write_off", label: "Write-off" },
   { key: "accrue_ap", label: "Carrier bill" },
   { key: "pay_carrier", label: "Pay carrier" },
 ];

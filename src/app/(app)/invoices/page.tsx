@@ -117,7 +117,11 @@ export default async function InvoicesPage({
           <div className="card-body">
             <div className="flex flex-wrap justify-between gap-3">
               <div>
-                <h3 className="font-semibold">{inv.invoice_number}</h3>
+                <h3 className="font-semibold">
+                  <Link href={`/invoices/${inv.id}`} className="link link-hover">
+                    {inv.invoice_number}
+                  </Link>
+                </h3>
                 <p className="text-sm opacity-70">
                   {(inv.customers as { name?: string } | null)?.name} · Shipment{" "}
                   {(inv.shipments as { load_number?: string } | null)?.load_number ?? "—"}
@@ -128,6 +132,9 @@ export default async function InvoicesPage({
                 </p>
               </div>
               <div className="flex flex-wrap items-center gap-1">
+                <Link href={`/invoices/${inv.id}`} className="btn btn-outline btn-xs">
+                  Open invoice
+                </Link>
                 <span className={`badge ${statusBadge(inv.status)}`}>{inv.status}</span>
                 {isDepositInvoice(inv) ? (
                   <span className="badge badge-info badge-sm">downpayment</span>

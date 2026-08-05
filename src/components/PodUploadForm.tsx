@@ -3,6 +3,7 @@
 import { useFormStatus } from "react-dom";
 import { useId, useRef, useState, type DragEvent } from "react";
 import { uploadPod } from "@/lib/actions/freight";
+import { SAMPLE_SIGNED_BOL_PATH } from "@/lib/display-text";
 
 const ACCEPT = "application/pdf,image/jpeg,image/png,image/webp";
 const MAX_BYTES = 8 * 1024 * 1024;
@@ -60,6 +61,7 @@ export function PodUploadForm({
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [dragging, setDragging] = useState(false);
+  const [sampleBusy, setSampleBusy] = useState(false);
 
   function clearPreview() {
     if (previewRef.current) {
@@ -67,6 +69,13 @@ export function PodUploadForm({
       previewRef.current = null;
     }
     setPreviewUrl(null);
+  }
+
+  function assignInputFile(next: File) {
+    if (!inputRef.current) return;
+    const dt = new DataTransfer();
+    dt.items.add(next);
+    inputRef.current.files = dt.files;
   }
 
   function pickFile(next: File | null) {
@@ -92,10 +101,29 @@ export function PodUploadForm({
       return;
     }
     setFile(next);
+    assignInputFile(next);
     if (next.type.startsWith("image/")) {
       const url = URL.createObjectURL(next);
       previewRef.current = url;
       setPreviewUrl(url);
+    }
+  }
+
+  async function loadSampleBol() {
+    setSampleBusy(true);
+    setError(null);
+    try {
+      const res = await fetch(SAMPLE_SIGNED_BOL_PATH);
+      if (!res.ok) throw new Error("Sample BOL missing");
+      const blob = await res.blob();
+      const sample = new File([blob], "signed-bol-sample.pdf", {
+        type: "application/pdf",
+      });
+      pickFile(sample);
+    } catch {
+      setError("Could not load the sample signed BOL.");
+    } finally {
+      setSampleBusy(false);
     }
   }
 
@@ -104,11 +132,6 @@ export function PodUploadForm({
     setDragging(false);
     const dropped = e.dataTransfer.files?.[0] ?? null;
     pickFile(dropped);
-    if (dropped && inputRef.current) {
-      const dt = new DataTransfer();
-      dt.items.add(dropped);
-      inputRef.current.files = dt.files;
-    }
   }
 
   return (
@@ -159,6 +182,14 @@ export function PodUploadForm({
             onChange={(e) => pickFile(e.target.files?.[0] ?? null)}
           />
         </label>
+        <button
+          type="button"
+          className="btn btn-outline btn-xs mt-3"
+          disabled={sampleBusy}
+          onClick={() => void loadSampleBol()}
+        >
+          {sampleBusy ? "Loading sample…" : "Use sample signed BOL"}
+        </button>
 
         {file ? (
           <div className="mt-3 flex flex-wrap items-start gap-3 rounded-box bg-base-100 p-3 text-sm">

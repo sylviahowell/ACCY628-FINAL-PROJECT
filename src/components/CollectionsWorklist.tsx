@@ -4,7 +4,7 @@ import Link from "next/link";
 import { useMemo, useState } from "react";
 import type { CollectionWorkItem } from "@/lib/collections";
 import { money } from "@/lib/types";
-import { addCollectionNote } from "@/lib/actions/freight";
+import { addCollectionNote, writeOffInvoice } from "@/lib/actions/freight";
 
 type Filter = "all" | "overdue" | "disputed" | "high";
 
@@ -124,9 +124,33 @@ export function CollectionsWorklist({ items }: { items: CollectionWorkItem[] }) 
                         )}
                       </td>
                       <td className="space-y-2">
-                        <Link href="/payments" className="btn btn-ghost btn-xs">
+                        <Link
+                          href={`/invoices/${item.invoiceId}`}
+                          className="btn btn-ghost btn-xs"
+                        >
+                          View invoice
+                        </Link>
+                        <Link
+                          href={`/payments?invoice_id=${item.invoiceId}`}
+                          className="btn btn-ghost btn-xs"
+                        >
                           Record payment
                         </Link>
+                        {item.disputeStatus !== "open" && item.balance > 0 ? (
+                          <form action={writeOffInvoice} className="flex flex-col gap-1">
+                            <input type="hidden" name="invoice_id" value={item.invoiceId} />
+                            <input
+                              name="note"
+                              required
+                              minLength={3}
+                              placeholder="Write-off reason…"
+                              className="input input-bordered input-xs w-40"
+                            />
+                            <button className="btn btn-error btn-outline btn-xs">
+                              Write off
+                            </button>
+                          </form>
+                        ) : null}
                         <form action={addCollectionNote} className="flex flex-col gap-1">
                           <input type="hidden" name="invoice_id" value={item.invoiceId} />
                           <input

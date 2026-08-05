@@ -75,6 +75,14 @@ async function persistPodFile(shipmentId: string, file: File, supabase: Awaited<
     if (data.publicUrl) return data.publicUrl;
   }
 
+  // Hosted deploys have an ephemeral filesystem — do not pretend a local path worked.
+  if (process.env.VERCEL) {
+    const detail = uploadError?.message ? ` (${uploadError.message})` : "";
+    throw new Error(
+      `POD cloud upload failed${detail}. Apply supabase/migrations/20260805180000_pods_storage_bucket.sql in Supabase before uploading on the live site.`,
+    );
+  }
+
   const dir = path.join(process.cwd(), "public", "pod-uploads", shipmentId);
   await mkdir(dir, { recursive: true });
   await writeFile(path.join(dir, filename), bytes);
@@ -1211,6 +1219,92 @@ export async function recordPayment(formData: FormData) {
   revalidatePath("/ar");
   revalidatePath("/dashboard");
   revalidatePath("/controls");
+  revalidatePath("/accounting");
+}
+
+/** Write off remaining AR — posts as Bad debt (not cash) via write_off_simulated payment. */
+export async function writeOffInvoice(formData: FormData) {
+  const profile = await getCurrentProfile();
+  if (!profile || !canManageBilling(profile.role)) {
+    throw new Error("Only billing or managers can write off invoices.");
+  }
+
+  const invoiceId = formString(formData, "invoice_id");
+  const note = formString(formData, "note") || "Collections write-off";
+  const supabase = await createClient();
+  const { data: invoice } = await supabase
+    .from("invoices")
+    .select("*")
+    .eq("id", invoiceId)
+    .maybeSingle();
+  if (!invoice) throw new Error("Invoice not found");
+  if (invoice.status === "disputed") {
+    redirect(
+      toastErrorPath(
+        "/ar",
+        "Resolve the dispute before writing off this invoice.",
+      ),
+    );
+  }
+  if (["paid", "cancelled"].includes(invoice.status)) {
+    redirect(toastErrorPath("/ar", "That invoice is already closed."));
+  }
+
+  const balance = Math.max(0, Number(invoice.total) - Number(invoice.amount_paid));
+  if (balance <= 0) {
+    redirect(toastErrorPath("/ar", "No open balance to write off."));
+  }
+
+  const { data: paymentRow, error } = await supabase
+    .from("payments")
+    .insert({
+      invoice_id: invoiceId,
+      amount: balance,
+      payment_date: new Date().toISOString().slice(0, 10),
+      method: "write_off_simulated",
+      reference: note.slice(0, 120),
+      recorded_by: profile.id,
+    })
+    .select("id")
+    .single();
+  if (error) throw new Error(error.message);
+
+  const previousStatus = invoice.status;
+  await supabase
+    .from("invoices")
+    .update({ amount_paid: Number(invoice.total), status: "paid" })
+    .eq("id", invoiceId);
+
+  await logBillingEvent({
+    entityType: "payment",
+    entityId: paymentRow.id,
+    fromStatus: null,
+    toStatus: "write_off",
+    changedBy: profile.id,
+    note: `Write-off ${balance.toFixed(2)} on ${invoice.invoice_number}: ${note}`,
+  });
+  await logBillingEvent({
+    entityType: "invoice",
+    entityId: invoiceId,
+    fromStatus: previousStatus,
+    toStatus: "paid",
+    changedBy: profile.id,
+    note: `AR written off to bad debt (${balance.toFixed(2)})`,
+  });
+
+  revalidatePath("/payments");
+  revalidatePath("/invoices");
+  revalidatePath(`/invoices/${invoiceId}`);
+  revalidatePath("/ar");
+  revalidatePath("/dashboard");
+  revalidatePath("/controls");
+  revalidatePath("/accounting");
+  redirect(
+    toastPath(
+      `/invoices/${invoiceId}`,
+      `Wrote off ${balance.toFixed(2)} to bad debt`,
+    ),
+  );
 }
 
 /** Shipper demo: mark an open invoice on their account as paid in full. */

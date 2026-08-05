@@ -29,6 +29,14 @@ export async function updateSession(request: NextRequest) {
   );
 
   const path = request.nextUrl.pathname;
+  const isStaticAsset =
+    path.startsWith("/pod-samples/") ||
+    path.startsWith("/pod-uploads/") ||
+    path.startsWith("/brand/");
+  if (isStaticAsset) {
+    return NextResponse.next();
+  }
+
   const isPublic =
     path === "/" ||
     path.startsWith("/login") ||

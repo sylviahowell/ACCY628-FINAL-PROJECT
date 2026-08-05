@@ -128,7 +128,7 @@ SELECT
   (CURRENT_DATE - 3)::timestamptz + interval '15 hours',
   'SHOWCASE POD — ready to bill',
   'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaa4',
-  'https://docs.rowanlane.com/pod/ld-2011.pdf'
+  '/pod-samples/ld-2011.pdf'
 FROM public.shipments s
 WHERE s.load_number = 'LD-2011-LOSS'
 ON CONFLICT (id) DO UPDATE SET
@@ -151,7 +151,7 @@ SELECT
   (CURRENT_DATE - 2)::timestamptz + interval '14 hours',
   'POD on file; detention pending approval',
   'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaa4',
-  'https://docs.rowanlane.com/pod/ld-2012.pdf'
+  '/pod-samples/ld-2012.pdf'
 FROM public.shipments s
 WHERE s.load_number = 'LD-2012-ACC'
 ON CONFLICT (id) DO NOTHING;

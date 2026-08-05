@@ -1,14 +1,28 @@
 import Link from "next/link";
 import { redirect } from "next/navigation";
 import { EmptyState } from "@/components/EmptyState";
+import { FilterBanner, resolveSearchParams } from "@/components/FilterBanner";
 import { getCurrentProfile } from "@/lib/actions/auth";
+import {
+  filterShipments,
+  shipmentFilterLabel,
+} from "@/lib/list-filters";
 import { createClient } from "@/lib/supabase/server";
 import { isOperations, money, statusBadge } from "@/lib/types";
 import { isInternalStaff } from "@/lib/roles";
 
-export default async function ShipmentsPage() {
+export default async function ShipmentsPage({
+  searchParams,
+}: {
+  searchParams?: Promise<Record<string, string | string[] | undefined>> | Record<string, string | string[] | undefined>;
+}) {
   const profile = await getCurrentProfile();
   if (!profile) redirect("/login");
+
+  const params = await resolveSearchParams(searchParams);
+  const filter = params.filter;
+  const filterLabel = shipmentFilterLabel(filter);
+  const today = new Date().toISOString().slice(0, 10);
 
   const supabase = await createClient();
   let query = supabase
@@ -23,9 +37,9 @@ export default async function ShipmentsPage() {
   }
 
   const { data: shipments } = await query;
-  const rows = shipments ?? [];
+  const allRows = shipments ?? [];
 
-  const shipmentIds = rows.map((s) => s.id);
+  const shipmentIds = allRows.map((s) => s.id);
   const { data: pods } =
     shipmentIds.length > 0
       ? await supabase.from("proof_of_delivery").select("shipment_id").in("shipment_id", shipmentIds)
@@ -44,6 +58,8 @@ export default async function ShipmentsPage() {
       .filter((i) => i.status !== "cancelled" && i.shipment_id)
       .map((i) => i.shipment_id as string),
   );
+
+  const rows = filterShipments(allRows, filter, { today, podSet, billedSet });
 
   const title =
     profile.role === "carrier"
@@ -86,18 +102,26 @@ export default async function ShipmentsPage() {
         ) : null}
       </div>
 
+      {filterLabel ? <FilterBanner label={filterLabel} clearHref="/shipments" /> : null}
+
       {rows.length === 0 ? (
         <EmptyState
-          title="No shipments to show"
+          title={filterLabel ? "No matching shipments" : "No shipments to show"}
           description={
-            profile.role === "carrier"
-              ? "Nothing is assigned to your carrier yet."
-              : profile.role === "customer"
-                ? "You do not have any shipments on this account yet."
-                : "Create a load from Broker Operations to start the contract-to-cash flow."
+            filterLabel
+              ? "Nothing matches this filter right now."
+              : profile.role === "carrier"
+                ? "Nothing is assigned to your carrier yet."
+                : profile.role === "customer"
+                  ? "You do not have any shipments on this account yet."
+                  : "Create a load from Broker Operations to start the contract-to-cash flow."
           }
           action={
-            isOperations(profile.role) ? (
+            filterLabel ? (
+              <Link href="/shipments" className="btn btn-outline btn-sm">
+                Show all shipments
+              </Link>
+            ) : isOperations(profile.role) ? (
               <Link href="/shipments/new" className="btn btn-primary btn-sm">
                 New shipment
               </Link>

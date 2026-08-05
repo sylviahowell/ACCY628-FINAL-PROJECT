@@ -1,5 +1,7 @@
+import Link from "next/link";
 import { redirect } from "next/navigation";
 import { EmptyState } from "@/components/EmptyState";
+import { FilterBanner, resolveSearchParams } from "@/components/FilterBanner";
 import { getCurrentProfile } from "@/lib/actions/auth";
 import {
   createContract,
@@ -10,10 +12,17 @@ import {
 import { createClient } from "@/lib/supabase/server";
 import { isOperations } from "@/lib/types";
 
-export default async function ContractsPage() {
+export default async function ContractsPage({
+  searchParams,
+}: {
+  searchParams?: Promise<Record<string, string | string[] | undefined>> | Record<string, string | string[] | undefined>;
+}) {
   const profile = await getCurrentProfile();
   if (!profile) redirect("/login");
   if (!isOperations(profile.role)) redirect("/dashboard");
+
+  const params = await resolveSearchParams(searchParams);
+  const expiringOnly = params.filter === "expiring";
 
   const supabase = await createClient();
   const { data: contracts } = await supabase
@@ -22,6 +31,19 @@ export default async function ContractsPage() {
     .order("created_at", { ascending: false });
   const { data: customers } = await supabase.from("customers").select("id, name").order("name");
   const today = new Date().toISOString().slice(0, 10);
+  const soon = new Date();
+  soon.setUTCDate(soon.getUTCDate() + 30);
+  const soonStr = soon.toISOString().slice(0, 10);
+
+  const allContracts = contracts ?? [];
+  const visibleContracts = expiringOnly
+    ? allContracts.filter(
+        (c) =>
+          c.status === "active" &&
+          c.end_date &&
+          c.end_date <= soonStr,
+      )
+    : allContracts;
 
   return (
     <div className="space-y-6">
@@ -32,6 +54,10 @@ export default async function ContractsPage() {
           and invoicing.
         </p>
       </div>
+
+      {expiringOnly ? (
+        <FilterBanner label="contracts ending within 30 days (or already past end)" clearHref="/contracts" />
+      ) : null}
 
       <details className="collapse collapse-arrow rounded-box border border-base-300 bg-base-100">
         <summary className="collapse-title font-medium">New contract</summary>
@@ -62,10 +88,21 @@ export default async function ContractsPage() {
         </div>
       </details>
 
-      {(contracts ?? []).length === 0 ? (
+      {visibleContracts.length === 0 ? (
         <EmptyState
-          title="No contracts yet"
-          description="Create a shipping agreement to drive rates and payment terms on new loads."
+          title={expiringOnly ? "No expiring contracts" : "No contracts yet"}
+          description={
+            expiringOnly
+              ? "No active contracts end within the next 30 days."
+              : "Create a shipping agreement to drive rates and payment terms on new loads."
+          }
+          action={
+            expiringOnly ? (
+              <Link href="/contracts" className="btn btn-outline btn-sm">
+                Show all contracts
+              </Link>
+            ) : undefined
+          }
         />
       ) : (
       <div className="overflow-x-auto rounded-box bg-base-100 shadow-sm">
@@ -81,7 +118,7 @@ export default async function ContractsPage() {
             </tr>
           </thead>
           <tbody>
-            {(contracts ?? []).map((c) => {
+            {visibleContracts.map((c) => {
               const pastEnd = c.end_date && c.end_date < today && c.status === "active";
               return (
                 <tr key={c.id}>

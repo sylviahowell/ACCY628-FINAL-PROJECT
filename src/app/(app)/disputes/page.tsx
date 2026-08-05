@@ -1,5 +1,7 @@
+import Link from "next/link";
 import { Suspense } from "react";
 import { requirePathAccess } from "@/lib/authz";
+import { FilterBanner, resolveSearchParams } from "@/components/FilterBanner";
 import { FocusScroll } from "@/components/FocusScroll";
 import { resolveDispute } from "@/lib/actions/freight";
 import { createClient } from "@/lib/supabase/server";
@@ -7,14 +9,25 @@ import { sanitizeDemoText } from "@/lib/display-text";
 import { money, statusBadge } from "@/lib/types";
 import { canManageBilling } from "@/lib/roles";
 
-export default async function DisputesPage() {
+export default async function DisputesPage({
+  searchParams,
+}: {
+  searchParams?: Promise<Record<string, string | string[] | undefined>> | Record<string, string | string[] | undefined>;
+}) {
   const profile = await requirePathAccess("/disputes");
   const canResolve = canManageBilling(profile.role);
+  const params = await resolveSearchParams(searchParams);
+  const openOnly = params.filter === "open";
+
   const supabase = await createClient();
   const { data: disputes } = await supabase
     .from("disputes")
     .select("*, invoices(invoice_number, status, amount_paid, total), shipments(load_number)")
     .order("created_at", { ascending: false });
+
+  const rows = openOnly
+    ? (disputes ?? []).filter((d) => d.status === "open")
+    : (disputes ?? []);
 
   return (
     <div className="space-y-6">
@@ -28,8 +41,9 @@ export default async function DisputesPage() {
           full.
         </p>
       </div>
+      {openOnly ? <FilterBanner label="open disputes only" clearHref="/disputes" /> : null}
       <div className="space-y-3">
-        {(disputes ?? []).map((d) => {
+        {rows.map((d) => {
           const inv = d.invoices as {
             invoice_number?: string;
             status?: string;
@@ -80,8 +94,19 @@ export default async function DisputesPage() {
             </div>
           );
         })}
-        {(disputes ?? []).length === 0 ? (
-          <p className="text-sm opacity-70">No disputes on file.</p>
+        {rows.length === 0 ? (
+          <p className="text-sm opacity-70">
+            {openOnly ? (
+              <>
+                No open disputes.{" "}
+                <Link href="/disputes" className="link">
+                  Show all
+                </Link>
+              </>
+            ) : (
+              "No disputes on file."
+            )}
+          </p>
         ) : null}
       </div>
     </div>

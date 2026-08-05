@@ -447,17 +447,25 @@ export default async function DashboardPage() {
                   .reduce((s, d) => s + Number(d.amount_disputed), 0),
             )}
             warn
+            href="/ar?filter=cash-at-risk"
           />
           <Stat
             title="POD-ready unbilled"
             value={String(unbilledDelivered)}
             warn={unbilledDelivered > 0}
+            href="/shipments?filter=ready-to-bill"
           />
-          <Stat title="Overdue invoices" value={String(pastDue.length)} warn={pastDue.length > 0} />
+          <Stat
+            title="Overdue invoices"
+            value={String(pastDue.length)}
+            warn={pastDue.length > 0}
+            href="/ar?filter=past-due"
+          />
           <Stat
             title="Open disputes"
             value={String(disputeList.filter((d) => d.status === "open").length)}
             warn={disputeList.some((d) => d.status === "open")}
+            href="/disputes?filter=open"
           />
         </div>
         <MorningBriefCard
@@ -716,14 +724,48 @@ export default async function DashboardPage() {
         />
         <StoryActionChips role="broker" />
         <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
-          <Stat title="Today's pickups" value={String(stats.pickupsToday)} />
-          <Stat title="Today's deliveries" value={String(stats.deliveriesToday)} />
-          <Stat title="Awaiting carrier" value={String(stats.unassigned)} warn={stats.unassigned > 0} />
-          <Stat title="Delayed loads" value={String(stats.delayed)} warn={stats.delayed > 0} />
-          <Stat title="Customer contact" value={String(stats.customerContact)} />
-          <Stat title="Carrier follow-ups" value={String(stats.carrierPending)} />
-          <Stat title="Accessorials to review" value={String(stats.accessorial)} />
-          <Stat title="Contract deadlines" value={String(stats.contracts)} />
+          <Stat
+            title="Today's pickups"
+            value={String(stats.pickupsToday)}
+            href="/shipments?filter=pickup-today"
+          />
+          <Stat
+            title="Today's deliveries"
+            value={String(stats.deliveriesToday)}
+            href="/shipments?filter=delivery-today"
+          />
+          <Stat
+            title="Awaiting carrier"
+            value={String(stats.unassigned)}
+            warn={stats.unassigned > 0}
+            href="/shipments?filter=unassigned"
+          />
+          <Stat
+            title="Delayed loads"
+            value={String(stats.delayed)}
+            warn={stats.delayed > 0}
+            href="/shipments?filter=delayed"
+          />
+          <Stat
+            title="Customer contact"
+            value={String(stats.customerContact)}
+            href="/warnings"
+          />
+          <Stat
+            title="Carrier follow-ups"
+            value={String(stats.carrierPending)}
+            href="/carriers"
+          />
+          <Stat
+            title="Accessorials to review"
+            value={String(stats.accessorial)}
+            href="/warnings"
+          />
+          <Stat
+            title="Contract deadlines"
+            value={String(stats.contracts)}
+            href="/contracts?filter=expiring"
+          />
         </div>
 
         {watchActions.length > 0 ? (
@@ -864,34 +906,65 @@ export default async function DashboardPage() {
         />
         <StoryActionChips role="billing" />
         <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
-          <Stat title="Total AR" value={money(ar)} />
-          <Stat title="Current AR" value={money(aging.current)} />
-          <Stat title="1–30 days past due" value={money(aging.d1_30)} warn={aging.d1_30 > 0} />
-          <Stat title="31–60 days past due" value={money(aging.d31_60)} warn={aging.d31_60 > 0} />
-          <Stat title="61–90 days past due" value={money(aging.d61_90)} warn={aging.d61_90 > 0} />
+          <Stat title="Total AR" value={money(ar)} href="/ar" />
+          <Stat title="Current AR" value={money(aging.current)} href="/ar?filter=current" />
+          <Stat
+            title="1–30 days past due"
+            value={money(aging.d1_30)}
+            warn={aging.d1_30 > 0}
+            href="/ar?filter=d1_30"
+          />
+          <Stat
+            title="31–60 days past due"
+            value={money(aging.d31_60)}
+            warn={aging.d31_60 > 0}
+            href="/ar?filter=d31_60"
+          />
+          <Stat
+            title="61–90 days past due"
+            value={money(aging.d61_90)}
+            warn={aging.d61_90 > 0}
+            href="/ar?filter=d61_90"
+          />
           <Stat
             title="More than 90 days"
             value={money(aging.d90_plus)}
             warn={aging.d90_plus > 0}
+            href="/ar?filter=d90_plus"
           />
-          <Stat title="Cash received today" value={money(paidToday)} />
-          <Stat title="Cash received this month" value={money(cashMonth)} />
+          <Stat
+            title="Cash received today"
+            value={money(paidToday)}
+            href="/payments?filter=today"
+          />
+          <Stat
+            title="Cash received this month"
+            value={money(cashMonth)}
+            href="/payments?filter=month"
+          />
           <Stat
             title="Delivered but unbilled"
             value={String(ready.length)}
             warn={ready.length > 0}
+            href="/shipments?filter=ready-to-bill"
           />
           <Stat
             title="Awaiting supporting docs"
             value={String(awaitingDocs.length)}
             warn={awaitingDocs.length > 0}
+            href="/shipments?filter=awaiting-docs"
           />
           <Stat
             title="Disputed invoice balance"
             value={money(disputedBalance)}
             warn={disputedBalance > 0}
+            href="/disputes?filter=open"
           />
-          <Stat title="Open invoices" value={String(openInvoices.length)} />
+          <Stat
+            title="Open invoices"
+            value={String(openInvoices.length)}
+            href="/invoices?filter=open"
+          />
         </div>
 
         <div className="grid gap-4 lg:grid-cols-2">
@@ -1005,10 +1078,28 @@ export default async function DashboardPage() {
         />
         <StoryActionChips role="customer" />
         <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
-          <Stat title="Current shipments" value={String(current.length)} />
-          <Stat title="Recent deliveries" value={String(recentDeliveries.length)} />
-          <Stat title="Outstanding balance" value={money(ar)} warn={ar > 0} />
-          <Stat title="Past-due invoices" value={String(overdueMine.length)} warn={overdueMine.length > 0} />
+          <Stat
+            title="Current shipments"
+            value={String(current.length)}
+            href="/shipments?filter=active"
+          />
+          <Stat
+            title="Recent deliveries"
+            value={String(recentDeliveries.length)}
+            href="/shipments?filter=delivered"
+          />
+          <Stat
+            title="Outstanding balance"
+            value={money(ar)}
+            warn={ar > 0}
+            href="/invoices?filter=unpaid"
+          />
+          <Stat
+            title="Past-due invoices"
+            value={String(overdueMine.length)}
+            warn={overdueMine.length > 0}
+            href="/invoices?filter=overdue"
+          />
         </div>
 
         {attention.length > 0 ? (
@@ -1129,13 +1220,27 @@ export default async function DashboardPage() {
       />
       <StoryActionChips role="carrier" />
       <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
-        <Stat title="Assigned loads" value={String(assigned.length)} />
-        <Stat title="Upcoming pickups" value={String(upcomingPickups.length)} />
-        <Stat title="Deliveries due today" value={String(dueToday.length)} warn={dueToday.length > 0} />
+        <Stat
+          title="Assigned loads"
+          value={String(assigned.length)}
+          href="/shipments?filter=active"
+        />
+        <Stat
+          title="Upcoming pickups"
+          value={String(upcomingPickups.length)}
+          href="/shipments?filter=pickup-upcoming"
+        />
+        <Stat
+          title="Deliveries due today"
+          value={String(dueToday.length)}
+          warn={dueToday.length > 0}
+          href="/shipments?filter=delivery-due-today"
+        />
         <Stat
           title="POD still needed"
           value={String(missingPod.length)}
           warn={missingPod.length > 0}
+          href="/documents?filter=missing-pod"
         />
       </div>
 
@@ -1203,19 +1308,36 @@ function Stat({
   title,
   value,
   warn,
+  href,
 }: {
   title: string;
   value: string;
   warn?: boolean;
+  href?: string;
 }) {
-  return (
-    <div className="stats bg-base-100 shadow-sm w-full">
-      <div className="stat py-3">
-        <div className="stat-title text-xs">{title}</div>
-        <div className={`stat-value text-2xl ${warn ? "text-error" : "text-primary"}`}>
-          {value}
-        </div>
+  const inner = (
+    <div className="stat py-3">
+      <div className="stat-title text-xs">{title}</div>
+      <div className={`stat-value text-2xl ${warn ? "text-error" : "text-primary"}`}>
+        {value}
       </div>
+    </div>
+  );
+
+  if (href) {
+    return (
+      <Link
+        href={href}
+        className="stats block w-full bg-base-100 shadow-sm transition hover:border-primary/40 hover:shadow-md focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary"
+      >
+        {inner}
+      </Link>
+    );
+  }
+
+  return (
+    <div className="stats w-full bg-base-100 shadow-sm">
+      {inner}
     </div>
   );
 }

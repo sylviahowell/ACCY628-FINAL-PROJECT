@@ -1,13 +1,20 @@
 import Link from "next/link";
 import { EmptyState } from "@/components/EmptyState";
+import { FilterBanner, resolveSearchParams } from "@/components/FilterBanner";
 import { requirePathAccess } from "@/lib/authz";
 import { getCurrentProfile } from "@/lib/actions/auth";
 import { normalizePodUrl, sanitizeDemoText } from "@/lib/display-text";
 import { createClient } from "@/lib/supabase/server";
 
-export default async function DocumentsPage() {
+export default async function DocumentsPage({
+  searchParams,
+}: {
+  searchParams?: Promise<Record<string, string | string[] | undefined>> | Record<string, string | string[] | undefined>;
+}) {
   await requirePathAccess("/documents");
   const profile = await getCurrentProfile();
+  const params = await resolveSearchParams(searchParams);
+  const missingOnly = params.filter === "missing-pod";
   const supabase = await createClient();
 
   const carrierId = profile?.role === "carrier" ? profile.carrier_id : null;
@@ -43,6 +50,10 @@ export default async function DocumentsPage() {
         </p>
       </div>
 
+      {missingOnly ? (
+        <FilterBanner label="loads still missing POD" clearHref="/documents" />
+      ) : null}
+
       {missing.length > 0 ? (
         <div className="card border border-warning/40 bg-warning/10 shadow-sm">
           <div className="card-body py-4">
@@ -62,53 +73,65 @@ export default async function DocumentsPage() {
             </ul>
           </div>
         </div>
+      ) : missingOnly ? (
+        <EmptyState
+          title="No missing POD"
+          description="All completed loads have proof of delivery on file."
+          action={
+            <Link href="/documents" className="btn btn-outline btn-sm">
+              Show all documents
+            </Link>
+          }
+        />
       ) : null}
 
-      <div className="space-y-3">
-        {(pods ?? []).map((p) => (
-          <div key={p.id} className="card bg-base-100 shadow-sm">
-            <div className="card-body py-4">
-              <div className="flex flex-wrap justify-between gap-3">
-                <div>
-                  <Link
-                    href={`/shipments/${p.shipment_id}`}
-                    className="link link-primary font-medium"
-                  >
-                    {(p.shipments as { load_number?: string } | null)?.load_number ?? "Shipment"}
-                  </Link>
-                  <p className="text-sm opacity-70">
-                    Signed by {p.signed_by ?? "—"} ·{" "}
-                    {new Date(p.delivered_at).toLocaleString()}
-                  </p>
-                  <p className="text-xs opacity-60">{sanitizeDemoText(p.notes)}</p>
+      {!missingOnly ? (
+        <div className="space-y-3">
+          {(pods ?? []).map((p) => (
+            <div key={p.id} className="card bg-base-100 shadow-sm">
+              <div className="card-body py-4">
+                <div className="flex flex-wrap justify-between gap-3">
+                  <div>
+                    <Link
+                      href={`/shipments/${p.shipment_id}`}
+                      className="link link-primary font-medium"
+                    >
+                      {(p.shipments as { load_number?: string } | null)?.load_number ?? "Shipment"}
+                    </Link>
+                    <p className="text-sm opacity-70">
+                      Signed by {p.signed_by ?? "—"} ·{" "}
+                      {new Date(p.delivered_at).toLocaleString()}
+                    </p>
+                    <p className="text-xs opacity-60">{sanitizeDemoText(p.notes)}</p>
+                  </div>
+                  {normalizePodUrl(p.file_url) ? (
+                    <a
+                      href={normalizePodUrl(p.file_url)!}
+                      className="btn btn-outline btn-sm"
+                      target="_blank"
+                      rel="noreferrer"
+                    >
+                      Open file
+                    </a>
+                  ) : (
+                    <span className="badge badge-ghost">No file URL</span>
+                  )}
                 </div>
-                {normalizePodUrl(p.file_url) ? (
-                  <a
-                    href={normalizePodUrl(p.file_url)!}
-                    className="btn btn-outline btn-sm"
-                    target="_blank"
-                    rel="noreferrer"
-                  >
-                    Open file
-                  </a>
-                ) : (
-                  <span className="badge badge-ghost">No file URL</span>
-                )}
               </div>
             </div>
-          </div>
-        ))}
-        {(pods ?? []).length === 0 ? (
-          <EmptyState
-            title="No delivery documents yet"
-            description={
-              missing.length > 0
-                ? "Upload POD from a delivered load above to clear the queue."
-                : "Proof of delivery for your assignments will appear here."
-            }
-          />
-        ) : null}
-      </div>
+          ))}
+          {(pods ?? []).length === 0 ? (
+            <EmptyState
+              title="No delivery documents yet"
+              description={
+                missing.length > 0
+                  ? "Upload POD from a delivered load above to clear the queue."
+                  : "Proof of delivery for your assignments will appear here."
+              }
+            />
+          ) : null}
+        </div>
+      ) : null}
     </div>
   );
 }

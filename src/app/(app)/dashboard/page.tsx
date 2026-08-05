@@ -11,7 +11,7 @@ import { PayablesWorklist } from "@/components/PayablesWorklist";
 import { CustomerFriendlyStatusCard } from "@/components/ShipmentHealthCard";
 import { ProfitabilityHeatmap } from "@/components/ProfitabilityHeatmap";
 import { ShipmentMapLazy } from "@/components/ShipmentMapLazy";
-import { DecideNowRail, type DecideNowItem } from "@/components/DecideNowRail";
+import { DecideNowRail } from "@/components/DecideNowRail";
 import { HorizontalBars, MonthlyBars, StatusPie } from "@/components/Charts";
 import { requirePathAccess } from "@/lib/authz";
 import { bucketByMonth } from "@/lib/analytics";
@@ -24,6 +24,14 @@ import {
   buildUnbilledQueues,
   computeAging,
 } from "@/lib/collections";
+import {
+  arBalanceAsOf,
+  buildDecideNowCandidates,
+  buildExecutiveHealthLine,
+  countActiveAsOf,
+  countLateAsOf,
+  rankDecideNowItems,
+} from "@/lib/decide-now";
 import {
   computePayableAging,
   openApBalance,
@@ -84,7 +92,7 @@ export default async function DashboardPage() {
     supabase
       .from("carriers")
       .select("id, name, rating, insurance_expiration, equipment_type, service_area"),
-    supabase.from("payments").select("amount, payment_date"),
+    supabase.from("payments").select("invoice_id, amount, payment_date"),
     supabase
       .from("disputes")
       .select("id, reason, amount_disputed, status, invoice_id, customer_id"),
@@ -292,19 +300,23 @@ export default async function DashboardPage() {
       .filter((p) => inRange(p.payment_date, lastMonth.start, lastMonth.end))
       .reduce((s, p) => s + Number(p.amount), 0);
 
-    // Approx: loads that were already active a week ago (created before, not finished by then)
-    const activeLastWeekApprox = shipList.filter(
-      (s) =>
-        s.created_at &&
-        s.created_at.slice(0, 10) <= weekAgoStr &&
-        !["cancelled"].includes(s.status),
-    ).length;
-    const lateLastWeek = shipList.filter(
-      (s) =>
-        s.promised_delivery_date &&
-        s.promised_delivery_date < weekAgoStr &&
-        !["delivered", "completed", "cancelled"].includes(s.status),
-    ).length;
+    const activeAsOfWeekAgo = countActiveAsOf(shipList, weekAgoStr);
+    const lateAsOfWeekAgo = countLateAsOf(shipList, weekAgoStr);
+    const lastMonthEndStr = lastMonth.end.toISOString().slice(0, 10);
+    const arLastMonthEnd = arBalanceAsOf({
+      invoices: invList.map((i) => ({
+        id: i.id,
+        total: Number(i.total),
+        issue_date: i.issue_date,
+        status: i.status,
+      })),
+      payments: (payments ?? []).map((p) => ({
+        invoice_id: (p as { invoice_id?: string }).invoice_id ?? "",
+        amount: Number(p.amount),
+        payment_date: p.payment_date,
+      })),
+      asOfExclusive: lastMonthEndStr,
+    });
 
     const kpis = buildExecutiveKpis({
       revenueThisMonth,
@@ -314,11 +326,11 @@ export default async function DashboardPage() {
       marginThisMonth,
       marginLastMonth,
       activeShipments: activeList.length,
-      activeLastWeekApprox,
+      activeAsOfWeekAgo,
       lateDeliveries: lateList.length,
-      lateLastWeek,
+      lateAsOfWeekAgo,
       arBalance: ar,
-      arLastMonthEndApprox: Math.max(ar * 0.92, ar - cashThisMonth),
+      arLastMonthEnd,
       cashThisMonth,
       cashLastMonth,
     });
@@ -364,28 +376,18 @@ export default async function DashboardPage() {
         (s) => s.delivery_date === today || s.promised_delivery_date === today,
       ).length,
       invoicesDueToday: invList.filter((i) => i.due_date === today).length,
-      approvalsWaiting: (approvals ?? []).length,
-      lateShipments: lateList.length,
-      unprofitableActive: activeList.filter((s) => {
-        const p = profitByShipment.get(s.id);
-        const m = p ? Number(p.margin) : Number(s.customer_rate) - Number(s.carrier_cost);
-        return m < 0;
-      }).length,
-      overdueInvoices: pastDue.length,
-      insuranceExpiring,
-      openDisputes: disputeList.filter((d) => d.status === "open").length,
     });
 
     const podSet = new Set(podList.map((p) => p.shipment_id));
     const billedSet = new Set(
       invList.filter((i) => isActiveFinalInvoice(i) && i.shipment_id).map((i) => i.shipment_id),
     );
-    const unbilledDelivered = shipList.filter(
+    const unbilledShipments = shipList.filter(
       (s) =>
         ["delivered", "completed"].includes(s.status) &&
         podSet.has(s.id) &&
         !billedSet.has(s.id),
-    ).length;
+    );
 
     const heatRows = toHeatRows({
       profit: profitList.map((p) => ({
@@ -472,29 +474,6 @@ export default async function DashboardPage() {
         .filter((d) => d.status === "open")
         .reduce((s, d) => s + Number(d.amount_disputed), 0);
 
-    const pendingApprovals = approvals ?? [];
-    const topApproval = pendingApprovals[0];
-    let topApprovalHref = "/approvals";
-    let topApprovalDetail = "Accessorials and exceptions waiting on you";
-    if (topApproval) {
-      let focusLoad: string | null = null;
-      if (topApproval.entity_type === "shipment") {
-        focusLoad =
-          shipList.find((s) => s.id === topApproval.entity_id)?.load_number ?? null;
-      } else if (topApproval.entity_type === "shipment_charge") {
-        const shipId = chargeList.find((c) => c.id === topApproval.entity_id)?.shipment_id;
-        focusLoad = shipId
-          ? (shipList.find((s) => s.id === shipId)?.load_number ?? null)
-          : null;
-      }
-      topApprovalHref = focusLoad
-        ? `/approvals?type=${encodeURIComponent(topApproval.request_type)}&focus=${encodeURIComponent(focusLoad)}`
-        : `/approvals?type=${encodeURIComponent(topApproval.request_type)}`;
-      topApprovalDetail = sanitizeDemoText(
-        `${topApproval.request_type}${focusLoad ? ` · ${focusLoad}` : ""} · ${money(topApproval.amount)}`,
-      );
-    }
-
     const openDisputeCount = disputeList.filter((d) => d.status === "open").length;
 
     const invoicesByCustomer = new Map<
@@ -536,140 +515,107 @@ export default async function DashboardPage() {
       );
     }
 
-    const decideNowItems: DecideNowItem[] = [];
-    if (pendingCoverageCount > 0) {
-      decideNowItems.push({
-        id: "coverage",
-        title: "Coverage requests",
-        metric: String(pendingCoverageCount),
-        detail: "Shippers waiting for ops to book a load, then assign a carrier",
-        href: "/coverage",
-        tone: "warning",
-        cta: "Review",
-      });
-    }
-    if (pendingApprovals.length > 0) {
-      decideNowItems.push({
-        id: "approvals",
-        title: "Pending approvals",
-        metric: String(pendingApprovals.length),
-        detail: topApprovalDetail,
-        href: topApprovalHref,
-        tone: "warning",
-        cta: "Review",
-      });
-    }
-    if (lateList.length > 0) {
-      decideNowItems.push({
-        id: "late",
-        title: "Delayed shipments",
-        metric: String(lateList.length),
-        detail: "Promised delivery date has passed — still open",
-        href: "#shipment-network-map",
-        tone: "error",
-        cta: "View map",
-      });
-    }
-    if (cashAtRisk > 0) {
-      decideNowItems.push({
-        id: "cash-at-risk",
-        title: "Cash at risk",
-        metric: money(cashAtRisk),
-        detail: "Overdue balances plus open dispute amounts",
-        href: "/ar?filter=cash-at-risk",
-        tone: "error",
-        cta: "Open AR",
-      });
-    }
-    if (riskIssueCount > 0) {
-      decideNowItems.push({
-        id: "risk-credit",
-        title: "Risk & credit",
-        metric: String(riskIssueCount),
-        detail: riskDetailParts.join(" · ") || "Credit or carrier insurance needs review",
-        href: "/risk",
-        tone: insuranceExpired > 0 || customersOverCredit > 0 ? "error" : "warning",
-        cta: "Open Risk",
-      });
-    }
-    if (unbilledDelivered > 0) {
-      decideNowItems.push({
-        id: "unbilled",
-        title: "POD-ready unbilled",
-        metric: String(unbilledDelivered),
-        detail: "Delivered with POD but not yet invoiced",
-        href: "/shipments?filter=ready-to-bill",
-        tone: "warning",
-        cta: "Open",
-      });
-    }
-    if (pastDue.length > 0) {
-      decideNowItems.push({
-        id: "overdue",
-        title: "Overdue invoices",
-        metric: String(pastDue.length),
-        detail: "Customer balances past due date",
-        href: "/ar?filter=past-due",
-        tone: "warning",
-        cta: "Open AR",
-      });
-    }
-    if (decideNowItems.length < 5 && openDisputeCount > 0) {
-      decideNowItems.push({
-        id: "disputes",
-        title: "Open disputes",
-        metric: String(openDisputeCount),
-        detail: "Billing disputes still unresolved",
-        href: "/disputes?filter=open",
-        tone: "info",
-        cta: "Review",
-      });
-    }
+    const resolveLoadNumber = (entityType: string, entityId: string) => {
+      if (entityType === "shipment") {
+        return shipList.find((s) => s.id === entityId)?.load_number ?? null;
+      }
+      if (entityType === "shipment_charge") {
+        const shipId = chargeList.find((c) => c.id === entityId)?.shipment_id;
+        return shipId
+          ? (shipList.find((s) => s.id === shipId)?.load_number ?? null)
+          : null;
+      }
+      return null;
+    };
+
+    const decideNowItems = rankDecideNowItems(
+      buildDecideNowCandidates({
+        today,
+        coverageCount: pendingCoverageCount,
+        approvals: (approvals ?? []).map((a) => ({
+          id: a.id,
+          amount: Number(a.amount),
+          request_type: a.request_type,
+          entity_type: a.entity_type,
+          entity_id: a.entity_id,
+          created_at: a.created_at ?? null,
+        })),
+        lateShipments: lateList.map((s) => ({
+          id: s.id,
+          load_number: s.load_number,
+          customer_rate: Number(s.customer_rate),
+          promised_delivery_date: s.promised_delivery_date,
+          status: s.status,
+        })),
+        unbilledShipments: unbilledShipments.map((s) => ({
+          id: s.id,
+          load_number: s.load_number,
+          customer_rate: Number(s.customer_rate),
+          promised_delivery_date: s.promised_delivery_date,
+          status: s.status,
+        })),
+        pastDueInvoices: pastDue.map((i) => ({
+          total: Number(i.total),
+          amount_paid: Number(i.amount_paid),
+          due_date: i.due_date,
+        })),
+        openDisputeCount,
+        cashAtRisk,
+        riskIssueCount,
+        riskDetail: riskDetailParts.join(" · "),
+        riskTone:
+          insuranceExpired > 0 || customersOverCredit > 0 ? "error" : "warning",
+        resolveLoadNumber,
+        sanitize: sanitizeDemoText,
+      }),
+      3,
+    );
+
+    const healthLine = buildExecutiveHealthLine({
+      topItems: decideNowItems,
+      marginPct: marginThisMonth,
+      lateCount: lateList.length,
+      cashAtRisk,
+    });
 
     return (
       <div className="space-y-6">
         <Header
           title="Executive Dashboard"
-          subtitle="Decide now, scan the brief, then review margin and network health"
+          subtitle={`Company performance and exceptions · As of ${today}`}
           action={
             <Link href="/controls" className="link link-hover text-sm opacity-70">
               Recent control overrides →
             </Link>
           }
         />
-        <div className="rounded-box border border-primary/20 bg-base-100 px-4 py-3 text-sm shadow-sm">
-          <p className="font-semibold">Shipper coverage process</p>
-          <ol className="mt-1 list-decimal space-y-0.5 pl-5 opacity-80">
-            <li>Shipper submits a coverage request (lane + dates).</li>
-            <li>Broker or manager books an unassigned load from the request.</li>
-            <li>Ops assigns a Preferred / Approved carrier from scorecards.</li>
-            <li>Shipper tracks the load on My Shipments.</li>
-          </ol>
-          {pendingCoverageCount > 0 ? (
-            <Link href="/coverage" className="btn btn-warning btn-sm mt-3">
-              {pendingCoverageCount} pending request{pendingCoverageCount === 1 ? "" : "s"}
-            </Link>
-          ) : (
-            <Link href="/coverage" className="link link-primary mt-2 inline-block text-xs">
-              Open coverage inbox →
-            </Link>
-          )}
-        </div>
-        <DecideNowRail items={decideNowItems.slice(0, 5)} />
+        <p className="rounded-box border border-base-300 bg-base-100 px-4 py-2.5 text-sm font-medium -mt-2">
+          {healthLine}
+        </p>
+        <DecideNowRail items={decideNowItems} />
         <MorningBriefCard
           greeting={brief.greeting}
           yesterday={brief.yesterday}
           today={brief.today}
-          attention={brief.attention}
         />
         <KpiRibbon items={kpis} />
-        <ProfitabilityHeatmap rows={heatRows} />
-        <ShipmentMapLazy shipments={mapShipments} today={today} />
+        <div className="space-y-3">
+          <div>
+            <h2 className="text-lg font-bold tracking-tight">Network & profitability</h2>
+            <p className="text-sm opacity-70">
+              Where margin concentrates and how live freight is moving across the map.
+            </p>
+          </div>
+          <ProfitabilityHeatmap rows={heatRows} />
+          <ShipmentMapLazy shipments={mapShipments} today={today} />
+        </div>
         <details className="rounded-box border border-base-300 bg-base-100">
           <summary className="cursor-pointer list-none px-4 py-3 marker:content-none [&::-webkit-details-marker]:hidden">
             <span className="flex flex-wrap items-end justify-between gap-2">
               <span>
-                <span className="block text-lg font-bold">Performance trends</span>
+                <span className="block text-lg font-bold tracking-tight">
+                  Performance trends
+                </span>
                 <span className="text-sm font-normal opacity-70">
                   Monthly revenue and profit, top customers by margin, and weakest loads
                 </span>

@@ -123,7 +123,7 @@ async function main() {
     // 7) Normal login should NOT show demo selector
     // Use a demo account via password form but without demo cookie — signIn clears demo mode
     await page.goto(`${BASE}/login`, { waitUntil: "networkidle" });
-    await page.fill('input[name="email"]', "manager@freightflow.example");
+    await page.fill('input[name="email"]', "manager@rowanlane.example");
     await page.fill('input[name="password"]', "FreightDemo2026!");
     await page.getByRole("button", { name: /^Sign In$/i }).click();
     await page.waitForURL(/\/dashboard/, { timeout: 45000 });

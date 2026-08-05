@@ -272,7 +272,7 @@ async function main() {
 
     console.log(`\n--- Normal login ---`);
     await page.goto(`${BASE}/login`, { waitUntil: "networkidle" });
-    await page.fill('input[name="email"]', "manager@freightflow.example");
+    await page.fill('input[name="email"]', "manager@rowanlane.example");
     await page.fill('input[name="password"]', "FreightDemo2026!");
     await page.getByRole("button", { name: /^Sign In$/i }).click();
     await page.waitForURL(/\/dashboard/, { timeout: 60000 });

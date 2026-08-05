@@ -13,6 +13,10 @@ export type DecideNowItem = {
   cta?: string;
   /** Higher = more urgent; sort only. */
   score: number;
+  /** Count rows get a muted unit suffix in the rail; money rows stay bare. */
+  metricKind: "count" | "money";
+  /** Shown after count metrics only (e.g. loads, requests). */
+  metricUnit?: string;
 };
 
 function daysBetween(from: string, to: string): number {
@@ -34,41 +38,6 @@ export function rankDecideNowItems(items: DecideNowItem[], limit = 3): DecideNow
     .filter((i) => i.score > 0)
     .sort((a, b) => b.score - a.score)
     .slice(0, limit);
-}
-
-export function buildExecutiveHealthLine(input: {
-  topItems: DecideNowItem[];
-  marginPct: number;
-  lateCount: number;
-  cashAtRisk: number;
-}): string {
-  if (input.topItems.length === 0) {
-    if (input.marginPct < 15) {
-      return "Clear of open decisions — watch margin; network ops look steady.";
-    }
-    return "Clear — no decisions waiting. Network looks healthy.";
-  }
-
-  const top = input.topItems[0];
-  if (top.id === "cash-at-risk") {
-    return `Cash pressure: ${money(input.cashAtRisk)} at risk — prioritize collections.`;
-  }
-  if (top.id === "delayed") {
-    return `Ops exception: ${input.lateCount} delayed load${input.lateCount === 1 ? "" : "s"} need recovery.`;
-  }
-  if (top.id === "approvals") {
-    return `Approvals blocking cash — ${top.metric} waiting on leadership.`;
-  }
-  if (top.id === "coverage") {
-    return `Shippers waiting on coverage — ${top.metric} request${top.metric === "1" ? "" : "s"} to book.`;
-  }
-  if (top.id === "risk-credit") {
-    return `Risk & credit needs review — ${top.detail}.`;
-  }
-  if (top.id === "ready-to-bill") {
-    return "Billing lag: ready-to-bill loads still uninvoiced — free up cash.";
-  }
-  return `Focus: ${top.title.toLowerCase()} (${top.metric}).`;
 }
 
 type ApprovalRow = {
@@ -117,6 +86,8 @@ export function buildDecideNowCandidates(input: {
       id: "coverage",
       title: "Coverage requests",
       metric: String(input.coverageCount),
+      metricKind: "count",
+      metricUnit: input.coverageCount === 1 ? "request" : "requests",
       detail: "Shippers waiting for ops to book a load, then assign a carrier",
       href: "/coverage",
       tone: "warning",
@@ -142,6 +113,7 @@ export function buildDecideNowCandidates(input: {
       id: "approvals",
       title: "Pending approvals",
       metric: money(approvalSum),
+      metricKind: "money",
       detail: input.sanitize(
         `${input.approvals.length} waiting · oldest ${ageLabel(ageDays)}${
           focusLoad ? ` · ${focusLoad}` : ""
@@ -175,10 +147,12 @@ export function buildDecideNowCandidates(input: {
       id: "delayed",
       title: "Delayed loads",
       metric: String(input.lateShipments.length),
+      metricKind: "count",
+      metricUnit: input.lateShipments.length === 1 ? "load" : "loads",
       detail: `${money(exposure)} exposure · worst ${worst.load_number} (${ageLabel(daysLate)} late)`,
       href: "/shipments?status=delayed",
       tone: "error",
-      cta: "Open",
+      cta: "Review",
       score: exposure,
     });
   }
@@ -195,13 +169,14 @@ export function buildDecideNowCandidates(input: {
       id: "cash-at-risk",
       title: "Cash at risk",
       metric: money(input.cashAtRisk),
+      metricKind: "money",
       detail:
         parts.length > 0
           ? `${parts.join(" · ")} — overdue balances plus dispute amounts`
           : "Overdue balances plus open dispute amounts",
       href: "/ar?filter=cash-at-risk",
       tone: "error",
-      cta: "Open AR",
+      cta: "Review",
       score: input.cashAtRisk,
     });
   }
@@ -211,10 +186,12 @@ export function buildDecideNowCandidates(input: {
       id: "risk-credit",
       title: "Risk & credit",
       metric: String(input.riskIssueCount),
+      metricKind: "count",
+      metricUnit: input.riskIssueCount === 1 ? "issue" : "issues",
       detail: input.riskDetail || "Credit or carrier insurance needs review",
       href: "/risk",
       tone: input.riskTone,
-      cta: "Open Risk",
+      cta: "Review",
       score: input.riskIssueCount * 25_000,
     });
   }
@@ -231,12 +208,13 @@ export function buildDecideNowCandidates(input: {
       id: "ready-to-bill",
       title: "Ready to bill",
       metric: money(unbilledValue),
+      metricKind: "money",
       detail: `${input.unbilledShipments.length} load${
         input.unbilledShipments.length === 1 ? "" : "s"
       } with POD · top ${top.load_number}`,
       href: "/shipments?filter=ready-to-bill",
       tone: "warning",
-      cta: "Open",
+      cta: "Review",
       score: unbilledValue,
     });
   }
@@ -250,12 +228,13 @@ export function buildDecideNowCandidates(input: {
       id: "overdue",
       title: "Overdue invoices",
       metric: money(overdueBal),
+      metricKind: "money",
       detail: `${input.pastDueInvoices.length} invoice${
         input.pastDueInvoices.length === 1 ? "" : "s"
       } past due`,
       href: "/ar?filter=past-due",
       tone: "warning",
-      cta: "Open AR",
+      cta: "Review",
       score: overdueBal,
     });
   }
@@ -265,6 +244,8 @@ export function buildDecideNowCandidates(input: {
       id: "disputes",
       title: "Open disputes",
       metric: String(input.openDisputeCount),
+      metricKind: "count",
+      metricUnit: input.openDisputeCount === 1 ? "dispute" : "disputes",
       detail: "Billing disputes still unresolved",
       href: "/disputes?filter=open",
       tone: "info",

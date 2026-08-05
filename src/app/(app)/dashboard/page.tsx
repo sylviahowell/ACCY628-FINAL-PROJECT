@@ -27,7 +27,6 @@ import {
 import {
   arBalanceAsOf,
   buildDecideNowCandidates,
-  buildExecutiveHealthLine,
   countActiveAsOf,
   countLateAsOf,
   rankDecideNowItems,
@@ -571,27 +570,17 @@ export default async function DashboardPage() {
       3,
     );
 
-    const healthLine = buildExecutiveHealthLine({
-      topItems: decideNowItems,
-      marginPct: marginThisMonth,
-      lateCount: lateList.length,
-      cashAtRisk,
-    });
-
     return (
       <div className="space-y-6">
         <Header
           title="Executive Dashboard"
-          subtitle={`Company performance and exceptions · As of ${today}`}
+          subtitle={`Company performance and exceptions · As of ${today} UTC`}
           action={
             <Link href="/controls" className="link link-hover text-sm opacity-70">
               Recent control overrides →
             </Link>
           }
         />
-        <p className="rounded-box border border-base-300 bg-base-100 px-4 py-2.5 text-sm font-medium -mt-2">
-          {healthLine}
-        </p>
         <DecideNowRail items={decideNowItems} />
         <MorningBriefCard
           greeting={brief.greeting}
@@ -599,11 +588,11 @@ export default async function DashboardPage() {
           today={brief.today}
         />
         <KpiRibbon items={kpis} />
-        <div className="space-y-3">
+        <div className="space-y-4">
           <div>
             <h2 className="text-lg font-bold tracking-tight">Network & profitability</h2>
             <p className="text-sm opacity-70">
-              Where margin concentrates and how live freight is moving across the map.
+              Margin concentration and live freight position.
             </p>
           </div>
           <ProfitabilityHeatmap rows={heatRows} />

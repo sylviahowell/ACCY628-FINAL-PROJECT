@@ -794,9 +794,14 @@ export async function reviewApproval(formData: FormData) {
   revalidatePath("/warnings");
   revalidatePath("/shipments");
   revalidatePath("/dashboard");
+
+  const returnRaw = String(formData.get("return_to") || "").trim();
+  const returnTo =
+    returnRaw === "/dashboard" || returnRaw === "/approvals" ? returnRaw : "/approvals";
+
   redirect(
     toastPath(
-      "/approvals",
+      returnTo,
       decision === "approved" ? "Request approved" : "Request rejected",
     ),
   );

@@ -3,9 +3,14 @@ import { requirePathAccess } from "@/lib/authz";
 import { createShipment } from "@/lib/actions/freight";
 import { CreateShipmentForm } from "@/components/CreateShipmentForm";
 import { createClient } from "@/lib/supabase/server";
-import { isOperations } from "@/lib/types";
+import { isOperations, money } from "@/lib/types";
 import type { ContractTermsInfo } from "@/lib/contract-terms";
 import { openArFromInvoices, insuranceRiskStatus } from "@/lib/risk-credit";
+import {
+  isOnCreditHold,
+  PAST_DUE_CREDIT_HOLD_THRESHOLD,
+  pastDueBalanceFromInvoices,
+} from "@/lib/credit-hold";
 
 export default async function NewShipmentPage() {
   const profile = await requirePathAccess("/shipments");
@@ -29,25 +34,19 @@ export default async function NewShipmentPage() {
     .eq("status", "active");
   const { data: invoices } = await supabase
     .from("invoices")
-    .select("customer_id, total, amount_paid, status")
+    .select("customer_id, total, amount_paid, status, due_date")
     .neq("status", "cancelled");
 
   const openArByCustomer = new Map<string, number>();
-  for (const inv of invoices ?? []) {
-    const cid = inv.customer_id as string;
-    const prior = openArByCustomer.get(cid) ?? 0;
-    openArByCustomer.set(
-      cid,
-      prior +
-        openArFromInvoices([
-          {
-            total: inv.total,
-            amount_paid: inv.amount_paid,
-            status: inv.status,
-          },
-        ]),
-    );
+  const pastDueByCustomer = new Map<string, number>();
+  for (const c of customers ?? []) {
+    const invs = (invoices ?? []).filter((i) => i.customer_id === c.id);
+    openArByCustomer.set(c.id, openArFromInvoices(invs));
+    pastDueByCustomer.set(c.id, pastDueBalanceFromInvoices(invs, today));
   }
+  const heldCustomers = (customers ?? []).filter((c) =>
+    isOnCreditHold(pastDueByCustomer.get(c.id) ?? 0),
+  );
 
   const assignableCarriers = (carriers ?? []).filter(
     (c) => insuranceRiskStatus(c.insurance_expiration ?? null, today).status !== "expired",
@@ -69,12 +68,29 @@ export default async function NewShipmentPage() {
           expired insurance (Suspended) are omitted from the list.
         </p>
       </div>
+
+      {heldCustomers.length > 0 ? (
+        <div className="rounded-box border border-warning/40 bg-warning/10 px-4 py-3 text-sm">
+          <p className="font-medium">Credit hold warning</p>
+          <p className="mt-1 opacity-80">
+            Past-due AR ≥ {money(PAST_DUE_CREDIT_HOLD_THRESHOLD)} blocks broker booking
+            {profile.role === "manager" ? " (you can override; it is logged)" : ""}. On hold:{" "}
+            {heldCustomers
+              .map((c) => `${c.name} (${money(pastDueByCustomer.get(c.id) ?? 0)})`)
+              .join(", ")}
+            .
+          </p>
+        </div>
+      ) : null}
+
       <CreateShipmentForm
         customers={(customers ?? []).map((c) => ({
           id: c.id,
           name: c.name,
           creditLimit: Number(c.credit_limit ?? 0),
           openAr: openArByCustomer.get(c.id) ?? 0,
+          pastDue: pastDueByCustomer.get(c.id) ?? 0,
+          onCreditHold: isOnCreditHold(pastDueByCustomer.get(c.id) ?? 0),
         }))}
         carriers={assignableCarriers.map((c) => ({ id: c.id, name: c.name }))}
         contracts={(contracts ?? []) as ContractTermsInfo[]}

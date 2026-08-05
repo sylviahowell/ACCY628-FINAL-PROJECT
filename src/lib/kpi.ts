@@ -9,6 +9,7 @@ export type KpiItem = {
   deltaLabel: string;
   tone: KpiTone;
   status: string;
+  href?: string;
 };
 
 function pctChange(current: number, prior: number) {
@@ -30,9 +31,9 @@ function formatPts(n: number) {
 }
 
 function formatCountDelta(n: number, unit: string) {
-  if (n === 0) return `Flat vs prior ${unit}`;
+  if (n === 0) return `Flat vs ${unit}`;
   const sign = n > 0 ? "+" : "";
-  return `${sign}${n} vs prior ${unit}`;
+  return `${sign}${n} vs ${unit}`;
 }
 
 /** Period helpers (UTC month windows). */
@@ -58,21 +59,21 @@ export function buildExecutiveKpis(input: {
   marginThisMonth: number;
   marginLastMonth: number;
   activeShipments: number;
-  activeLastWeekApprox: number;
+  activeAsOfWeekAgo: number;
   lateDeliveries: number;
-  lateLastWeek: number;
+  lateAsOfWeekAgo: number;
   arBalance: number;
-  arLastMonthEndApprox: number;
+  arLastMonthEnd: number;
   cashThisMonth: number;
   cashLastMonth: number;
 }): KpiItem[] {
   const revDelta = pctChange(input.revenueThisMonth, input.revenueLastMonth);
   const profitDelta = pctChange(input.profitThisMonth, input.profitLastMonth);
   const marginDelta = input.marginThisMonth - input.marginLastMonth;
-  const lateDelta = input.lateDeliveries - input.lateLastWeek;
-  const arDelta = pctChange(input.arBalance, input.arLastMonthEndApprox);
+  const lateDelta = input.lateDeliveries - input.lateAsOfWeekAgo;
+  const arDelta = pctChange(input.arBalance, input.arLastMonthEnd);
   const cashDelta = pctChange(input.cashThisMonth, input.cashLastMonth);
-  const activeDelta = input.activeShipments - input.activeLastWeekApprox;
+  const activeDelta = input.activeShipments - input.activeAsOfWeekAgo;
 
   return [
     {
@@ -82,6 +83,7 @@ export function buildExecutiveKpis(input: {
       deltaLabel: `${formatPct(revDelta)} from last month`,
       tone: revDelta >= 0 ? "good" : "bad",
       status: revDelta >= 0 ? "Improving" : "Soft",
+      href: "/profitability",
     },
     {
       id: "gp",
@@ -90,6 +92,7 @@ export function buildExecutiveKpis(input: {
       deltaLabel: `${formatPct(profitDelta)} from last month`,
       tone: profitDelta >= 0 ? "good" : "bad",
       status: input.profitThisMonth >= 0 ? "On track" : "Loss",
+      href: "/profitability",
     },
     {
       id: "gm",
@@ -98,30 +101,34 @@ export function buildExecutiveKpis(input: {
       deltaLabel: `${formatPts(marginDelta)} vs last month`,
       tone: marginDelta >= 0 ? "good" : "bad",
       status: input.marginThisMonth >= 15 ? "Healthy" : "Watch",
+      href: "/profitability",
     },
     {
       id: "active",
       label: "Active shipments",
       value: String(input.activeShipments),
-      deltaLabel: formatCountDelta(activeDelta, "week"),
+      deltaLabel: formatCountDelta(activeDelta, "7d ago"),
       tone: "neutral",
-      status: "Network load",
+      status: "In network",
+      href: "/shipments",
     },
     {
       id: "late",
-      label: "Late deliveries",
+      label: "Delayed loads",
       value: String(input.lateDeliveries),
-      deltaLabel: formatCountDelta(lateDelta, "week"),
+      deltaLabel: formatCountDelta(lateDelta, "7d ago"),
       tone: lateDelta <= 0 ? "good" : "bad",
       status: input.lateDeliveries === 0 ? "Clear" : "Attention",
+      href: "/shipments?status=delayed",
     },
     {
       id: "ar",
       label: "Accounts receivable",
       value: money(input.arBalance),
-      deltaLabel: `${formatPct(arDelta)} vs prior month level`,
+      deltaLabel: `${formatPct(arDelta)} vs end of last month`,
       tone: arDelta <= 0 ? "good" : "bad",
       status: input.arBalance > 0 ? "Outstanding" : "Cleared",
+      href: "/ar",
     },
     {
       id: "cash",
@@ -130,6 +137,7 @@ export function buildExecutiveKpis(input: {
       deltaLabel: `${formatPct(cashDelta)} from last month`,
       tone: cashDelta >= 0 ? "good" : "bad",
       status: cashDelta >= 0 ? "Strong" : "Slower",
+      href: "/payments",
     },
   ];
 }

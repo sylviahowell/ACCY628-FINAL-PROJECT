@@ -14,6 +14,8 @@ export type BookingCustomer = {
   name: string;
   creditLimit: number;
   openAr: number;
+  pastDue?: number;
+  onCreditHold?: boolean;
 };
 
 export type BookingCarrier = {
@@ -66,7 +68,8 @@ export function CreateShipmentForm({
     customer!.creditLimit > 0 &&
     rateNum > 0 &&
     projected > customer!.creditLimit;
-  const blockSubmit = overCredit && !isManager;
+  const onHold = Boolean(customer?.onCreditHold);
+  const blockSubmit = (overCredit || onHold) && !isManager;
 
   function applyQuoteFromContract(contract: ContractTermsInfo, mileStr: string) {
     const q = calcLaneQuote(Number(mileStr), contract);
@@ -110,6 +113,7 @@ export function CreateShipmentForm({
           {customers.map((c) => (
             <option key={c.id} value={c.id}>
               {c.name}
+              {c.onCreditHold ? " · CREDIT HOLD" : ""}
             </option>
           ))}
         </select>
@@ -265,6 +269,18 @@ export function CreateShipmentForm({
           </p>
         )}
 
+        {customer && customer.onCreditHold ? (
+          <div className="md:col-span-2 rounded-box border border-warning/40 bg-warning/10 px-3 py-2.5 text-sm">
+            <p className="font-medium">Credit hold — {customer.name}</p>
+            <p className="opacity-80">
+              Past-due AR {money(customer.pastDue ?? 0)} meets the hold threshold
+              {isManager
+                ? " — manager override will be logged on submit."
+                : " — ask a manager to book this load, or clear past-due balances first."}
+            </p>
+          </div>
+        ) : null}
+
         {customer && customer.creditLimit > 0 ? (
           <div
             className={`md:col-span-2 rounded-box border px-3 py-2.5 text-sm ${
@@ -323,15 +339,20 @@ export function CreateShipmentForm({
         />
         {isManager ? (
           <p className="md:col-span-2 text-xs opacity-60">
-            Managers may book above a customer credit limit; the override is logged.
+            Managers may override credit limit and past-due credit holds; overrides are logged.
           </p>
         ) : (
           <p className="md:col-span-2 text-xs opacity-60">
-            Booking is blocked if open AR + this rate exceeds the customer credit limit.
+            Booking is blocked if open AR + this rate exceeds the credit limit, or if past-due AR
+            meets the credit-hold threshold.
           </p>
         )}
         <button className="btn btn-primary md:col-span-2" disabled={blockSubmit}>
-          {blockSubmit ? "Ask a manager — over credit limit" : "Create shipment"}
+          {blockSubmit
+            ? onHold
+              ? "Ask a manager — credit hold"
+              : "Ask a manager — over credit limit"
+            : "Create shipment"}
         </button>
       </div>
     </form>

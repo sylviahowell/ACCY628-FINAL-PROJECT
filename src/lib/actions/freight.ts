@@ -22,6 +22,13 @@ import { formString, moneyAmount, nonEmptyString, parseForm, uuidSchema } from "
 import { logEvent } from "@/lib/log-event";
 import { insuranceRiskStatus } from "@/lib/risk-credit";
 import { payableAmount } from "@/lib/payables";
+import { logBillingEvent } from "@/lib/billing-audit";
+import {
+  creditHoldMessage,
+  creditHoldOverrideNote,
+  isOnCreditHold,
+  pastDueBalanceFromInvoices,
+} from "@/lib/credit-hold";
 import { expirePastEndContracts } from "@/lib/actions/contracts-lifecycle";
 import { z } from "zod";
 
@@ -345,32 +352,49 @@ export async function createShipment(formData: FormData) {
   await expirePastEndContracts();
 
   if (carrierId) {
-    await assertCarrierInsuranceCurrent(carrierId);
+    try {
+      await assertCarrierInsuranceCurrent(carrierId);
+    } catch (err) {
+      const message = err instanceof Error ? err.message : "Carrier insurance check failed.";
+      redirect(toastErrorPath("/shipments/new", message));
+    }
   }
 
-  // Credit limit control: open AR + this rate cannot exceed customer credit
+  // Credit controls: past-due hold + open AR vs credit limit
   const { data: customer } = await supabase
     .from("customers")
     .select("id, credit_limit, payment_terms, name")
     .eq("id", customerId)
     .single();
-  if (!customer) throw new Error("Customer not found");
+  if (!customer) {
+    redirect(toastErrorPath("/shipments/new", "Customer not found."));
+  }
 
+  const today = new Date().toISOString().slice(0, 10);
   const { data: openInvoices } = await supabase
     .from("invoices")
-    .select("total, amount_paid, status")
+    .select("total, amount_paid, status, due_date")
     .eq("customer_id", customerId)
     .neq("status", "cancelled");
   const openAr = (openInvoices ?? []).reduce((sum, inv) => {
     if (["paid", "cancelled"].includes(inv.status)) return sum;
     return sum + Math.max(0, Number(inv.total) - Number(inv.amount_paid));
   }, 0);
+  const pastDue = pastDueBalanceFromInvoices(openInvoices ?? [], today);
+  const onCreditHold = isOnCreditHold(pastDue);
+  if (onCreditHold && profile.role !== "manager") {
+    redirect(toastErrorPath("/shipments/new", creditHoldMessage(customer.name, pastDue)));
+  }
+
   const creditLimit = Number(customer.credit_limit ?? 0);
   const projected = openAr + customerRate;
   if (creditLimit > 0 && projected > creditLimit) {
     if (profile.role !== "manager") {
-      throw new Error(
-        `Credit limit exceeded for ${customer.name}: open AR ${openAr.toFixed(0)} + rate ${customerRate.toFixed(0)} > limit ${creditLimit.toFixed(0)}. Ask a manager to book this load.`,
+      redirect(
+        toastErrorPath(
+          "/shipments/new",
+          `Credit limit exceeded for ${customer.name}: open AR ${openAr.toFixed(0)} + rate ${customerRate.toFixed(0)} > limit ${creditLimit.toFixed(0)}. Ask a manager to book this load.`,
+        ),
       );
     }
   }
@@ -383,19 +407,24 @@ export async function createShipment(formData: FormData) {
       .select("*")
       .eq("id", contractId)
       .single();
-    if (!contract) throw new Error("Contract not found");
+    if (!contract) {
+      redirect(toastErrorPath("/shipments/new", "Contract not found."));
+    }
     if (contract.status !== "active") {
-      throw new Error("Only active contracts can be used on new shipments.");
+      redirect(toastErrorPath("/shipments/new", "Only active contracts can be used on new shipments."));
     }
     if (contract.customer_id !== customerId) {
-      throw new Error("Selected contract does not belong to this customer.");
+      redirect(toastErrorPath("/shipments/new", "Selected contract does not belong to this customer."));
     }
     const outside =
       isDateOutsideContractWindow(pickupDate, contract.start_date, contract.end_date) ||
       isDateOutsideContractWindow(deliveryDate, contract.start_date, contract.end_date);
     if (outside && formData.get("confirm_outside_contract_dates") !== "on") {
-      throw new Error(
-        "Pickup/delivery is outside the contract window. Confirm the override on the form, or adjust dates.",
+      redirect(
+        toastErrorPath(
+          "/shipments/new",
+          "Pickup/delivery is outside the contract window. Confirm the override on the form, or adjust dates.",
+        ),
       );
     }
     contractDownpaymentPct = Number(contract.downpayment_pct ?? 0);
@@ -444,7 +473,9 @@ export async function createShipment(formData: FormData) {
     });
   }
 
-  if (creditLimit > 0 && projected > creditLimit && profile.role === "manager") {
+  if (onCreditHold && profile.role === "manager") {
+    await logStatus(data.id, null, status, profile.id, creditHoldOverrideNote(pastDue));
+  } else if (creditLimit > 0 && projected > creditLimit && profile.role === "manager") {
     await logStatus(
       data.id,
       null,
@@ -1006,22 +1037,37 @@ export async function generateInvoice(shipmentId: string, _formData?: FormData) 
   }
 
   const invoiceNumber = `INV-${Date.now().toString().slice(-8)}`;
-  const { error } = await supabase.from("invoices").insert({
-    invoice_number: invoiceNumber,
-    customer_id: shipment.customer_id,
-    shipment_id: shipment.id,
-    status: "sent",
-    issue_date: issueDate,
-    due_date: dueDate,
-    subtotal,
-    total,
-    amount_paid: 0,
-  });
+  const { data: createdInvoice, error } = await supabase
+    .from("invoices")
+    .insert({
+      invoice_number: invoiceNumber,
+      customer_id: shipment.customer_id,
+      shipment_id: shipment.id,
+      status: "sent",
+      issue_date: issueDate,
+      due_date: dueDate,
+      subtotal,
+      total,
+      amount_paid: 0,
+    })
+    .select("id")
+    .single();
   if (error) {
     if (error.message.toLowerCase().includes("duplicate")) {
       throw new Error("Duplicate invoice number blocked by control.");
     }
     throw new Error(error.message);
+  }
+
+  if (createdInvoice?.id) {
+    await logBillingEvent({
+      entityType: "invoice",
+      entityId: createdInvoice.id,
+      fromStatus: null,
+      toStatus: "sent",
+      changedBy: profile.id,
+      note: `Invoice ${invoiceNumber} generated`,
+    });
   }
 
   await supabase
@@ -1062,14 +1108,18 @@ export async function recordPayment(formData: FormData) {
     );
   }
 
-  const { error } = await supabase.from("payments").insert({
-    invoice_id: invoiceId,
-    amount,
-    payment_date: String(formData.get("payment_date") || new Date().toISOString().slice(0, 10)),
-    method: String(formData.get("method") || "ach_simulated"),
-    reference: String(formData.get("reference") || "") || null,
-    recorded_by: profile.id,
-  });
+  const { data: paymentRow, error } = await supabase
+    .from("payments")
+    .insert({
+      invoice_id: invoiceId,
+      amount,
+      payment_date: String(formData.get("payment_date") || new Date().toISOString().slice(0, 10)),
+      method: String(formData.get("method") || "ach_simulated"),
+      reference: String(formData.get("reference") || "") || null,
+      recorded_by: profile.id,
+    })
+    .select("id")
+    .single();
   if (error) throw new Error(error.message);
 
   const paid = Number(invoice.amount_paid) + amount;
@@ -1077,15 +1127,38 @@ export async function recordPayment(formData: FormData) {
   if (paid >= Number(invoice.total)) status = "paid";
   else if (paid > 0) status = "partial";
 
+  const previousStatus = invoice.status;
   await supabase
     .from("invoices")
     .update({ amount_paid: paid, status })
     .eq("id", invoiceId);
 
+  if (paymentRow?.id) {
+    await logBillingEvent({
+      entityType: "payment",
+      entityId: paymentRow.id,
+      fromStatus: null,
+      toStatus: "recorded",
+      changedBy: profile.id,
+      note: `Payment ${amount.toFixed(2)} on invoice ${invoice.invoice_number ?? invoiceId}`,
+    });
+  }
+  if (previousStatus !== status) {
+    await logBillingEvent({
+      entityType: "invoice",
+      entityId: invoiceId,
+      fromStatus: previousStatus,
+      toStatus: status,
+      changedBy: profile.id,
+      note: `Status updated after payment of ${amount.toFixed(2)}`,
+    });
+  }
+
   revalidatePath("/payments");
   revalidatePath("/invoices");
   revalidatePath("/ar");
   revalidatePath("/dashboard");
+  revalidatePath("/controls");
 }
 
 /** Shipper demo: mark an open invoice on their account as paid in full. */
@@ -1205,22 +1278,52 @@ export async function openDispute(formData: FormData) {
     }
   }
 
-  const { error } = await supabase.from("disputes").insert({
-    invoice_id: invoiceId,
-    shipment_id: shipmentId,
-    customer_id: profile.customer_id,
-    reason: input.reason,
-    amount_disputed: input.amount_disputed,
-    opened_by: profile.id,
-    status: "open",
-  });
+  const { data: openedDispute, error } = await supabase
+    .from("disputes")
+    .insert({
+      invoice_id: invoiceId,
+      shipment_id: shipmentId,
+      customer_id: profile.customer_id,
+      reason: input.reason,
+      amount_disputed: input.amount_disputed,
+      opened_by: profile.id,
+      status: "open",
+    })
+    .select("id")
+    .single();
   if (error) throw new Error(error.message);
+
+  if (openedDispute?.id) {
+    await logBillingEvent({
+      entityType: "dispute",
+      entityId: openedDispute.id,
+      fromStatus: null,
+      toStatus: "open",
+      changedBy: profile.id,
+      note: input.reason.slice(0, 200),
+    });
+  }
+
   if (invoiceId) {
+    const { data: before } = await supabase
+      .from("invoices")
+      .select("status")
+      .eq("id", invoiceId)
+      .maybeSingle();
     await supabase.from("invoices").update({ status: "disputed" }).eq("id", invoiceId);
+    await logBillingEvent({
+      entityType: "invoice",
+      entityId: invoiceId,
+      fromStatus: before?.status ?? null,
+      toStatus: "disputed",
+      changedBy: profile.id,
+      note: "Invoice marked disputed",
+    });
   }
   revalidatePath("/invoices");
   revalidatePath("/disputes");
   revalidatePath("/dashboard");
+  revalidatePath("/controls");
   redirect(toastPath("/invoices", "Dispute submitted"));
 }
 
@@ -1248,9 +1351,22 @@ export async function resolveDispute(formData: FormData) {
 
   const { error } = await supabase
     .from("disputes")
-    .update({ status: decision })
+    .update({
+      status: decision,
+      resolved_at: new Date().toISOString(),
+      resolved_by: profile.id,
+    })
     .eq("id", disputeId);
   if (error) throw new Error(error.message);
+
+  await logBillingEvent({
+    entityType: "dispute",
+    entityId: disputeId,
+    fromStatus: "open",
+    toStatus: decision,
+    changedBy: profile.id,
+    note: `Dispute ${decision}`,
+  });
 
   if (dispute.invoice_id) {
     const { data: invoice } = await supabase
@@ -1279,6 +1395,14 @@ export async function resolveDispute(formData: FormData) {
           .from("invoices")
           .update({ status: nextStatus })
           .eq("id", invoice.id);
+        await logBillingEvent({
+          entityType: "invoice",
+          entityId: invoice.id,
+          fromStatus: "disputed",
+          toStatus: nextStatus,
+          changedBy: profile.id,
+          note: `Invoice restored after dispute ${decision}`,
+        });
       }
     }
   }
@@ -1288,6 +1412,7 @@ export async function resolveDispute(formData: FormData) {
   revalidatePath("/payments");
   revalidatePath("/ar");
   revalidatePath("/dashboard");
+  revalidatePath("/controls");
 }
 
 export async function reviewApproval(formData: FormData) {

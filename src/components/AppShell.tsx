@@ -241,6 +241,7 @@ function navFor(
           { href: "/dashboard", label: "Broker Operations", icon: i(<LayoutDashboard className="h-4 w-4" />) },
           { href: "/warnings", label: "Warnings", icon: i(<AlertTriangle className="h-4 w-4" />) },
           { href: "/coverage", label: "Coverage requests", icon: i(<Inbox className="h-4 w-4" />) },
+          { href: "/risk", label: "Risk & Credit", icon: i(<ShieldAlert className="h-4 w-4" />) },
           {
             href: "/shipments",
             label: "Shipments",

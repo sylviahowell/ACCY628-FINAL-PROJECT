@@ -864,6 +864,11 @@ export default async function DashboardPage() {
             },
           ]
         : []),
+      {
+        title: "Risk & Credit review",
+        action: "Check customer credit utilization and carrier insurance expiry",
+        href: "/risk",
+      },
     ];
 
     return (
@@ -873,6 +878,9 @@ export default async function DashboardPage() {
           subtitle="Intake shipper requests, cover loads, clear delays, keep freight moving"
           action={
             <div className="flex flex-wrap gap-2">
+              <Link href="/risk" className="btn btn-outline btn-sm">
+                Risk &amp; Credit
+              </Link>
               <Link href="/coverage" className="btn btn-outline btn-sm">
                 Coverage requests
                 {pendingCoverageCount > 0 ? (

@@ -30,6 +30,7 @@ const ALLOWED = {
   broker: [
     "/dashboard",
     "/warnings",
+    "/risk",
     "/coverage",
     "/customers",
     "/contracts",
@@ -66,7 +67,7 @@ const ROLES = [
     cardIndex: 1,
     name: "Blake Broker",
     dashboardHint: /Broker|Operations|Task|Shipment|Carrier/i,
-    forbidden: ["/invoices", "/ar", "/profitability", "/support", "/documents", "/approvals", "/controls", "/risk"],
+    forbidden: ["/invoices", "/ar", "/profitability", "/support", "/documents", "/approvals", "/controls"],
   },
   {
     role: "billing",

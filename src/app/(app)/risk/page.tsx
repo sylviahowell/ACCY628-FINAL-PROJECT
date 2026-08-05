@@ -13,7 +13,7 @@ import { createClient } from "@/lib/supabase/server";
 
 export default async function RiskCreditPage() {
   const profile = await requirePathAccess("/risk");
-  if (profile.role !== "manager") redirect("/dashboard");
+  if (profile.role !== "manager" && profile.role !== "broker") redirect("/dashboard");
 
   const supabase = await createClient();
   const today = new Date().toISOString().slice(0, 10);

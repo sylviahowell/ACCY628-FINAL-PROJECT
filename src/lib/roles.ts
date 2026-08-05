@@ -49,6 +49,7 @@ export function allowedPaths(role: UserRole): string[] {
       return [
         "/dashboard",
         "/warnings",
+        "/risk",
         "/coverage",
         "/customers",
         "/contracts",

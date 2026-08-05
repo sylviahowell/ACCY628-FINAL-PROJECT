@@ -474,3 +474,127 @@ WHERE load_number LIKE 'LD-TEST%'
    OR load_number LIKE 'LD-CXL%'
    OR load_number LIKE 'LD-C2C-%'
    OR load_number LIKE 'LD-REQ-%';
+
+-- ---------------------------------------------------------------------------
+-- Support tickets (shipper + carrier + one resolved for staff filters)
+-- Profiles: customer aaa…3 · carrier aaa…4 · broker aaa…2
+-- ---------------------------------------------------------------------------
+INSERT INTO public.support_tickets (
+  id, ticket_number, created_by, customer_id, carrier_id,
+  subject, category, priority, status, shipment_id,
+  assigned_to, resolved_by, resolved_at, created_at, updated_at
+) VALUES
+(
+  'bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbb01',
+  'TKT-1001',
+  'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaa3',
+  '11111111-1111-1111-1111-111111111101',
+  NULL,
+  'ETA update on delayed load LD-1003',
+  'shipment',
+  'high',
+  'open',
+  '44444444-4444-4444-4444-444444444403',
+  NULL,
+  NULL,
+  NULL,
+  now() - interval '6 hours',
+  now() - interval '6 hours'
+),
+(
+  'bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbb02',
+  'TKT-1002',
+  'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaa4',
+  NULL,
+  '22222222-2222-2222-2222-222222222201',
+  'Need clarification on POD photo requirements',
+  'account',
+  'normal',
+  'pending',
+  NULL,
+  'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaa2',
+  NULL,
+  NULL,
+  now() - interval '2 days',
+  now() - interval '1 day'
+),
+(
+  'bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbb03',
+  'TKT-1003',
+  'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaa3',
+  '11111111-1111-1111-1111-111111111101',
+  NULL,
+  'Portal login hours / who to call after 6pm CT',
+  'other',
+  'low',
+  'resolved',
+  NULL,
+  'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaa2',
+  'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaa2',
+  now() - interval '3 days',
+  now() - interval '5 days',
+  now() - interval '3 days'
+)
+ON CONFLICT (id) DO UPDATE SET
+  subject = excluded.subject,
+  status = excluded.status,
+  category = excluded.category,
+  priority = excluded.priority,
+  assigned_to = excluded.assigned_to,
+  resolved_by = excluded.resolved_by,
+  resolved_at = excluded.resolved_at,
+  updated_at = excluded.updated_at;
+
+INSERT INTO public.support_ticket_messages (id, ticket_id, author_id, body, is_internal, created_at)
+VALUES
+(
+  'cccccccc-cccc-cccc-cccc-cccccccccc01',
+  'bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbb01',
+  'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaa3',
+  'LD-1003 looks delayed past the promised delivery. Can ops confirm a revised ETA for our DC?',
+  false,
+  now() - interval '6 hours'
+),
+(
+  'cccccccc-cccc-cccc-cccc-cccccccccc02',
+  'bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbb02',
+  'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaa4',
+  'Our drivers are uploading POD photos but the portal still shows Needs POD. What file types do you accept?',
+  false,
+  now() - interval '2 days'
+),
+(
+  'cccccccc-cccc-cccc-cccc-cccccccccc03',
+  'bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbb02',
+  'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaa2',
+  'JPG or PNG under 10MB works. Re-upload from Documents → the load — if it still fails, reply here with the load number.',
+  false,
+  now() - interval '1 day'
+),
+(
+  'cccccccc-cccc-cccc-cccc-cccccccccc04',
+  'bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbb02',
+  'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaa2',
+  'Internal: Prairie Haulers often hits mobile compression — watch for HEIC rejects.',
+  true,
+  now() - interval '1 day'
+),
+(
+  'cccccccc-cccc-cccc-cccc-cccccccccc05',
+  'bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbb03',
+  'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaa3',
+  'Is there an after-hours line for emergency freight issues?',
+  false,
+  now() - interval '5 days'
+),
+(
+  'cccccccc-cccc-cccc-cccc-cccccccccc06',
+  'bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbb03',
+  'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaa2',
+  'Yes — after 6pm CT call (312) 555-0199 and select option 1 for on-call ops. Tickets submitted here are monitored Mon–Fri 8am–6pm CT.',
+  false,
+  now() - interval '3 days'
+)
+ON CONFLICT (id) DO UPDATE SET
+  body = excluded.body,
+  is_internal = excluded.is_internal;

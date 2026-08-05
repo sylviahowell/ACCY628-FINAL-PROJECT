@@ -10,6 +10,8 @@ export type ShellNavItem = {
   href: string;
   label: string;
   icon: ReactNode;
+  /** Optional badge count on the top-level link (e.g. open support tickets). */
+  count?: number;
   children?: ShellNavChild[];
 };
 
@@ -60,6 +62,9 @@ function AppNavLinksFallback({ links }: { links: ShellNavItem[] }) {
           <Link href={item.href} className="gap-3">
             {item.icon}
             <span className="flex-1">{item.label}</span>
+            {typeof item.count === "number" && item.count > 0 ? (
+              <span className="tabular-nums text-xs opacity-60">{item.count}</span>
+            ) : null}
           </Link>
         </li>
       ))}
@@ -113,6 +118,9 @@ function AppNavLinksInner({ links }: { links: ShellNavItem[] }) {
             <Link href={item.href} className={`gap-3 ${active ? "active" : ""}`}>
               {item.icon}
               <span className="flex-1">{item.label}</span>
+              {typeof item.count === "number" && item.count > 0 ? (
+                <span className="tabular-nums text-xs opacity-60">{item.count}</span>
+              ) : null}
             </Link>
           </li>
         );

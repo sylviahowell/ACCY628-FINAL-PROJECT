@@ -40,6 +40,7 @@ export function allowedPaths(role: UserRole): string[] {
         "/ar",
         "/ap",
         "/disputes",
+        "/support",
         "/accounting",
         "/reports",
         "/profitability",
@@ -55,6 +56,7 @@ export function allowedPaths(role: UserRole): string[] {
         "/contracts",
         "/shipments",
         "/carriers",
+        "/support",
         "/settings",
       ];
     case "billing":
@@ -67,6 +69,7 @@ export function allowedPaths(role: UserRole): string[] {
         "/ar",
         "/ap",
         "/disputes",
+        "/support",
         "/accounting",
         "/profitability",
         "/settings",
@@ -87,6 +90,7 @@ export function allowedPaths(role: UserRole): string[] {
         "/warnings",
         "/shipments",
         "/documents",
+        "/support",
         "/settings",
       ];
     default:

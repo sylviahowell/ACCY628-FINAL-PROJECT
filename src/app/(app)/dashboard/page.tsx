@@ -832,9 +832,9 @@ export default async function DashboardPage() {
         {watchActions.length > 0 ? (
           <Panel title="Recommended actions">
             <ul className="space-y-2">
-              {watchActions.map((w) => (
+              {watchActions.map((w, i) => (
                 <li
-                  key={w.title}
+                  key={`${w.href}-${w.title}-${i}`}
                   className="flex flex-wrap items-center justify-between gap-2 rounded-box border border-warning/30 bg-warning/10 px-3 py-2"
                 >
                   <div>
@@ -1076,18 +1076,21 @@ export default async function DashboardPage() {
             !["delivered", "completed"].includes(s.status),
         )
         .map((s) => ({
+          key: `delay-${s.id}`,
           title: `${s.load_number} is delayed`,
           detail: "Expected delivery date has passed",
           href: `/shipments/${s.id}`,
         })),
       ...overdueMine.slice(0, 3).map((i) => ({
+        key: `overdue-${i.id}`,
         title: `${i.invoice_number} is past due`,
         detail: `Balance ${money(Number(i.total) - Number(i.amount_paid))}`,
         href: "/invoices",
       })),
       ...openDisputes.slice(0, 2).map((d) => ({
+        key: `dispute-${d.id}`,
         title: "Open billing question",
-        detail: d.reason,
+        detail: sanitizeDemoText(d.reason),
         href: "/support",
       })),
     ];
@@ -1116,7 +1119,7 @@ export default async function DashboardPage() {
             <ul className="space-y-2">
               {attention.map((a) => (
                 <li
-                  key={a.title + a.detail}
+                  key={a.key}
                   className="flex flex-wrap items-center justify-between gap-2 rounded-box border border-warning/30 bg-warning/10 px-3 py-2"
                 >
                   <div>

@@ -40,27 +40,32 @@ const DEMO_SIGNIN_HELP =
   "In Auth → Providers → Email, turn off Confirm email, then create the five @rowanlane.example users.";
 
 export async function getCurrentProfile(): Promise<Profile | null> {
-  const supabase = await createClient();
-  const {
-    data: { user },
-  } = await withTimeout(
-    supabase.auth.getUser(),
-    AUTH_FETCH_TIMEOUT_MS,
-    "getUser",
-  );
-  if (!user) return null;
+  try {
+    const supabase = await createClient();
+    const {
+      data: { user },
+    } = await withTimeout(
+      supabase.auth.getUser(),
+      AUTH_FETCH_TIMEOUT_MS,
+      "getUser",
+    );
+    if (!user) return null;
 
-  const { data } = await withTimeout(
-    supabase
-      .from("profiles")
-      .select("id, email, full_name, role, customer_id, carrier_id")
-      .eq("id", user.id)
-      .maybeSingle(),
-    AUTH_FETCH_TIMEOUT_MS,
-    "getCurrentProfile",
-  );
+    const { data } = await withTimeout(
+      supabase
+        .from("profiles")
+        .select("id, email, full_name, role, customer_id, carrier_id")
+        .eq("id", user.id)
+        .maybeSingle(),
+      AUTH_FETCH_TIMEOUT_MS,
+      "getCurrentProfile",
+    );
 
-  return (data as Profile | null) ?? null;
+    return (data as Profile | null) ?? null;
+  } catch {
+    // Auth/profile hangs should not crash app routes — treat as signed out.
+    return null;
+  }
 }
 
 async function signInDemoAccount(role: UserRole) {

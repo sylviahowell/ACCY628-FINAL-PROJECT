@@ -1,6 +1,7 @@
 import { Suspense, type ReactNode } from "react";
 import {
   AlertTriangle,
+  Banknote,
   BarChart3,
   Building2,
   CheckSquare,
@@ -194,6 +195,7 @@ function navFor(
             ],
           },
           { href: "/ar", label: "Accounts Receivable", icon: i(<BarChart3 className="h-4 w-4" />) },
+          { href: "/ap", label: "Accounts Payable", icon: i(<Banknote className="h-4 w-4" />) },
           { href: "/disputes", label: "Disputes", icon: i(<AlertTriangle className="h-4 w-4" />) },
           {
             href: "/profitability",
@@ -248,6 +250,7 @@ function navFor(
           { href: "/shipments", label: "Shipments", icon: i(<Package className="h-4 w-4" />) },
           { href: "/invoices", label: "Invoices", icon: i(<FileText className="h-4 w-4" />) },
           { href: "/ar", label: "Accounts Receivable", icon: i(<BarChart3 className="h-4 w-4" />) },
+          { href: "/ap", label: "Accounts Payable", icon: i(<Banknote className="h-4 w-4" />) },
           { href: "/payments", label: "Payments", icon: i(<Wallet className="h-4 w-4" />) },
           { href: "/disputes", label: "Disputes", icon: i(<AlertTriangle className="h-4 w-4" />) },
           { href: "/accounting", label: "Accounting", icon: i(<ClipboardList className="h-4 w-4" />) },

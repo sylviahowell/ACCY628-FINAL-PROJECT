@@ -1,6 +1,6 @@
 "use client";
 
-import { Suspense, useEffect, useMemo, useState, type ReactNode } from "react";
+import { Suspense, useMemo, useState, type ReactNode } from "react";
 import { useSearchParams } from "next/navigation";
 import { FocusScroll } from "@/components/FocusScroll";
 
@@ -85,13 +85,13 @@ function InvoicesTriageInner({
   emptyAll: ReactNode;
 }) {
   const params = useSearchParams();
-  const [filter, setFilter] = useState<InvoiceFilter>(() =>
-    initialFilter(params.get("status"), params.get("filter")),
-  );
-
-  useEffect(() => {
-    setFilter(initialFilter(params.get("status"), params.get("filter")));
-  }, [params]);
+  const urlFilter = initialFilter(params.get("status"), params.get("filter"));
+  const [filter, setFilter] = useState<InvoiceFilter>(urlFilter);
+  const [prevUrlFilter, setPrevUrlFilter] = useState(urlFilter);
+  if (urlFilter !== prevUrlFilter) {
+    setPrevUrlFilter(urlFilter);
+    setFilter(urlFilter);
+  }
 
   return (
     <>

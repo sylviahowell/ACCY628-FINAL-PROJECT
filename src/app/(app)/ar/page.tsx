@@ -8,6 +8,7 @@ import { requirePathAccess } from "@/lib/authz";
 import {
   agingChartData,
   buildCollectionWorklist,
+  buildCustomerArRollup,
   computeAging,
 } from "@/lib/collections";
 import { sanitizeDemoText } from "@/lib/display-text";
@@ -42,22 +43,26 @@ export default async function AccountsReceivablePage({
     .order("created_at", { ascending: false });
 
   const invList = invoices ?? [];
+  const mappedInvoices = invList.map((i) => ({
+    id: i.id,
+    invoice_number: i.invoice_number,
+    customer_id: i.customer_id,
+    total: Number(i.total),
+    amount_paid: Number(i.amount_paid),
+    due_date: i.due_date,
+    status: i.status,
+    customers: i.customers as { name?: string } | null,
+  }));
+
   const aging = computeAging(invList, today);
   const totalAr =
     aging.current + aging.d1_30 + aging.d31_60 + aging.d61_90 + aging.d90_plus;
   const pastDue = aging.d1_30 + aging.d31_60 + aging.d61_90 + aging.d90_plus;
 
+  const customerRollup = buildCustomerArRollup(mappedInvoices, today).slice(0, 8);
+
   const worklist = buildCollectionWorklist({
-    invoices: invList.map((i) => ({
-      id: i.id,
-      invoice_number: i.invoice_number,
-      customer_id: i.customer_id,
-      total: Number(i.total),
-      amount_paid: Number(i.amount_paid),
-      due_date: i.due_date,
-      status: i.status,
-      customers: i.customers as { name?: string } | null,
-    })),
+    invoices: mappedInvoices,
     disputes: (disputes ?? []).map((d) => ({
       invoice_id: d.invoice_id,
       status: d.status,
@@ -141,6 +146,59 @@ export default async function AccountsReceivablePage({
         <div className="card-body">
           <h2 className="card-title text-base">Aging mix</h2>
           <StatusPie data={agingChartData(aging)} />
+        </div>
+      </div>
+
+      <div className="card bg-base-100 shadow-sm">
+        <div className="card-body gap-3">
+          <div>
+            <h2 className="card-title text-base">Customers by open AR</h2>
+            <p className="text-sm opacity-70">Concentration of who owes us.</p>
+          </div>
+          {customerRollup.length === 0 ? (
+            <p className="text-sm opacity-70">No open balances.</p>
+          ) : (
+            <div className="overflow-x-auto">
+              <table className="table table-sm">
+                <thead>
+                  <tr>
+                    <th>Customer</th>
+                    <th>Open AR</th>
+                    <th>Past due</th>
+                    <th># Invoices</th>
+                    <th>Oldest (days)</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {customerRollup.map((row) => (
+                    <tr key={row.customerId} className="hover">
+                      <td className="font-medium">{row.customerName}</td>
+                      <td>{money(row.openBalance)}</td>
+                      <td
+                        className={
+                          row.pastDueBalance > 0 ? "font-medium text-warning" : ""
+                        }
+                      >
+                        {money(row.pastDueBalance)}
+                      </td>
+                      <td>{row.invoiceCount}</td>
+                      <td
+                        className={
+                          row.oldestDays > 60
+                            ? "font-semibold text-error"
+                            : row.oldestDays > 0
+                              ? "text-warning"
+                              : ""
+                        }
+                      >
+                        {Math.max(0, row.oldestDays)}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
         </div>
       </div>
 

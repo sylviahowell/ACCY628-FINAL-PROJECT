@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useState, useSyncExternalStore, type ReactNode } from "react";
 import {
   Bar,
   BarChart,
@@ -72,6 +72,23 @@ function useChartColors() {
   return colors;
 }
 
+/** Recharts measures the DOM; render only after client mount to avoid hydration mismatches. */
+function useChartReady() {
+  return useSyncExternalStore(
+    () => () => {},
+    () => true,
+    () => false,
+  );
+}
+
+function ChartFrame({ children }: { children: ReactNode }) {
+  const ready = useChartReady();
+  if (!ready) {
+    return <div className="h-64 w-full" aria-hidden />;
+  }
+  return <div className="h-64 w-full">{children}</div>;
+}
+
 export function MonthlyBars({
   data,
   dataKey,
@@ -83,7 +100,7 @@ export function MonthlyBars({
 }) {
   const colors = useChartColors();
   return (
-    <div className="h-64 w-full">
+    <ChartFrame>
       <ResponsiveContainer width="100%" height="100%">
         <BarChart data={data}>
           <CartesianGrid strokeDasharray="3 3" stroke={colors.muted} opacity={0.25} />
@@ -110,7 +127,7 @@ export function MonthlyBars({
           />
         </BarChart>
       </ResponsiveContainer>
-    </div>
+    </ChartFrame>
   );
 }
 
@@ -129,7 +146,7 @@ export function StatusPie({
     colors.error,
   ];
   return (
-    <div className="h-64 w-full">
+    <ChartFrame>
       <ResponsiveContainer width="100%" height="100%">
         <PieChart>
           <Pie
@@ -154,7 +171,7 @@ export function StatusPie({
           <Legend />
         </PieChart>
       </ResponsiveContainer>
-    </div>
+    </ChartFrame>
   );
 }
 
@@ -167,7 +184,7 @@ export function HorizontalBars({
 }) {
   const colors = useChartColors();
   return (
-    <div className="h-64 w-full">
+    <ChartFrame>
       <ResponsiveContainer width="100%" height="100%">
         <BarChart data={data} layout="vertical" margin={{ left: 24 }}>
           <CartesianGrid strokeDasharray="3 3" stroke={colors.muted} opacity={0.25} />
@@ -195,6 +212,6 @@ export function HorizontalBars({
           <Bar dataKey="value" name={name} fill={colors.accent} radius={[0, 4, 4, 0]} />
         </BarChart>
       </ResponsiveContainer>
-    </div>
+    </ChartFrame>
   );
 }

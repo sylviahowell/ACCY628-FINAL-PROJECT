@@ -2,8 +2,8 @@
 
 import { useEffect, useState, useTransition } from "react";
 import { Beaker, LogOut } from "lucide-react";
-import { isRedirectError } from "next/dist/client/components/redirect-error";
-import { exitDemo, switchDemoRole } from "@/lib/actions/auth";
+import { activateDemoModeSession, exitDemo } from "@/lib/actions/auth";
+import { clientSignInDemoRole } from "@/lib/demo-auth-client";
 import {
   DEMO_MODE_STORAGE_KEY,
   DEMO_ROLE_OPTIONS,
@@ -27,6 +27,13 @@ function clearDemoClientState() {
   } catch {
     /* ignore */
   }
+}
+
+function hardNavigateToPortal(role: UserRole) {
+  // Full document navigation so middleware + layout re-read the new auth cookies.
+  window.location.assign(
+    `/dashboard?portal=${encodeURIComponent(role)}&t=${Date.now()}`,
+  );
 }
 
 export function DemoRoleSelector({ activeRole }: { activeRole: UserRole }) {
@@ -53,9 +60,10 @@ export function DemoRoleSelector({ activeRole }: { activeRole: UserRole }) {
     setError(null);
     startTransition(async () => {
       try {
-        await switchDemoRole(role);
+        await clientSignInDemoRole(role);
+        await activateDemoModeSession();
+        hardNavigateToPortal(role);
       } catch (e) {
-        if (isRedirectError(e)) throw e;
         setError(e instanceof Error ? e.message : "Could not switch demo role");
       }
     });
@@ -87,6 +95,9 @@ export function DemoRoleSelector({ activeRole }: { activeRole: UserRole }) {
           <option value="exit">Exit Demo…</option>
         </select>
       </label>
+      {pending ? (
+        <span className="text-[11px] text-[#0866D9]">Switching…</span>
+      ) : null}
       {error ? (
         <p
           className="basis-full max-w-md text-right text-[11px] leading-snug text-error"

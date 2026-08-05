@@ -95,15 +95,11 @@ export default async function InvoicesPage({
     }
   }
 
-  let overdueCount = 0;
-  let openCount = 0;
   const invoiceCards: InvoiceCardMeta[] = visibleInvoices.map((inv) => {
     const balance = Number(inv.total) - Number(inv.amount_paid);
     const isClosed = ["paid", "cancelled"].includes(inv.status) || balance <= 0;
     const isOpen = !isClosed;
     const isOverdue = isOpen && Boolean(inv.due_date && inv.due_date < today);
-    if (isOpen) openCount += 1;
-    if (isOverdue) overdueCount += 1;
 
     return {
       id: inv.id,
@@ -164,17 +160,16 @@ export default async function InvoicesPage({
 
   // Chip counts should reflect the full book when not in a dashboard deep-link,
   // and the filtered subset when one is active.
-  if (!filter || filter === "ready-to-bill") {
-    overdueCount = 0;
-    openCount = 0;
-    for (const inv of allInvoices) {
-      const balance = Number(inv.total) - Number(inv.amount_paid);
-      const isClosed = ["paid", "cancelled"].includes(inv.status) || balance <= 0;
-      const isOpen = !isClosed;
-      const isOverdue = isOpen && Boolean(inv.due_date && inv.due_date < today);
-      if (isOpen) openCount += 1;
-      if (isOverdue) overdueCount += 1;
-    }
+  const countBook = !filter || filter === "ready-to-bill" ? allInvoices : visibleInvoices;
+  let openCount = 0;
+  let overdueCount = 0;
+  for (const inv of countBook) {
+    const balance = Number(inv.total) - Number(inv.amount_paid);
+    const isClosed = ["paid", "cancelled"].includes(inv.status) || balance <= 0;
+    const isOpen = !isClosed;
+    const isOverdue = isOpen && Boolean(inv.due_date && inv.due_date < today);
+    if (isOpen) openCount += 1;
+    if (isOverdue) overdueCount += 1;
   }
 
   const showReady = canManageBilling(profile.role);

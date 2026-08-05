@@ -116,9 +116,7 @@ export function CollectionsWorklist({ items }: { items: CollectionWorkItem[] }) 
                           <>
                             <p className="line-clamp-2">{item.lastNote}</p>
                             <p className="opacity-50">
-                              {item.lastNoteAt
-                                ? new Date(item.lastNoteAt).toLocaleDateString()
-                                : ""}
+                              {item.lastNoteAt ? item.lastNoteAt.slice(0, 10) : ""}
                             </p>
                           </>
                         ) : (

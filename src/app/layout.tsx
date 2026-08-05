@@ -1,6 +1,6 @@
 import type { Metadata } from "next";
 import { Source_Sans_3 } from "next/font/google";
-import Script from "next/script";
+import { AppearanceBoot } from "@/components/AppearanceBoot";
 import "./globals.css";
 
 const sans = Source_Sans_3({
@@ -14,20 +14,6 @@ export const metadata: Metadata = {
     "Contract-to-cash management for freight brokerage and logistics",
 };
 
-/** Apply saved appearance before paint to avoid a corporate→saved flash. */
-const appearanceBootScript = `
-(function () {
-  try {
-    var key = "freightflow-theme";
-    var allowed = ["corporate", "business", "nord", "dim", "silk"];
-    var saved = localStorage.getItem(key);
-    var theme = allowed.indexOf(saved) >= 0 ? saved : "corporate";
-    document.documentElement.setAttribute("data-theme", theme);
-    if (saved !== theme) localStorage.setItem(key, theme);
-  } catch (e) {}
-})();
-`;
-
 export default function RootLayout({
   children,
 }: Readonly<{ children: React.ReactNode }>) {
@@ -39,9 +25,7 @@ export default function RootLayout({
       suppressHydrationWarning
     >
       <body className="min-h-full bg-base-200 text-base-content antialiased">
-        <Script id="freightflow-appearance-boot" strategy="beforeInteractive">
-          {appearanceBootScript}
-        </Script>
+        <AppearanceBoot />
         {children}
       </body>
     </html>

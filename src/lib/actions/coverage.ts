@@ -27,6 +27,11 @@ function toastPath(path: string, message: string) {
   return `${path}${join}toast=${encodeURIComponent(message)}`;
 }
 
+function toastErrorPath(path: string, message: string) {
+  const join = path.includes("?") ? "&" : "?";
+  return `${path}${join}toastError=${encodeURIComponent(message)}`;
+}
+
 async function logStatus(
   shipmentId: string,
   fromStatus: string | null,
@@ -211,21 +216,24 @@ export async function acceptCoverageRequest(formData: FormData) {
   const pastDue = pastDueBalanceFromInvoices(openInvoices ?? [], today);
   const onCreditHold = isOnCreditHold(pastDue);
   if (onCreditHold && profile.role !== "manager") {
-    throw new Error(creditHoldMessage(customer.name, pastDue));
+    redirect(toastErrorPath("/coverage", creditHoldMessage(customer.name, pastDue)));
   }
 
   const creditLimit = Number(customer.credit_limit ?? 0);
   const projected = openAr + customerRate;
   const overCredit = creditLimit > 0 && projected > creditLimit;
   if (overCredit && profile.role !== "manager") {
-    throw new Error(
-      `Credit limit exceeded for ${customer.name}: open AR ${openAr.toFixed(0)} + rate ${customerRate.toFixed(0)} > limit ${creditLimit.toFixed(0)}. Ask a manager to book.`,
+    redirect(
+      toastErrorPath(
+        "/coverage",
+        `Credit limit exceeded for ${customer.name}: open AR ${openAr.toFixed(0)} + rate ${customerRate.toFixed(0)} > limit ${creditLimit.toFixed(0)}. Ask a manager to book.`,
+      ),
     );
   }
 
   const lossLoad = isNegativeMargin(customerRate, carrierCost);
   if (lossLoad && profile.role !== "manager") {
-    throw new Error(negativeMarginMessage(customerRate, carrierCost));
+    redirect(toastErrorPath("/coverage", negativeMarginMessage(customerRate, carrierCost)));
   }
 
   const pickup = String(req.pickup_location || "").trim();

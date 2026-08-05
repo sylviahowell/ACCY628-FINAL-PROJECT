@@ -536,6 +536,7 @@ export async function assignCarrier(formData: FormData) {
   }
 
   const shipmentId = String(formData.get("shipment_id") || "");
+  const returnPath = shipmentId ? `/shipments/${shipmentId}` : "/shipments";
   const carrierId = String(formData.get("carrier_id") || "") || null;
   const carrierCostRaw = String(formData.get("carrier_cost") || "").trim();
   const supabase = await createClient();
@@ -545,13 +546,25 @@ export async function assignCarrier(formData: FormData) {
     .select("id, status, carrier_id, carrier_cost, customer_rate")
     .eq("id", shipmentId)
     .single();
-  if (!shipment) throw new Error("Shipment not found");
+  if (!shipment) {
+    redirect(toastErrorPath(returnPath, "Shipment not found"));
+  }
   if (["delivered", "completed", "cancelled"].includes(shipment.status)) {
-    throw new Error("Cannot reassign a delivered, completed, or cancelled load.");
+    redirect(
+      toastErrorPath(
+        returnPath,
+        "Cannot reassign a delivered, completed, or cancelled load.",
+      ),
+    );
   }
 
   if (carrierId) {
-    await assertCarrierInsuranceCurrent(carrierId);
+    try {
+      await assertCarrierInsuranceCurrent(carrierId);
+    } catch (err) {
+      const message = err instanceof Error ? err.message : "Carrier insurance check failed.";
+      redirect(toastErrorPath(returnPath, message));
+    }
   }
 
   const patch: {
@@ -570,7 +583,7 @@ export async function assignCarrier(formData: FormData) {
       : Number(shipment.carrier_cost);
   const customerRate = Number(shipment.customer_rate);
   if (isNegativeMargin(customerRate, nextCost) && profile.role !== "manager") {
-    throw new Error(negativeMarginMessage(customerRate, nextCost));
+    redirect(toastErrorPath(returnPath, negativeMarginMessage(customerRate, nextCost)));
   }
 
   if (carrierId && ["draft", "scheduled"].includes(shipment.status)) {

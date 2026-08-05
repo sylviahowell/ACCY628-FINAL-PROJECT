@@ -58,7 +58,7 @@ export default async function SettingsPage() {
             <div>
               <h2 className="card-title text-base">Appearance</h2>
               <p className="text-sm opacity-70">
-                Choose how FreightFlow looks on this device.
+                Choose how RowanLane looks on this device.
               </p>
             </div>
           </div>

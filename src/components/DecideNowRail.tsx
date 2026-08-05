@@ -1,14 +1,7 @@
 import Link from "next/link";
+import type { DecideNowItem } from "@/lib/decide-now";
 
-export type DecideNowItem = {
-  id: string;
-  title: string;
-  metric: string;
-  detail: string;
-  href: string;
-  tone?: "warning" | "error" | "info";
-  cta?: string;
-};
+export type { DecideNowItem };
 
 export function DecideNowRail({ items }: { items: DecideNowItem[] }) {
   const count = items.length;
@@ -24,17 +17,17 @@ export function DecideNowRail({ items }: { items: DecideNowItem[] }) {
       <div className="card-body gap-3 p-4 sm:p-5">
         <div className="flex flex-wrap items-center justify-between gap-2">
           <div className="flex items-center gap-2">
-            <h2 className="text-lg font-bold">Decide now</h2>
+            <h2 className="text-lg font-bold tracking-tight">Decide now</h2>
             <span
               className={`badge badge-sm ${
                 count === 0 ? "badge-success" : "badge-warning"
               }`}
             >
-              {count === 0 ? "Clear" : `${count} waiting`}
+              {count === 0 ? "Clear" : `Top ${count}`}
             </span>
           </div>
           <p className="text-sm opacity-70">
-            Highest-priority executive decisions — one click to act.
+            Highest-impact decisions — one click to act.
           </p>
         </div>
 
@@ -52,7 +45,9 @@ export function DecideNowRail({ items }: { items: DecideNowItem[] }) {
                 <div className="min-w-0 flex-1">
                   <div className="flex flex-wrap items-baseline gap-x-2 gap-y-0.5">
                     <p className="font-semibold">{item.title}</p>
-                    <p className={`text-sm font-bold ${toneMetricClass(item.tone)}`}>
+                    <p
+                      className={`text-sm font-bold tabular-nums ${toneMetricClass(item.tone)}`}
+                    >
                       {item.metric}
                     </p>
                   </div>

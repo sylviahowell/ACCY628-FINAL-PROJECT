@@ -1,0 +1,356 @@
+import { daysPastDue } from "@/lib/collections";
+import { money } from "@/lib/types";
+
+export type DecideNowTone = "warning" | "error" | "info";
+
+export type DecideNowItem = {
+  id: string;
+  title: string;
+  metric: string;
+  detail: string;
+  href: string;
+  tone?: DecideNowTone;
+  cta?: string;
+  /** Higher = more urgent; sort only. */
+  score: number;
+};
+
+function daysBetween(from: string, to: string): number {
+  return Math.floor(
+    (new Date(to + "T00:00:00Z").getTime() -
+      new Date(from + "T00:00:00Z").getTime()) /
+      (1000 * 60 * 60 * 24),
+  );
+}
+
+function ageLabel(days: number): string {
+  if (days <= 0) return "today";
+  if (days === 1) return "1 day";
+  return `${days} days`;
+}
+
+export function rankDecideNowItems(items: DecideNowItem[], limit = 3): DecideNowItem[] {
+  return [...items]
+    .filter((i) => i.score > 0)
+    .sort((a, b) => b.score - a.score)
+    .slice(0, limit);
+}
+
+export function buildExecutiveHealthLine(input: {
+  topItems: DecideNowItem[];
+  marginPct: number;
+  lateCount: number;
+  cashAtRisk: number;
+}): string {
+  if (input.topItems.length === 0) {
+    if (input.marginPct < 15) {
+      return "Clear of open decisions — watch margin; network ops look steady.";
+    }
+    return "Clear — no decisions waiting. Network looks healthy.";
+  }
+
+  const top = input.topItems[0];
+  if (top.id === "cash-at-risk") {
+    return `Cash pressure: ${money(input.cashAtRisk)} at risk — prioritize collections.`;
+  }
+  if (top.id === "delayed") {
+    return `Ops exception: ${input.lateCount} delayed load${input.lateCount === 1 ? "" : "s"} need recovery.`;
+  }
+  if (top.id === "approvals") {
+    return `Approvals blocking cash — ${top.metric} waiting on leadership.`;
+  }
+  if (top.id === "coverage") {
+    return `Shippers waiting on coverage — ${top.metric} request${top.metric === "1" ? "" : "s"} to book.`;
+  }
+  if (top.id === "risk-credit") {
+    return `Risk & credit needs review — ${top.detail}.`;
+  }
+  if (top.id === "ready-to-bill") {
+    return "Billing lag: ready-to-bill loads still uninvoiced — free up cash.";
+  }
+  return `Focus: ${top.title.toLowerCase()} (${top.metric}).`;
+}
+
+type ApprovalRow = {
+  id: string;
+  amount: number;
+  request_type: string;
+  entity_type: string;
+  entity_id: string;
+  created_at?: string | null;
+};
+
+type ShipRow = {
+  id: string;
+  load_number: string;
+  customer_rate: number;
+  promised_delivery_date: string | null;
+  status: string;
+};
+
+type InvoiceRow = {
+  total: number;
+  amount_paid: number;
+  due_date: string;
+};
+
+export function buildDecideNowCandidates(input: {
+  today: string;
+  coverageCount: number;
+  approvals: ApprovalRow[];
+  lateShipments: ShipRow[];
+  unbilledShipments: ShipRow[];
+  pastDueInvoices: InvoiceRow[];
+  openDisputeCount: number;
+  cashAtRisk: number;
+  riskIssueCount: number;
+  riskDetail: string;
+  riskTone: DecideNowTone;
+  resolveLoadNumber: (entityType: string, entityId: string) => string | null;
+  sanitize: (text: string) => string;
+}): DecideNowItem[] {
+  const items: DecideNowItem[] = [];
+  const { today } = input;
+
+  if (input.coverageCount > 0) {
+    items.push({
+      id: "coverage",
+      title: "Coverage requests",
+      metric: String(input.coverageCount),
+      detail: "Shippers waiting for ops to book a load, then assign a carrier",
+      href: "/coverage",
+      tone: "warning",
+      cta: "Review",
+      score: input.coverageCount * 50_000,
+    });
+  }
+
+  if (input.approvals.length > 0) {
+    const approvalSum = input.approvals.reduce((s, a) => s + Number(a.amount), 0);
+    const sorted = [...input.approvals].sort((a, b) =>
+      (a.created_at ?? "").localeCompare(b.created_at ?? ""),
+    );
+    const oldest = sorted[0];
+    const focusLoad = input.resolveLoadNumber(oldest.entity_type, oldest.entity_id);
+    const ageDays = oldest.created_at
+      ? daysBetween(oldest.created_at.slice(0, 10), today)
+      : 0;
+    const href = focusLoad
+      ? `/approvals?type=${encodeURIComponent(oldest.request_type)}&focus=${encodeURIComponent(focusLoad)}`
+      : `/approvals?type=${encodeURIComponent(oldest.request_type)}`;
+    items.push({
+      id: "approvals",
+      title: "Pending approvals",
+      metric: money(approvalSum),
+      detail: input.sanitize(
+        `${input.approvals.length} waiting · oldest ${ageLabel(ageDays)}${
+          focusLoad ? ` · ${focusLoad}` : ""
+        } · ${oldest.request_type}`,
+      ),
+      href,
+      tone: "warning",
+      cta: "Review",
+      score: approvalSum,
+    });
+  }
+
+  if (input.lateShipments.length > 0) {
+    const exposure = input.lateShipments.reduce(
+      (s, sh) => s + Number(sh.customer_rate),
+      0,
+    );
+    const worst = [...input.lateShipments].sort((a, b) => {
+      const ad = a.promised_delivery_date
+        ? daysPastDue(a.promised_delivery_date, today)
+        : 0;
+      const bd = b.promised_delivery_date
+        ? daysPastDue(b.promised_delivery_date, today)
+        : 0;
+      return bd - ad;
+    })[0];
+    const daysLate = worst.promised_delivery_date
+      ? daysPastDue(worst.promised_delivery_date, today)
+      : 0;
+    items.push({
+      id: "delayed",
+      title: "Delayed loads",
+      metric: String(input.lateShipments.length),
+      detail: `${money(exposure)} exposure · worst ${worst.load_number} (${ageLabel(daysLate)} late)`,
+      href: "/shipments?status=delayed",
+      tone: "error",
+      cta: "Open",
+      score: exposure,
+    });
+  }
+
+  if (input.cashAtRisk > 0) {
+    const overdueN = input.pastDueInvoices.length;
+    const disputeN = input.openDisputeCount;
+    const parts: string[] = [];
+    if (overdueN > 0) parts.push(`${overdueN} overdue`);
+    if (disputeN > 0) {
+      parts.push(`${disputeN} open dispute${disputeN === 1 ? "" : "s"}`);
+    }
+    items.push({
+      id: "cash-at-risk",
+      title: "Cash at risk",
+      metric: money(input.cashAtRisk),
+      detail:
+        parts.length > 0
+          ? `${parts.join(" · ")} — overdue balances plus dispute amounts`
+          : "Overdue balances plus open dispute amounts",
+      href: "/ar?filter=cash-at-risk",
+      tone: "error",
+      cta: "Open AR",
+      score: input.cashAtRisk,
+    });
+  }
+
+  if (input.riskIssueCount > 0) {
+    items.push({
+      id: "risk-credit",
+      title: "Risk & credit",
+      metric: String(input.riskIssueCount),
+      detail: input.riskDetail || "Credit or carrier insurance needs review",
+      href: "/risk",
+      tone: input.riskTone,
+      cta: "Open Risk",
+      score: input.riskIssueCount * 25_000,
+    });
+  }
+
+  if (input.unbilledShipments.length > 0) {
+    const unbilledValue = input.unbilledShipments.reduce(
+      (s, sh) => s + Number(sh.customer_rate),
+      0,
+    );
+    const top = [...input.unbilledShipments].sort(
+      (a, b) => Number(b.customer_rate) - Number(a.customer_rate),
+    )[0];
+    items.push({
+      id: "ready-to-bill",
+      title: "Ready to bill",
+      metric: money(unbilledValue),
+      detail: `${input.unbilledShipments.length} load${
+        input.unbilledShipments.length === 1 ? "" : "s"
+      } with POD · top ${top.load_number}`,
+      href: "/shipments?filter=ready-to-bill",
+      tone: "warning",
+      cta: "Open",
+      score: unbilledValue,
+    });
+  }
+
+  if (input.cashAtRisk <= 0 && input.pastDueInvoices.length > 0) {
+    const overdueBal = input.pastDueInvoices.reduce(
+      (s, i) => s + Math.max(0, Number(i.total) - Number(i.amount_paid)),
+      0,
+    );
+    items.push({
+      id: "overdue",
+      title: "Overdue invoices",
+      metric: money(overdueBal),
+      detail: `${input.pastDueInvoices.length} invoice${
+        input.pastDueInvoices.length === 1 ? "" : "s"
+      } past due`,
+      href: "/ar?filter=past-due",
+      tone: "warning",
+      cta: "Open AR",
+      score: overdueBal,
+    });
+  }
+
+  if (input.cashAtRisk <= 0 && input.openDisputeCount > 0) {
+    items.push({
+      id: "disputes",
+      title: "Open disputes",
+      metric: String(input.openDisputeCount),
+      detail: "Billing disputes still unresolved",
+      href: "/disputes?filter=open",
+      tone: "info",
+      cta: "Review",
+      score: input.openDisputeCount * 10_000,
+    });
+  }
+
+  return items;
+}
+
+export function arBalanceAsOf(input: {
+  invoices: {
+    id: string;
+    total: number;
+    issue_date: string | null;
+    status: string;
+  }[];
+  payments: { invoice_id: string; amount: number; payment_date: string | null }[];
+  asOfExclusive: string;
+}): number {
+  const paidByInvoice = new Map<string, number>();
+  for (const p of input.payments) {
+    if (!p.payment_date || p.payment_date >= input.asOfExclusive) continue;
+    if (!p.invoice_id) continue;
+    paidByInvoice.set(
+      p.invoice_id,
+      (paidByInvoice.get(p.invoice_id) ?? 0) + Number(p.amount),
+    );
+  }
+
+  let total = 0;
+  for (const inv of input.invoices) {
+    if (inv.status === "cancelled") continue;
+    if (!inv.issue_date || inv.issue_date >= input.asOfExclusive) continue;
+    const paid = paidByInvoice.get(inv.id) ?? 0;
+    total += Math.max(0, Number(inv.total) - paid);
+  }
+  return total;
+}
+
+const ACTIVE_STATUSES = new Set([
+  "scheduled",
+  "assigned",
+  "booked",
+  "picked_up",
+  "in_transit",
+]);
+
+export function countActiveAsOf(
+  shipments: {
+    created_at: string | null;
+    delivery_date: string | null;
+    status: string;
+  }[],
+  asOf: string,
+): number {
+  return shipments.filter((s) => {
+    if (s.status === "cancelled") return false;
+    const created = s.created_at?.slice(0, 10);
+    if (!created || created > asOf) return false;
+    if (s.delivery_date && s.delivery_date <= asOf) return false;
+    if (ACTIVE_STATUSES.has(s.status)) return true;
+    if (
+      ["delivered", "completed"].includes(s.status) &&
+      s.delivery_date &&
+      s.delivery_date > asOf
+    ) {
+      return true;
+    }
+    return false;
+  }).length;
+}
+
+export function countLateAsOf(
+  shipments: {
+    promised_delivery_date: string | null;
+    delivery_date: string | null;
+    status: string;
+  }[],
+  asOf: string,
+): number {
+  return shipments.filter((s) => {
+    if (s.status === "cancelled") return false;
+    if (!s.promised_delivery_date || s.promised_delivery_date >= asOf) return false;
+    if (s.delivery_date && s.delivery_date <= asOf) return false;
+    return true;
+  }).length;
+}

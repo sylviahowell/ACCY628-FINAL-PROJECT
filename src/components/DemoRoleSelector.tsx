@@ -1,7 +1,8 @@
 "use client";
 
-import { useEffect, useTransition } from "react";
+import { useEffect, useState, useTransition } from "react";
 import { Beaker, LogOut } from "lucide-react";
+import { isRedirectError } from "next/dist/client/components/redirect-error";
 import { exitDemo, switchDemoRole } from "@/lib/actions/auth";
 import {
   DEMO_MODE_STORAGE_KEY,
@@ -30,6 +31,7 @@ function clearDemoClientState() {
 
 export function DemoRoleSelector({ activeRole }: { activeRole: UserRole }) {
   const [pending, startTransition] = useTransition();
+  const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
     persistDemoClientState(activeRole);
@@ -38,6 +40,7 @@ export function DemoRoleSelector({ activeRole }: { activeRole: UserRole }) {
   function onChange(next: string) {
     if (next === "exit") {
       clearDemoClientState();
+      setError(null);
       startTransition(async () => {
         await exitDemo();
       });
@@ -47,8 +50,14 @@ export function DemoRoleSelector({ activeRole }: { activeRole: UserRole }) {
     const role = next as UserRole;
     if (role === activeRole) return;
     persistDemoClientState(role);
+    setError(null);
     startTransition(async () => {
-      await switchDemoRole(role);
+      try {
+        await switchDemoRole(role);
+      } catch (e) {
+        if (isRedirectError(e)) throw e;
+        setError(e instanceof Error ? e.message : "Could not switch demo role");
+      }
     });
   }
 
@@ -78,6 +87,14 @@ export function DemoRoleSelector({ activeRole }: { activeRole: UserRole }) {
           <option value="exit">Exit Demo…</option>
         </select>
       </label>
+      {error ? (
+        <p
+          className="basis-full max-w-md text-right text-[11px] leading-snug text-error"
+          role="alert"
+        >
+          {error}
+        </p>
+      ) : null}
 
       <button
         type="button"

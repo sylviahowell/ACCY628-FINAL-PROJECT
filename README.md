@@ -44,6 +44,8 @@ Appearance (theme) lives only under **Settings** after login.
 
 If login fails with an email confirmation error: Supabase Dashboard → Authentication → Providers → Email → turn off **Confirm email**.
 
+If you see **email rate limit exceeded**: the project hit Supabase’s free-tier email cap (usually from signup confirmation emails). Wait ~1 hour, keep Confirm email off, and ensure the five demo users already exist under Authentication → Users (auto sign-up for demos is disabled to avoid this).
+
 ## Story seed (panel demo data)
 Narrative seed is in `supabase/story_seed_phase7.sql` and is already applied on the shared Supabase project. Re-run in the SQL editor only if demo data was wiped.
 

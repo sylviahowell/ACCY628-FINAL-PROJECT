@@ -11,6 +11,7 @@ import { CollectionsWorklist } from "@/components/CollectionsWorklist";
 import { CustomerFriendlyStatusCard } from "@/components/ShipmentHealthCard";
 import { ProfitabilityHeatmap } from "@/components/ProfitabilityHeatmap";
 import { ShipmentMapLazy } from "@/components/ShipmentMapLazy";
+import { DecideNowRail, type DecideNowItem } from "@/components/DecideNowRail";
 import { StoryActionChips } from "@/components/StoryActionChips";
 import { HorizontalBars, MonthlyBars, StatusPie } from "@/components/Charts";
 import { requirePathAccess } from "@/lib/authz";
@@ -425,6 +426,108 @@ export default async function DashboardPage() {
         };
       });
 
+    const cashAtRisk =
+      pastDue.reduce(
+        (s, i) => s + Math.max(0, Number(i.total) - Number(i.amount_paid)),
+        0,
+      ) +
+      disputeList
+        .filter((d) => d.status === "open")
+        .reduce((s, d) => s + Number(d.amount_disputed), 0);
+
+    const pendingApprovals = approvals ?? [];
+    const topApproval = pendingApprovals[0];
+    let topApprovalHref = "/approvals";
+    let topApprovalDetail = "Accessorials and exceptions waiting on you";
+    if (topApproval) {
+      let focusLoad: string | null = null;
+      if (topApproval.entity_type === "shipment") {
+        focusLoad =
+          shipList.find((s) => s.id === topApproval.entity_id)?.load_number ?? null;
+      } else if (topApproval.entity_type === "shipment_charge") {
+        const shipId = chargeList.find((c) => c.id === topApproval.entity_id)?.shipment_id;
+        focusLoad = shipId
+          ? (shipList.find((s) => s.id === shipId)?.load_number ?? null)
+          : null;
+      }
+      topApprovalHref = focusLoad
+        ? `/approvals?type=${encodeURIComponent(topApproval.request_type)}&focus=${encodeURIComponent(focusLoad)}`
+        : `/approvals?type=${encodeURIComponent(topApproval.request_type)}`;
+      topApprovalDetail = sanitizeDemoText(
+        `${topApproval.request_type}${focusLoad ? ` · ${focusLoad}` : ""} · ${money(topApproval.amount)}`,
+      );
+    }
+
+    const openDisputeCount = disputeList.filter((d) => d.status === "open").length;
+
+    const decideNowItems: DecideNowItem[] = [];
+    if (pendingApprovals.length > 0) {
+      decideNowItems.push({
+        id: "approvals",
+        title: "Pending approvals",
+        metric: String(pendingApprovals.length),
+        detail: topApprovalDetail,
+        href: topApprovalHref,
+        tone: "warning",
+        cta: "Review",
+      });
+    }
+    if (lateList.length > 0) {
+      decideNowItems.push({
+        id: "late",
+        title: "Late shipments",
+        metric: String(lateList.length),
+        detail: "Promised delivery date has passed — ops exception",
+        href: "/warnings?severity=critical",
+        tone: "error",
+        cta: "Open",
+      });
+    }
+    if (cashAtRisk > 0) {
+      decideNowItems.push({
+        id: "cash-at-risk",
+        title: "Cash at risk",
+        metric: money(cashAtRisk),
+        detail: "Overdue balances plus open dispute amounts",
+        href: "/ar?filter=cash-at-risk",
+        tone: "error",
+        cta: "Open AR",
+      });
+    }
+    if (unbilledDelivered > 0) {
+      decideNowItems.push({
+        id: "unbilled",
+        title: "POD-ready unbilled",
+        metric: String(unbilledDelivered),
+        detail: "Delivered with POD but not yet invoiced",
+        href: "/shipments?filter=ready-to-bill",
+        tone: "warning",
+        cta: "Open",
+      });
+    }
+    if (pastDue.length > 0) {
+      decideNowItems.push({
+        id: "overdue",
+        title: "Overdue invoices",
+        metric: String(pastDue.length),
+        detail: "Customer balances past due date",
+        href: "/ar?filter=past-due",
+        tone: "warning",
+        cta: "Open AR",
+      });
+    }
+    if (decideNowItems.length < 5 && openDisputeCount > 0) {
+      decideNowItems.push({
+        id: "disputes",
+        title: "Open disputes",
+        metric: String(openDisputeCount),
+        detail: "Billing disputes still unresolved",
+        href: "/disputes?filter=open",
+        tone: "info",
+        cta: "Review",
+      });
+    }
+
     return (
       <div className="space-y-6">
         <Header
@@ -432,18 +535,11 @@ export default async function DashboardPage() {
           subtitle="Company performance, exceptions, and contract-to-cash health"
         />
         <StoryActionChips role="manager" />
+        <DecideNowRail items={decideNowItems.slice(0, 5)} />
         <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
           <Stat
             title="Cash at risk"
-            value={money(
-              pastDue.reduce(
-                (s, i) => s + Math.max(0, Number(i.total) - Number(i.amount_paid)),
-                0,
-              ) +
-                disputeList
-                  .filter((d) => d.status === "open")
-                  .reduce((s, d) => s + Number(d.amount_disputed), 0),
-            )}
+            value={money(cashAtRisk)}
             warn
             href="/ar?filter=cash-at-risk"
           />

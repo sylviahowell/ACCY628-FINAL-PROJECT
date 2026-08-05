@@ -5,7 +5,7 @@ import { sanitizeDemoText } from "@/lib/display-text";
 import { money } from "@/lib/types";
 import { createClient } from "@/lib/supabase/server";
 
-type ActivityKind = "override" | "status" | "approval" | "collection";
+type ActivityKind = "override" | "status" | "approval" | "collection" | "billing";
 
 type ActivityRow = {
   id: string;
@@ -25,6 +25,8 @@ function kindBadge(kind: ActivityKind) {
       return "badge-info";
     case "collection":
       return "badge-accent";
+    case "billing":
+      return "badge-secondary";
     default:
       return "badge-ghost";
   }
@@ -38,6 +40,8 @@ function kindLabel(kind: ActivityKind) {
       return "Approval";
     case "collection":
       return "Collection";
+    case "billing":
+      return "Billing";
     default:
       return "Status";
   }
@@ -63,6 +67,7 @@ export default async function ControlsPage() {
     { data: statusRows },
     { data: approvals },
     { data: notes },
+    { data: billingEvents },
   ] = await Promise.all([
     supabase
       .from("shipment_status_updates")
@@ -81,6 +86,12 @@ export default async function ControlsPage() {
       .select("id, invoice_id, note, created_by, created_at")
       .order("created_at", { ascending: false })
       .limit(25),
+    supabase
+      .from("status_events")
+      .select("id, entity_type, entity_id, from_status, to_status, note, changed_by, created_at")
+      .in("entity_type", ["invoice", "payment", "dispute"])
+      .order("created_at", { ascending: false })
+      .limit(40),
   ]);
 
   const shipmentIds = [
@@ -118,7 +129,12 @@ export default async function ControlsPage() {
   ];
 
   const invoiceIds = [
-    ...new Set((notes ?? []).map((n) => n.invoice_id).filter(Boolean) as string[]),
+    ...new Set([
+      ...((notes ?? []).map((n) => n.invoice_id).filter(Boolean) as string[]),
+      ...(billingEvents ?? [])
+        .filter((e) => e.entity_type === "invoice")
+        .map((e) => e.entity_id),
+    ]),
   ];
 
   const profileIds = [
@@ -127,6 +143,7 @@ export default async function ControlsPage() {
         ...(statusRows ?? []).map((r) => r.changed_by),
         ...(approvals ?? []).flatMap((a) => [a.requested_by, a.reviewed_by]),
         ...(notes ?? []).map((n) => n.created_by),
+        ...(billingEvents ?? []).map((e) => e.changed_by),
       ].filter(Boolean) as string[],
     ),
   ];
@@ -204,9 +221,39 @@ export default async function ControlsPage() {
     });
   }
 
+  for (const e of billingEvents ?? []) {
+    const invNum = e.entity_type === "invoice" ? invById.get(e.entity_id) : null;
+    const note = sanitizeDemoText(e.note);
+    const transition =
+      e.from_status && e.to_status
+        ? `${e.from_status} → ${e.to_status}`
+        : e.to_status;
+    activities.push({
+      id: `billing-${e.id}`,
+      kind: "billing",
+      at: e.created_at,
+      actor: e.changed_by ? nameById.get(e.changed_by) ?? "Staff" : "Staff",
+      summary: `${e.entity_type}: ${transition}${note ? ` · ${note}` : ""}`,
+      href:
+        e.entity_type === "invoice"
+          ? "/invoices"
+          : e.entity_type === "payment"
+            ? "/payments"
+            : "/disputes",
+      hrefLabel:
+        invNum ??
+        (e.entity_type === "payment"
+          ? "Payments"
+          : e.entity_type === "dispute"
+            ? "Disputes"
+            : "Invoices"),
+    });
+  }
+
   activities.sort((a, b) => new Date(b.at).getTime() - new Date(a.at).getTime());
-  const recent = activities.slice(0, 50);
+  const recent = activities.slice(0, 60);
   const overrideCount = recent.filter((a) => a.kind === "override").length;
+  const billingCount = recent.filter((a) => a.kind === "billing").length;
   const pendingApprovals = (approvals ?? []).filter((a) => a.status === "pending").length;
 
   return (
@@ -214,12 +261,13 @@ export default async function ControlsPage() {
       <header>
         <h1 className="text-2xl font-bold">Control activity</h1>
         <p className="mt-1 text-sm opacity-70">
-          Recent status events, approval decisions, credit overrides, and collection notes.
-          Compensating visibility when managers also perform ops and billing.
+          Recent status events, approval decisions, credit overrides, collection notes, and billing
+          audit events (invoice status, payments, disputes). Compensating visibility when managers
+          also perform ops and billing.
         </p>
       </header>
 
-      <div className="grid gap-3 sm:grid-cols-3">
+      <div className="grid gap-3 sm:grid-cols-4">
         <div className="stats bg-base-100 shadow-sm">
           <div className="stat py-3">
             <div className="stat-title">Entries shown</div>
@@ -230,6 +278,12 @@ export default async function ControlsPage() {
           <div className="stat py-3">
             <div className="stat-title">Overrides in view</div>
             <div className="stat-value text-2xl">{overrideCount}</div>
+          </div>
+        </div>
+        <div className="stats bg-base-100 shadow-sm">
+          <div className="stat py-3">
+            <div className="stat-title">Billing events</div>
+            <div className="stat-value text-2xl">{billingCount}</div>
           </div>
         </div>
         <div className="stats bg-base-100 shadow-sm">

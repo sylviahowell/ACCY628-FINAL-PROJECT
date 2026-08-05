@@ -2,6 +2,11 @@ import { redirect } from "next/navigation";
 import { EmptyState } from "@/components/EmptyState";
 import { requirePathAccess } from "@/lib/authz";
 import { createCustomer } from "@/lib/actions/freight";
+import {
+  isOnCreditHold,
+  PAST_DUE_CREDIT_HOLD_THRESHOLD,
+  pastDueBalanceFromInvoices,
+} from "@/lib/credit-hold";
 import { createClient } from "@/lib/supabase/server";
 import { isOperations, money } from "@/lib/types";
 
@@ -10,19 +15,22 @@ export default async function CustomersPage() {
   if (!isOperations(profile.role)) redirect("/dashboard");
 
   const supabase = await createClient();
+  const today = new Date().toISOString().slice(0, 10);
   const { data: customers } = await supabase.from("customers").select("*").order("name");
   const { data: shipments } = await supabase.from("shipments").select("customer_id, status");
   const showAr = profile.role === "manager";
-  const { data: invoices } = showAr
-    ? await supabase.from("invoices").select("customer_id, total, amount_paid, status")
-    : { data: [] as { customer_id: string; total: number; amount_paid: number; status: string }[] };
+  // Ops need due dates to surface credit holds; managers also see full AR dollars.
+  const { data: invoices } = await supabase
+    .from("invoices")
+    .select("customer_id, total, amount_paid, status, due_date");
 
   return (
     <div className="space-y-6">
       <div>
         <h1 className="text-2xl font-bold">Customers</h1>
         <p className="text-sm opacity-70">
-          Shippers you bill. Create customers, then attach contracts and shipments.
+          Shippers you bill. Create customers, then attach contracts and shipments. Credit hold
+          flags when past-due AR reaches {money(PAST_DUE_CREDIT_HOLD_THRESHOLD)}.
         </p>
       </div>
 
@@ -60,17 +68,32 @@ export default async function CustomersPage() {
             (sum, i) => sum + Math.max(0, Number(i.total) - Number(i.amount_paid)),
             0,
           );
+          const pastDue = pastDueBalanceFromInvoices(custInvoices, today);
+          const onHold = isOnCreditHold(pastDue);
           return (
             <div key={c.id} className="card bg-base-100 shadow-sm">
               <div className="card-body">
                 <div className="flex flex-wrap items-start justify-between gap-3">
                   <div>
-                    <h3 className="card-title text-lg">{c.name}</h3>
+                    <h3 className="card-title text-lg">
+                      <span className="inline-flex flex-wrap items-center gap-2">
+                        {c.name}
+                        {onHold ? (
+                          <span className="badge badge-warning badge-sm">Credit hold</span>
+                        ) : null}
+                      </span>
+                    </h3>
                     <p className="text-sm opacity-70">
                       {c.contact_name ?? "No contact"} · {c.contact_email ?? "—"} ·{" "}
                       {c.payment_terms ?? "Net 30"}
                     </p>
                     <p className="text-xs opacity-60">{c.billing_address}</p>
+                    {onHold ? (
+                      <p className="mt-1 text-xs text-warning">
+                        Past-due {money(pastDue)} ≥ hold threshold {money(PAST_DUE_CREDIT_HOLD_THRESHOLD)}.
+                        Brokers cannot book until cleared or a manager overrides.
+                      </p>
+                    ) : null}
                   </div>
                   <div className="text-right text-sm">
                     <p>
@@ -84,9 +107,14 @@ export default async function CustomersPage() {
                         <p>
                           Outstanding: <b>{money(outstanding)}</b>
                         </p>
+                        <p>
+                          Past due: <b>{money(pastDue)}</b>
+                        </p>
                       </>
                     ) : (
-                      <p className="text-xs opacity-60">AR balances managed in Billing</p>
+                      <p className="text-xs opacity-60">
+                        {onHold ? `Past due ${money(pastDue)}` : "AR balances managed in Billing"}
+                      </p>
                     )}
                     <p>Credit limit: {money(c.credit_limit)}</p>
                   </div>

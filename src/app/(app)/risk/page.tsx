@@ -9,6 +9,12 @@ import {
   insuranceRiskStatus,
   openArFromInvoices,
 } from "@/lib/risk-credit";
+import {
+  isOnCreditHold,
+  PAST_DUE_CREDIT_HOLD_THRESHOLD,
+  pastDueBalanceFromInvoices,
+} from "@/lib/credit-hold";
+import { money } from "@/lib/types";
 import { createClient } from "@/lib/supabase/server";
 
 export default async function RiskCreditPage() {
@@ -30,7 +36,7 @@ export default async function RiskCreditPage() {
       .order("name"),
     supabase
       .from("invoices")
-      .select("customer_id, total, amount_paid, status")
+      .select("customer_id, total, amount_paid, status, due_date")
       .neq("status", "cancelled"),
     supabase
       .from("carriers")
@@ -41,7 +47,7 @@ export default async function RiskCreditPage() {
 
   const invoicesByCustomer = new Map<
     string,
-    { total: number; amount_paid: number; status: string }[]
+    { total: number; amount_paid: number; status: string; due_date: string }[]
   >();
   for (const inv of invoices ?? []) {
     const list = invoicesByCustomer.get(inv.customer_id) ?? [];
@@ -49,12 +55,15 @@ export default async function RiskCreditPage() {
       total: Number(inv.total),
       amount_paid: Number(inv.amount_paid),
       status: inv.status,
+      due_date: inv.due_date,
     });
     invoicesByCustomer.set(inv.customer_id, list);
   }
 
   const customerRows: CustomerCreditRow[] = (customers ?? []).map((c) => {
-    const openAr = openArFromInvoices(invoicesByCustomer.get(c.id) ?? []);
+    const invs = invoicesByCustomer.get(c.id) ?? [];
+    const openAr = openArFromInvoices(invs);
+    const pastDue = pastDueBalanceFromInvoices(invs, today);
     const creditLimit = Number(c.credit_limit ?? 0);
     return {
       id: c.id,
@@ -62,6 +71,8 @@ export default async function RiskCreditPage() {
       paymentTerms: c.payment_terms ?? "Net 30",
       creditLimit,
       openAr,
+      pastDue,
+      onCreditHold: isOnCreditHold(pastDue),
       utilizationPct: creditUtilizationPct(openAr, creditLimit),
       status: creditStatus(openAr, creditLimit),
     };
@@ -112,8 +123,10 @@ export default async function RiskCreditPage() {
         <p className="font-medium text-info-content">Control in this workspace</p>
         <p className="mt-1 opacity-80">
           This business faces credit over-extension and uninsured carrier risk. RowanLane
-          surfaces limit utilization and certificate expiry here, and blocks non-manager booking
-          when open AR plus a new rate would exceed the customer credit limit.
+          surfaces limit utilization and certificate expiry here, blocks non-manager booking when
+          open AR plus a new rate would exceed the customer credit limit, and places customers on
+          credit hold when past-due AR reaches {money(PAST_DUE_CREDIT_HOLD_THRESHOLD)} (managers may
+          override).
         </p>
       </div>
 

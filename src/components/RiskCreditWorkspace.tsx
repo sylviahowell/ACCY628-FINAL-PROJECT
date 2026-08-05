@@ -14,7 +14,7 @@ import {
   insuranceStatusLabel,
 } from "@/lib/risk-credit";
 
-type CreditFilter = "all" | CreditStatus;
+type CreditFilter = "all" | CreditStatus | "hold";
 type CarrierFilter = "all" | InsuranceRiskStatus;
 type CreditSort = "risk" | "name" | "utilization" | "openAr";
 type CarrierSort = "risk" | "name" | "expiry" | "activeLoads";
@@ -48,8 +48,18 @@ export function RiskCreditWorkspace({
   const [carrierQuery, setCarrierQuery] = useState("");
 
   const creditCounts = useMemo(() => {
-    const counts = { all: customers.length, over: 0, watch: 0, ok: 0, no_limit: 0 };
-    for (const c of customers) counts[c.status] += 1;
+    const counts = {
+      all: customers.length,
+      over: 0,
+      watch: 0,
+      ok: 0,
+      no_limit: 0,
+      hold: 0,
+    };
+    for (const c of customers) {
+      counts[c.status] += 1;
+      if (c.onCreditHold) counts.hold += 1;
+    }
     return counts;
   }, [customers]);
 
@@ -70,7 +80,9 @@ export function RiskCreditWorkspace({
     let rows =
       creditFilter === "all"
         ? customers
-        : customers.filter((c) => c.status === creditFilter);
+        : creditFilter === "hold"
+          ? customers.filter((c) => c.onCreditHold)
+          : customers.filter((c) => c.status === creditFilter);
     if (q) rows = rows.filter((c) => c.name.toLowerCase().includes(q));
     return [...rows].sort((a, b) => {
       if (creditSort === "name") return a.name.localeCompare(b.name);
@@ -107,10 +119,14 @@ export function RiskCreditWorkspace({
 
   return (
     <div className="space-y-8">
-      <div className="grid gap-3 sm:grid-cols-3">
+      <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
         <div className="stat rounded-box border border-base-300 bg-base-100 py-3 shadow-sm">
           <div className="stat-title text-xs">Customers over limit</div>
           <div className="stat-value text-2xl text-error">{creditCounts.over}</div>
+        </div>
+        <div className="stat rounded-box border border-base-300 bg-base-100 py-3 shadow-sm">
+          <div className="stat-title text-xs">On credit hold</div>
+          <div className="stat-value text-2xl text-warning">{creditCounts.hold}</div>
         </div>
         <div className="stat rounded-box border border-base-300 bg-base-100 py-3 shadow-sm">
           <div className="stat-title text-xs">Carriers expired</div>
@@ -126,8 +142,9 @@ export function RiskCreditWorkspace({
         <div>
           <h2 className="text-lg font-semibold">Customer credit exposure</h2>
           <p className="text-sm opacity-70">
-            Open AR vs credit limit. Booking is blocked when open AR + new rate exceeds the
-            limit unless a manager overrides.
+            Open AR vs credit limit, plus past-due credit holds. Booking is blocked for brokers when
+            open AR + new rate exceeds the limit or past-due meets the hold threshold, unless a
+            manager overrides.
           </p>
         </div>
 
@@ -135,6 +152,7 @@ export function RiskCreditWorkspace({
           {(
             [
               ["all", "All", creditCounts.all],
+              ["hold", "Credit hold", creditCounts.hold],
               ["over", "Over limit", creditCounts.over],
               ["watch", "Watch", creditCounts.watch],
               ["ok", "OK", creditCounts.ok],
@@ -180,6 +198,7 @@ export function RiskCreditWorkspace({
                 <th>Customer</th>
                 <th>Credit limit</th>
                 <th>Open AR</th>
+                <th>Past due</th>
                 <th>Utilization</th>
                 <th>Status</th>
                 <th>Terms</th>
@@ -189,16 +208,24 @@ export function RiskCreditWorkspace({
             <tbody>
               {visibleCustomers.length === 0 ? (
                 <tr>
-                  <td colSpan={7} className="text-center text-sm opacity-60 py-8">
+                  <td colSpan={8} className="text-center text-sm opacity-60 py-8">
                     No customers match this filter.
                   </td>
                 </tr>
               ) : (
                 visibleCustomers.map((c) => (
                   <tr key={c.id} className="hover">
-                    <td className="font-medium">{c.name}</td>
+                    <td className="font-medium">
+                      <span className="inline-flex flex-wrap items-center gap-1.5">
+                        {c.name}
+                        {c.onCreditHold ? (
+                          <span className="badge badge-warning badge-sm">Credit hold</span>
+                        ) : null}
+                      </span>
+                    </td>
                     <td>{c.creditLimit > 0 ? formatMoney(c.creditLimit) : "—"}</td>
                     <td>{formatMoney(c.openAr)}</td>
+                    <td>{formatMoney(c.pastDue)}</td>
                     <td>
                       {c.utilizationPct == null ? "—" : `${c.utilizationPct.toFixed(1)}%`}
                     </td>

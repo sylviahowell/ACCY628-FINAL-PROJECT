@@ -19,6 +19,7 @@ const env = loadEnv();
 const url = env.NEXT_PUBLIC_SUPABASE_URL;
 const key = env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
 const PASS = "FreightDemo2026!";
+const BASE = process.env.SMOKE_BASE_URL || "http://localhost:3000";
 
 const results = [];
 function ok(name, detail = "") {
@@ -56,7 +57,7 @@ async function main() {
   // 1) HTTP pages
   for (const path of ["/login", "/signup"]) {
     try {
-      const res = await fetch(`http://localhost:3001${path}`);
+      const res = await fetch(`${BASE}${path}`);
       if (res.ok) ok(`HTTP ${path}`, String(res.status));
       else fail(`HTTP ${path}`, String(res.status));
     } catch (e) {
@@ -66,7 +67,7 @@ async function main() {
 
   // Protected route should redirect when logged out
   try {
-    const res = await fetch("http://localhost:3001/dashboard", { redirect: "manual" });
+    const res = await fetch(`${BASE}/dashboard`, { redirect: "manual" });
     if (res.status === 307 || res.status === 302 || res.status === 303) {
       ok("HTTP /dashboard redirects when logged out", `status ${res.status}`);
     } else if (res.status === 200) {

@@ -1,11 +1,43 @@
 import Link from "next/link";
 import { redirect } from "next/navigation";
-import { getCurrentProfile } from "@/lib/actions/auth";
-import { reviewApproval } from "@/lib/actions/freight";
-import { createClient } from "@/lib/supabase/server";
-import { money, statusBadge } from "@/lib/types";
+import {
+  BusinessInsightsPanel,
+  KpiRibbon,
+  MorningBriefCard,
+} from "@/components/ExecutivePanels";
+import { BillingInsightsPanel, UnbilledQueuePanel } from "@/components/BillingPanels";
+import { BrokerTaskBoard } from "@/components/BrokerTaskBoard";
+import { CarrierScorecardGrid } from "@/components/CarrierScorecards";
+import { CarrierTaskList } from "@/components/CarrierTaskList";
+import { CollectionsWorklist } from "@/components/CollectionsWorklist";
+import { CustomerFriendlyStatusCard } from "@/components/ShipmentHealthCard";
+import { ProfitabilityHeatmap } from "@/components/ProfitabilityHeatmap";
+import { ShipmentMapLazy } from "@/components/ShipmentMapLazy";
+import { StoryActionChips } from "@/components/StoryActionChips";
 import { HorizontalBars, MonthlyBars, StatusPie } from "@/components/Charts";
+import { getCurrentProfile } from "@/lib/actions/auth";
 import { bucketByMonth } from "@/lib/analytics";
+import { buildBrokerTasks, brokerTaskStats } from "@/lib/broker-tasks";
+import { buildCarrierScorecards } from "@/lib/carrier-scorecard";
+import {
+  agingChartData,
+  buildBillingInsights,
+  buildCollectionWorklist,
+  buildUnbilledQueues,
+  computeAging,
+} from "@/lib/collections";
+import { toHeatRows } from "@/lib/heatmap";
+import { buildBusinessInsights } from "@/lib/insights";
+import { buildExecutiveKpis, inRange, monthBounds } from "@/lib/kpi";
+import { buildMorningBrief } from "@/lib/morning-brief";
+import {
+  buildCarrierTasks,
+  customerFacingHealth,
+} from "@/lib/portal-views";
+import { computeShipmentHealth } from "@/lib/shipment-health";
+import { createClient } from "@/lib/supabase/server";
+import { sanitizeDemoText } from "@/lib/display-text";
+import { money, statusBadge } from "@/lib/types";
 
 export default async function DashboardPage() {
   const profile = await getCurrentProfile();
@@ -17,22 +49,22 @@ export default async function DashboardPage() {
   const { data: shipments } = await supabase
     .from("shipments")
     .select(
-      "id, load_number, status, customer_rate, carrier_cost, delivery_date, pickup_date, promised_delivery_date, created_at, carrier_id, customer_id, customers(name), carriers(name)",
+      "id, load_number, status, customer_rate, carrier_cost, delivery_date, pickup_date, promised_delivery_date, created_at, created_by, carrier_id, customer_id, origin_city, origin_state, dest_city, dest_state, pickup_location, delivery_location, freight_type, customers(name), carriers(name)",
     );
   const { data: invoices } = await supabase
     .from("invoices")
-    .select("id, invoice_number, status, total, amount_paid, due_date, issue_date, customers(name)");
+    .select("id, invoice_number, status, total, amount_paid, due_date, issue_date, shipment_id, customer_id, customers(name)");
   const { data: profit } = await supabase.from("shipment_profitability").select("*");
   const { data: customers } = await supabase.from("customers").select("id, name");
-  const { data: carriers } = await supabase.from("carriers").select("id, name, rating");
+  const { data: carriers } = await supabase
+    .from("carriers")
+    .select("id, name, rating, insurance_expiration, equipment_type, service_area");
   const { data: payments } = await supabase
     .from("payments")
-    .select("amount, payment_date")
-    .eq("payment_date", today);
+    .select("amount, payment_date");
   const { data: disputes } = await supabase
     .from("disputes")
-    .select("id, reason, amount_disputed, status")
-    .eq("status", "open");
+    .select("id, reason, amount_disputed, status, invoice_id, customer_id");
   const { data: approvals } = await supabase
     .from("approval_requests")
     .select("*")
@@ -40,13 +72,66 @@ export default async function DashboardPage() {
   const { data: pods } = await supabase
     .from("proof_of_delivery")
     .select("id, shipment_id, delivered_at, signed_by");
+  const { data: charges } = await supabase
+    .from("shipment_charges")
+    .select("id, shipment_id, amount, approval_status, description");
+  const { data: contracts } = await supabase
+    .from("contracts")
+    .select("id, contract_number, end_date, status, customers(name)");
+  const { data: collectionNotes } =
+    profile.role === "billing" || profile.role === "manager"
+      ? await supabase
+          .from("collection_notes")
+          .select("invoice_id, note, created_at")
+          .order("created_at", { ascending: false })
+      : { data: [] as { invoice_id: string; note: string; created_at: string }[] };
 
   const customerName = new Map((customers ?? []).map((c) => [c.id, c.name]));
-  const shipList = shipments ?? [];
-  const invList = invoices ?? [];
+  let shipList = shipments ?? [];
+  let invList = invoices ?? [];
+  let disputeList = disputes ?? [];
+  let podList = pods ?? [];
+  let chargeList = charges ?? [];
+
+  // Portal roles only see their own account slice
+  if (profile.role === "customer" && profile.customer_id) {
+    const cid = profile.customer_id;
+    shipList = shipList.filter((s) => s.customer_id === cid);
+    invList = invList.filter((i) => i.customer_id === cid);
+    disputeList = disputeList.filter((d) => d.customer_id === cid);
+    const shipIds = new Set(shipList.map((s) => s.id));
+    podList = podList.filter((p) => shipIds.has(p.shipment_id));
+    chargeList = chargeList.filter((c) => shipIds.has(c.shipment_id));
+  } else if (profile.role === "carrier" && profile.carrier_id) {
+    const carId = profile.carrier_id;
+    shipList = shipList.filter((s) => s.carrier_id === carId);
+    const shipIds = new Set(shipList.map((s) => s.id));
+    podList = podList.filter((p) => shipIds.has(p.shipment_id));
+    chargeList = chargeList.filter((c) => shipIds.has(c.shipment_id));
+  }
+
   const profitList = profit ?? [];
   const profitByShipment = new Map(
     profitList.map((p) => [p.shipment_id as string, p]),
+  );
+
+  // Health inputs shared across map / scorecards
+  const overdueCustomerIds = new Set(
+    invList
+      .filter((i) => {
+        const bal = Number(i.total) - Number(i.amount_paid);
+        return bal > 0 && i.due_date < today && !["paid", "cancelled"].includes(i.status);
+      })
+      .map((i) => i.customer_id as string),
+  );
+  const openDisputeInvoiceIds = new Set(
+    disputeList.filter((d) => d.status === "open").map((d) => d.invoice_id as string),
+  );
+  const disputedShipmentIds = new Set(
+    invList
+      .filter((i) => openDisputeInvoiceIds.has(i.id) || i.status === "disputed")
+      .map((i) => i.shipment_id as string)
+      .filter(Boolean),
   );
 
   const revenue = profitList.reduce(
@@ -121,33 +206,425 @@ export default async function DashboardPage() {
 
   // ——— EXECUTIVE ———
   if (profile.role === "manager") {
-    const active = shipList.filter((s) =>
+    const activeList = shipList.filter((s) =>
       ["scheduled", "assigned", "booked", "picked_up", "in_transit"].includes(s.status),
-    ).length;
+    );
     const delivered = shipList.filter((s) =>
       ["delivered", "completed"].includes(s.status),
     ).length;
+    const lateList = shipList.filter(
+      (s) =>
+        s.promised_delivery_date &&
+        s.promised_delivery_date < today &&
+        !["delivered", "completed", "cancelled"].includes(s.status),
+    );
+
+    const thisMonth = monthBounds(0);
+    const lastMonth = monthBounds(-1);
+    const weekAgo = new Date();
+    weekAgo.setUTCDate(weekAgo.getUTCDate() - 7);
+    const weekAgoStr = weekAgo.toISOString().slice(0, 10);
+    const yesterday = new Date();
+    yesterday.setUTCDate(yesterday.getUTCDate() - 1);
+    const yesterdayStr = yesterday.toISOString().slice(0, 10);
+
+    const revInMonth = (start: Date, end: Date) =>
+      invList
+        .filter((i) => i.status !== "cancelled" && inRange(i.issue_date, start, end))
+        .reduce((s, i) => s + Number(i.total), 0);
+    const profitInMonth = (start: Date, end: Date) =>
+      shipList.reduce((sum, s) => {
+        const date = s.delivery_date || s.pickup_date || s.created_at;
+        if (!inRange(date, start, end)) return sum;
+        const p = profitByShipment.get(s.id);
+        return sum + (p ? Number(p.margin) : Number(s.customer_rate) - Number(s.carrier_cost));
+      }, 0);
+    const costInMonth = (start: Date, end: Date) =>
+      shipList.reduce((sum, s) => {
+        const date = s.delivery_date || s.pickup_date || s.created_at;
+        if (!inRange(date, start, end)) return sum;
+        const p = profitByShipment.get(s.id);
+        return sum + (p ? Number(p.carrier_cost) : Number(s.carrier_cost));
+      }, 0);
+
+    const revenueThisMonth = revInMonth(thisMonth.start, thisMonth.end);
+    const revenueLastMonth = revInMonth(lastMonth.start, lastMonth.end);
+    const profitThisMonth = profitInMonth(thisMonth.start, thisMonth.end);
+    const profitLastMonth = profitInMonth(lastMonth.start, lastMonth.end);
+    const costThisMonth = costInMonth(thisMonth.start, thisMonth.end);
+    const costLastMonth = costInMonth(lastMonth.start, lastMonth.end);
+    const marginThisMonth =
+      revenueThisMonth > 0 ? (profitThisMonth / revenueThisMonth) * 100 : 0;
+    const marginLastMonth =
+      revenueLastMonth > 0 ? (profitLastMonth / revenueLastMonth) * 100 : 0;
+
+    const cashThisMonth = (payments ?? [])
+      .filter((p) => inRange(p.payment_date, thisMonth.start, thisMonth.end))
+      .reduce((s, p) => s + Number(p.amount), 0);
+    const cashLastMonth = (payments ?? [])
+      .filter((p) => inRange(p.payment_date, lastMonth.start, lastMonth.end))
+      .reduce((s, p) => s + Number(p.amount), 0);
+    const paidToday = (payments ?? [])
+      .filter((p) => p.payment_date === today)
+      .reduce((s, p) => s + Number(p.amount), 0);
+
+    // Approx: loads that were already active a week ago (created before, not finished by then)
+    const activeLastWeekApprox = shipList.filter(
+      (s) =>
+        s.created_at &&
+        s.created_at.slice(0, 10) <= weekAgoStr &&
+        !["cancelled"].includes(s.status),
+    ).length;
+    const lateLastWeek = shipList.filter(
+      (s) =>
+        s.promised_delivery_date &&
+        s.promised_delivery_date < weekAgoStr &&
+        !["delivered", "completed", "cancelled"].includes(s.status),
+    ).length;
+
+    const kpis = buildExecutiveKpis({
+      revenueThisMonth,
+      revenueLastMonth,
+      profitThisMonth,
+      profitLastMonth,
+      marginThisMonth,
+      marginLastMonth,
+      activeShipments: activeList.length,
+      activeLastWeekApprox,
+      lateDeliveries: lateList.length,
+      lateLastWeek,
+      arBalance: ar,
+      arLastMonthEndApprox: Math.max(ar * 0.92, ar - cashThisMonth),
+      cashThisMonth,
+      cashLastMonth,
+    });
+
+    const yDeliveredSafe = shipList.filter((s) => s.delivery_date === yesterdayStr);
+    const yRev = yDeliveredSafe.reduce((sum, s) => {
+      const p = profitByShipment.get(s.id);
+      return (
+        sum +
+        (p
+          ? Number(p.customer_rate) +
+            Number(p.billable_accessorials) -
+            Number(p.discount_amount || 0)
+          : Number(s.customer_rate))
+      );
+    }, 0);
+    const yProfit = yDeliveredSafe.reduce((sum, s) => {
+      const p = profitByShipment.get(s.id);
+      return sum + (p ? Number(p.margin) : Number(s.customer_rate) - Number(s.carrier_cost));
+    }, 0);
+    const yPay = (payments ?? [])
+      .filter((p) => p.payment_date === yesterdayStr)
+      .reduce((s, p) => s + Number(p.amount), 0);
+
+    const insuranceExpiring = (carriers ?? []).filter((c) => {
+      if (!c.insurance_expiration) return false;
+      const days = Math.floor(
+        (new Date(c.insurance_expiration + "T00:00:00Z").getTime() -
+          new Date(today + "T00:00:00Z").getTime()) /
+          (1000 * 60 * 60 * 24),
+      );
+      return days >= 0 && days <= 30;
+    }).length;
+
+    const brief = buildMorningBrief({
+      fullName: profile.full_name,
+      yesterdayDelivered: yDeliveredSafe.length,
+      yesterdayRevenue: yRev,
+      yesterdayProfit: yProfit,
+      yesterdayPayments: yPay,
+      pickupsToday: shipList.filter((s) => s.pickup_date === today).length,
+      deliveriesToday: shipList.filter(
+        (s) => s.delivery_date === today || s.promised_delivery_date === today,
+      ).length,
+      invoicesDueToday: invList.filter((i) => i.due_date === today).length,
+      approvalsWaiting: (approvals ?? []).length,
+      lateShipments: lateList.length,
+      unprofitableActive: activeList.filter((s) => {
+        const p = profitByShipment.get(s.id);
+        const m = p ? Number(p.margin) : Number(s.customer_rate) - Number(s.carrier_cost);
+        return m < 0;
+      }).length,
+      overdueInvoices: pastDue.length,
+      insuranceExpiring,
+      openDisputes: disputeList.filter((d) => d.status === "open").length,
+    });
+
+    const podSet = new Set(podList.map((p) => p.shipment_id));
+    const billedSet = new Set(
+      invList.filter((i) => i.status !== "cancelled" && i.shipment_id).map((i) => i.shipment_id),
+    );
+    const unbilledDelivered = shipList.filter(
+      (s) =>
+        ["delivered", "completed"].includes(s.status) &&
+        podSet.has(s.id) &&
+        !billedSet.has(s.id),
+    ).length;
+
+    const customerRevMargin = new Map<
+      string,
+      { name: string; revenue: number; profit: number }
+    >();
+    for (const p of profitList) {
+      const rev =
+        Number(p.customer_rate) +
+        Number(p.billable_accessorials) -
+        Number(p.discount_amount || 0);
+      const cur = customerRevMargin.get(p.customer_id) ?? {
+        name: customerName.get(p.customer_id) ?? "Customer",
+        revenue: 0,
+        profit: 0,
+      };
+      cur.revenue += rev;
+      cur.profit += Number(p.margin);
+      customerRevMargin.set(p.customer_id, cur);
+    }
+    const topRevenueCustomer =
+      [...customerRevMargin.values()].sort((a, b) => b.revenue - a.revenue)[0] ?? null;
+
+    const overdueByCustomer = Object.values(
+      pastDue.reduce<Record<string, { name: string; balance: number }>>((acc, inv) => {
+        const name =
+          (inv.customers as { name?: string } | null)?.name ??
+          customerName.get(inv.customer_id) ??
+          "Customer";
+        const bal = Number(inv.total) - Number(inv.amount_paid);
+        acc[name] = acc[name] || { name, balance: 0 };
+        acc[name].balance += bal;
+        return acc;
+      }, {}),
+    );
+
+    const laneStats = new Map<string, { profit: number; revenue: number; loads: number }>();
+    for (const s of shipList) {
+      const lane = `${s.origin_city ?? "?"} → ${s.dest_city ?? "?"}`;
+      const p = profitByShipment.get(s.id);
+      const rev = p
+        ? Number(p.customer_rate) +
+          Number(p.billable_accessorials) -
+          Number(p.discount_amount || 0)
+        : Number(s.customer_rate);
+      const profitAmt = p ? Number(p.margin) : Number(s.customer_rate) - Number(s.carrier_cost);
+      const cur = laneStats.get(lane) ?? { profit: 0, revenue: 0, loads: 0 };
+      cur.profit += profitAmt;
+      cur.revenue += rev;
+      cur.loads += 1;
+      laneStats.set(lane, cur);
+    }
+    const weakLane =
+      [...laneStats.entries()]
+        .map(([lane, v]) => ({
+          lane,
+          marginPct: v.revenue > 0 ? (v.profit / v.revenue) * 100 : 0,
+          loads: v.loads,
+        }))
+        .filter((l) => l.loads >= 1)
+        .sort((a, b) => a.marginPct - b.marginPct)[0] ?? null;
+
+    const chargeByShip = new Map<string, number>();
+    for (const c of chargeList) {
+      chargeByShip.set(c.shipment_id, (chargeByShip.get(c.shipment_id) ?? 0) + 1);
+    }
+    const carrierAccessorial = (carriers ?? []).map((c) => {
+      const loads = shipList.filter((s) => s.carrier_id === c.id);
+      const withCharges = loads.filter((s) => (chargeByShip.get(s.id) ?? 0) > 0).length;
+      return {
+        name: c.name,
+        loads: loads.length,
+        accessorialRate: loads.length ? withCharges / loads.length : 0,
+      };
+    });
+    const highAccessorialCarrier =
+      carrierAccessorial.sort((a, b) => b.accessorialRate - a.accessorialRate)[0] ?? null;
+
+    const insights = buildBusinessInsights({
+      revenueThisMonth,
+      revenueLastMonth,
+      marginThisMonth,
+      marginLastMonth,
+      carrierCostThisMonth: costThisMonth,
+      carrierCostLastMonth: costLastMonth,
+      topRevenueCustomer: topRevenueCustomer
+        ? {
+            name: topRevenueCustomer.name,
+            revenue: topRevenueCustomer.revenue,
+            marginPct:
+              topRevenueCustomer.revenue > 0
+                ? (topRevenueCustomer.profit / topRevenueCustomer.revenue) * 100
+                : 0,
+          }
+        : null,
+      unbilledDelivered,
+      overdueByCustomer,
+      weakLane,
+      highAccessorialCarrier,
+    });
+
+    const heatRows = toHeatRows({
+      profit: profitList.map((p) => ({
+        shipment_id: p.shipment_id,
+        load_number: p.load_number,
+        customer_id: p.customer_id,
+        customer_rate: Number(p.customer_rate),
+        carrier_cost: Number(p.carrier_cost),
+        billable_accessorials: Number(p.billable_accessorials),
+        payable_accessorials: Number(p.payable_accessorials),
+        discount_amount: p.discount_amount == null ? null : Number(p.discount_amount),
+        margin: Number(p.margin),
+      })),
+      shipments: shipList.map((s) => ({
+        id: s.id,
+        carrier_id: s.carrier_id,
+        origin_city: s.origin_city,
+        dest_city: s.dest_city,
+        pickup_date: s.pickup_date,
+        delivery_date: s.delivery_date,
+        created_at: s.created_at,
+      })),
+      customerNames: customerName,
+      carrierNames: new Map((carriers ?? []).map((c) => [c.id, c.name])),
+    });
+
+    const mapShipments = shipList
+      .filter((s) => s.status !== "cancelled")
+      .map((s) => {
+        const hasPod = podSet.has(s.id);
+        const pendingAccessorials = chargeList.filter(
+          (c) => c.shipment_id === s.id && c.approval_status === "pending",
+        ).length;
+        const p = profitByShipment.get(s.id);
+        const margin = p
+          ? Number(p.margin)
+          : Number(s.customer_rate) - Number(s.carrier_cost);
+        const billed = billedSet.has(s.id);
+        let daysSinceDeliveryUnbilled: number | null = null;
+        if (["delivered", "completed"].includes(s.status) && !billed && s.delivery_date) {
+          daysSinceDeliveryUnbilled = Math.floor(
+            (new Date(today + "T00:00:00Z").getTime() -
+              new Date(s.delivery_date + "T00:00:00Z").getTime()) /
+              (1000 * 60 * 60 * 24),
+          );
+        }
+        const health = computeShipmentHealth({
+          status: s.status,
+          carrier_id: s.carrier_id,
+          promised_delivery_date: s.promised_delivery_date,
+          delivery_date: s.delivery_date,
+          margin,
+          hasPod,
+          pendingAccessorials,
+          daysSinceDeliveryUnbilled,
+          hasOpenDispute: disputedShipmentIds.has(s.id),
+          hasOverdueInvoice: overdueCustomerIds.has(s.customer_id as string),
+          today,
+        });
+        return {
+          id: s.id,
+          load_number: s.load_number,
+          status: s.status,
+          origin_city: s.origin_city,
+          origin_state: s.origin_state,
+          dest_city: s.dest_city,
+          dest_state: s.dest_state,
+          pickup_location: s.pickup_location,
+          delivery_location: s.delivery_location,
+          promised_delivery_date: s.promised_delivery_date,
+          customer_name: (s.customers as { name?: string } | null)?.name ?? "Customer",
+          carrier_name: (s.carriers as { name?: string } | null)?.name ?? "Unassigned",
+          health_score: health.score,
+          health_category: health.category,
+        };
+      });
 
     return (
       <div className="space-y-6">
         <Header
           title="Executive Dashboard"
-          subtitle="Company-wide revenue, margin, cash, and approval alerts"
+          subtitle="Company performance, exceptions, and contract-to-cash health"
         />
+        <StoryActionChips role="manager" />
         <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
-          <Stat title="Revenue" value={money(revenue)} />
-          <Stat title="Gross profit" value={money(grossProfit)} warn={grossProfit < 0} />
-          <Stat title="Profit margin" value={`${marginPct.toFixed(1)}%`} warn={marginPct < 0} />
-          <Stat title="Active shipments" value={String(active)} />
-          <Stat title="Delivered shipments" value={String(delivered)} />
-          <Stat title="Accounts receivable" value={money(ar)} />
-          <Stat title="Open invoices" value={String(openInvoices.length)} />
-          <Stat title="Pending approvals" value={String((approvals ?? []).length)} />
+          <Stat
+            title="Cash at risk"
+            value={money(
+              pastDue.reduce(
+                (s, i) => s + Math.max(0, Number(i.total) - Number(i.amount_paid)),
+                0,
+              ) +
+                disputeList
+                  .filter((d) => d.status === "open")
+                  .reduce((s, d) => s + Number(d.amount_disputed), 0),
+            )}
+            warn
+          />
+          <Stat
+            title="POD-ready unbilled"
+            value={String(unbilledDelivered)}
+            warn={unbilledDelivered > 0}
+          />
+          <Stat title="Overdue invoices" value={String(pastDue.length)} warn={pastDue.length > 0} />
+          <Stat
+            title="Open disputes"
+            value={String(disputeList.filter((d) => d.status === "open").length)}
+            warn={disputeList.some((d) => d.status === "open")}
+          />
         </div>
+        <MorningBriefCard
+          greeting={brief.greeting}
+          yesterday={brief.yesterday}
+          today={brief.today}
+          attention={brief.attention}
+        />
+        <KpiRibbon items={kpis} />
+        <ShipmentMapLazy shipments={mapShipments} today={today} />
         <div className="grid gap-4 lg:grid-cols-2">
-          <Panel title="Monthly revenue"><MonthlyBars data={monthlyRev} name="Revenue" /></Panel>
-          <Panel title="Monthly profit"><MonthlyBars data={monthlyProfit} name="Profit" /></Panel>
-          <Panel title="Top customers"><HorizontalBars data={topCustomers} name="Margin" /></Panel>
+          <BusinessInsightsPanel insights={insights} />
+          <div className="space-y-4">
+            <div className="grid gap-4 sm:grid-cols-2">
+              <Stat title="Delivered (all time)" value={String(delivered)} />
+              <Stat title="Pending approvals" value={String((approvals ?? []).length)} />
+              <Stat title="Cash received today" value={money(paidToday)} />
+              <Stat title="Open invoices" value={String(openInvoices.length)} />
+            </div>
+            <Panel title="Alerts requiring approval">
+              {(approvals ?? []).length === 0 ? (
+                <p className="text-sm opacity-70">No pending approvals.</p>
+              ) : (
+                <ul className="space-y-3">
+                  {(approvals ?? []).slice(0, 4).map((a) => (
+                    <li
+                      key={a.id}
+                      className="flex flex-wrap items-center justify-between gap-3 rounded-box border border-warning/40 bg-warning/10 p-3"
+                    >
+                      <div>
+                        <p className="font-medium capitalize">
+                          {a.request_type} · {money(a.amount)}
+                        </p>
+                        <p className="text-sm opacity-70">{sanitizeDemoText(a.reason)}</p>
+                      </div>
+                      <Link href="/approvals" className="btn btn-warning btn-xs">
+                        Review
+                      </Link>
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </Panel>
+          </div>
+        </div>
+        <ProfitabilityHeatmap rows={heatRows} />
+        <div className="grid gap-4 lg:grid-cols-2">
+          <Panel title="Monthly revenue">
+            <MonthlyBars data={monthlyRev} name="Revenue" />
+          </Panel>
+          <Panel title="Monthly profit">
+            <MonthlyBars data={monthlyProfit} name="Profit" />
+          </Panel>
+          <Panel title="Top customers">
+            <HorizontalBars data={topCustomers} name="Margin" />
+          </Panel>
           <Panel title="Least profitable shipments">
             <MiniTable
               headers={["Load", "Customer", "Margin"]}
@@ -166,145 +643,397 @@ export default async function DashboardPage() {
             ])}
           />
         </Panel>
-        <Panel title="Alerts requiring approval">
-          {(approvals ?? []).length === 0 ? (
-            <p className="text-sm opacity-70">No pending approvals.</p>
-          ) : (
-            <ul className="space-y-3">
-              {(approvals ?? []).map((a) => (
-                <li key={a.id} className="flex flex-wrap items-center justify-between gap-3 rounded-box border border-warning/40 bg-warning/10 p-3">
-                  <div>
-                    <p className="font-medium capitalize">{a.request_type} · {money(a.amount)}</p>
-                    <p className="text-sm opacity-70">{a.reason}</p>
-                  </div>
-                  <div className="flex gap-2">
-                    <form action={reviewApproval}>
-                      <input type="hidden" name="approval_id" value={a.id} />
-                      <input type="hidden" name="decision" value="approved" />
-                      <button className="btn btn-success btn-xs">Approve</button>
-                    </form>
-                    <form action={reviewApproval}>
-                      <input type="hidden" name="approval_id" value={a.id} />
-                      <input type="hidden" name="decision" value="rejected" />
-                      <button className="btn btn-error btn-xs">Reject</button>
-                    </form>
-                  </div>
-                </li>
-              ))}
-            </ul>
-          )}
-        </Panel>
       </div>
     );
   }
 
   // ——— BROKER OPS ———
   if (profile.role === "broker") {
-    const pickupsToday = shipList.filter((s) => s.pickup_date === today).length;
-    const deliveriesToday = shipList.filter((s) => s.delivery_date === today || s.promised_delivery_date === today).length;
+    const podSet = new Set(podList.map((p) => p.shipment_id));
+    const pendingCharges = chargeList.filter((c) => c.approval_status === "pending");
+    const brokerTasks = buildBrokerTasks({
+      shipments: shipList.map((s) => ({
+        id: s.id,
+        load_number: s.load_number,
+        status: s.status,
+        carrier_id: s.carrier_id,
+        customer_id: s.customer_id,
+        pickup_date: s.pickup_date,
+        delivery_date: s.delivery_date,
+        promised_delivery_date: s.promised_delivery_date,
+        origin_city: s.origin_city,
+        dest_city: s.dest_city,
+        pickup_location: s.pickup_location,
+        delivery_location: s.delivery_location,
+        customer_rate: Number(s.customer_rate),
+        carrier_cost: Number(s.carrier_cost),
+        created_by: s.created_by ?? null,
+        customers: s.customers as { name?: string } | null,
+      })),
+      today,
+      profileId: profile.id,
+      pendingCharges: pendingCharges.map((c) => ({
+        id: c.id,
+        shipment_id: c.shipment_id,
+        description: c.description,
+        amount: Number(c.amount),
+      })),
+      contracts: (contracts ?? []).map((c) => ({
+        id: c.id,
+        contract_number: c.contract_number,
+        end_date: c.end_date,
+        status: c.status,
+        customers: c.customers as { name?: string } | null,
+      })),
+      podShipmentIds: podSet,
+    });
+    const stats = brokerTaskStats(brokerTasks);
     const inTransit = shipList.filter((s) => s.status === "in_transit");
-    const delayed = shipList.filter(
-      (s) =>
-        s.promised_delivery_date &&
-        s.promised_delivery_date < today &&
-        !["delivered", "completed", "cancelled"].includes(s.status),
+
+    const profitMap = new Map(
+      profitList.map((p) => [
+        p.shipment_id as string,
+        { margin: Number(p.margin), carrier_cost: Number(p.carrier_cost) },
+      ]),
     );
-    const unassigned = shipList.filter((s) => !s.carrier_id && s.status !== "cancelled");
-    const availableCarriers = (carriers ?? []).length;
+    const chargeCount = new Map<string, number>();
+    for (const c of chargeList) {
+      chargeCount.set(c.shipment_id, (chargeCount.get(c.shipment_id) ?? 0) + 1);
+    }
+    const scorecards = buildCarrierScorecards({
+      carriers: (carriers ?? []).map((c) => ({
+        id: c.id,
+        name: c.name,
+        equipment_type: (c as { equipment_type?: string | null }).equipment_type ?? null,
+        service_area: (c as { service_area?: string | null }).service_area ?? null,
+        rating: c.rating == null ? null : Number(c.rating),
+        insurance_expiration: c.insurance_expiration ?? null,
+      })),
+      shipments: shipList.map((s) => ({
+        id: s.id,
+        carrier_id: s.carrier_id,
+        status: s.status,
+        pickup_date: s.pickup_date,
+        delivery_date: s.delivery_date,
+        promised_delivery_date: s.promised_delivery_date,
+        carrier_cost: Number(s.carrier_cost),
+        customer_rate: Number(s.customer_rate),
+      })),
+      profitByShipment: profitMap,
+      podShipmentIds: podSet,
+      chargesByShipment: chargeCount,
+      today,
+    });
+
+    const mapShipments = shipList
+      .filter((s) => s.status !== "cancelled")
+      .map((s) => {
+        const hasPod = podSet.has(s.id);
+        const pendingAccessorials = chargeList.filter(
+          (c) => c.shipment_id === s.id && c.approval_status === "pending",
+        ).length;
+        const p = profitByShipment.get(s.id);
+        const margin = p
+          ? Number(p.margin)
+          : Number(s.customer_rate) - Number(s.carrier_cost);
+        const health = computeShipmentHealth({
+          status: s.status,
+          carrier_id: s.carrier_id,
+          promised_delivery_date: s.promised_delivery_date,
+          delivery_date: s.delivery_date,
+          margin,
+          hasPod,
+          pendingAccessorials,
+          daysSinceDeliveryUnbilled: null,
+          hasOpenDispute: disputedShipmentIds.has(s.id),
+          hasOverdueInvoice: overdueCustomerIds.has(s.customer_id as string),
+          today,
+        });
+        return {
+          id: s.id,
+          load_number: s.load_number,
+          status: s.status,
+          origin_city: s.origin_city,
+          origin_state: s.origin_state,
+          dest_city: s.dest_city,
+          dest_state: s.dest_state,
+          pickup_location: s.pickup_location,
+          delivery_location: s.delivery_location,
+          promised_delivery_date: s.promised_delivery_date,
+          customer_name: (s.customers as { name?: string } | null)?.name ?? "Customer",
+          carrier_name: (s.carriers as { name?: string } | null)?.name ?? "Unassigned",
+          health_score: health.score,
+          health_category: health.category,
+        };
+      });
+
+    const watchActions = [
+      ...(stats.delayed
+        ? [
+            {
+              title: `${stats.delayed} delayed load(s)`,
+              action: "Call carriers for ETAs and notify customers",
+              href: "/warnings",
+            },
+          ]
+        : []),
+      ...(stats.unassigned
+        ? [
+            {
+              title: `${stats.unassigned} unassigned load(s)`,
+              action: "Cover with a Preferred / Approved carrier from scorecards",
+              href: "/carriers",
+            },
+          ]
+        : []),
+      ...(stats.accessorial
+        ? [
+            {
+              title: `${stats.accessorial} accessorial(s) awaiting manager approval`,
+              action: "Escalate to a manager — only managers can approve or reject",
+              href: "/warnings",
+            },
+          ]
+        : []),
+      ...(scorecards.filter((c) => c.tier === "Watch List" || c.tier === "Suspended").length
+        ? [
+            {
+              title: "Carrier insurance or performance watch",
+              action: "Review Watch List / Suspended carriers before booking",
+              href: "/carriers",
+            },
+          ]
+        : []),
+    ];
 
     return (
       <div className="space-y-6">
         <Header
           title="Operations Dashboard"
-          subtitle="Today's freight board — pickups, coverage, and delays"
-          action={<Link href="/shipments/new" className="btn btn-primary btn-sm">New shipment</Link>}
+          subtitle="Task board for coverage, delays, and daily freight work"
+          action={
+            <Link href="/shipments/new" className="btn btn-primary btn-sm">
+              New shipment
+            </Link>
+          }
         />
-        <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
-          <Stat title="Today's pickups" value={String(pickupsToday)} />
-          <Stat title="Today's deliveries" value={String(deliveriesToday)} />
-          <Stat title="In transit" value={String(inTransit.length)} />
-          <Stat title="Delayed loads" value={String(delayed.length)} warn={delayed.length > 0} />
-          <Stat title="Unassigned loads" value={String(unassigned.length)} warn={unassigned.length > 0} />
-          <Stat title="Carriers on roster" value={String(availableCarriers)} />
+        <StoryActionChips role="broker" />
+        <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
+          <Stat title="Today's pickups" value={String(stats.pickupsToday)} />
+          <Stat title="Today's deliveries" value={String(stats.deliveriesToday)} />
+          <Stat title="Awaiting carrier" value={String(stats.unassigned)} warn={stats.unassigned > 0} />
+          <Stat title="Delayed loads" value={String(stats.delayed)} warn={stats.delayed > 0} />
+          <Stat title="Customer contact" value={String(stats.customerContact)} />
+          <Stat title="Carrier follow-ups" value={String(stats.carrierPending)} />
+          <Stat title="Accessorials to review" value={String(stats.accessorial)} />
+          <Stat title="Contract deadlines" value={String(stats.contracts)} />
         </div>
-        <div className="grid gap-4 lg:grid-cols-2">
-          <Panel title="Unassigned loads">
-            <ShipmentList rows={unassigned} empty="All loads have carriers." />
+
+        {watchActions.length > 0 ? (
+          <Panel title="Recommended actions">
+            <ul className="space-y-2">
+              {watchActions.map((w) => (
+                <li
+                  key={w.title}
+                  className="flex flex-wrap items-center justify-between gap-2 rounded-box border border-warning/30 bg-warning/10 px-3 py-2"
+                >
+                  <div>
+                    <p className="font-medium text-sm">{w.title}</p>
+                    <p className="text-xs opacity-70">{w.action}</p>
+                  </div>
+                  <Link href={w.href} className="btn btn-warning btn-xs">
+                    Open
+                  </Link>
+                </li>
+              ))}
+            </ul>
+            <Link href="/warnings" className="btn btn-ghost btn-sm mt-2">
+              Full warning center
+            </Link>
           </Panel>
-          <Panel title="Delayed loads">
-            <ShipmentList rows={delayed} empty="No delayed loads." />
-          </Panel>
-        </div>
-        <Panel title="Shipments in transit">
+        ) : (
+          <div className="alert alert-success">
+            <span>No high-priority broker exceptions right now. Check the work queue for today&apos;s tasks.</span>
+          </div>
+        )}
+
+        <BrokerTaskBoard tasks={brokerTasks} profileId={profile.id} today={today} />
+        <ShipmentMapLazy shipments={mapShipments} today={today} />
+        <Panel title="In transit now">
           <ShipmentList rows={inTransit} empty="Nothing in transit." />
         </Panel>
+        <div>
+          <div className="mb-3 flex flex-wrap items-end justify-between gap-2">
+            <div>
+              <h2 className="text-lg font-bold">Carrier scorecards</h2>
+              <p className="text-sm opacity-70">
+                Performance tiers for coverage decisions. Full detail also on Carriers.
+              </p>
+            </div>
+            <Link href="/carriers" className="btn btn-outline btn-sm">
+              Open carriers
+            </Link>
+          </div>
+          <CarrierScorecardGrid scorecards={scorecards.slice(0, 4)} showComparison />
+        </div>
       </div>
     );
   }
 
   // ——— BILLING ———
   if (profile.role === "billing") {
-    const paidToday = (payments ?? []).reduce((s, p) => s + Number(p.amount), 0);
-    const aging = { current: 0, d30: 0, d60: 0, d90: 0 };
-    for (const inv of openInvoices) {
-      const bal = Number(inv.total) - Number(inv.amount_paid);
-      const days = Math.floor(
-        (Date.now() - new Date(inv.due_date).getTime()) / (1000 * 60 * 60 * 24),
-      );
-      if (days <= 0) aging.current += bal;
-      else if (days <= 30) aging.d30 += bal;
-      else if (days <= 60) aging.d60 += bal;
-      else aging.d90 += bal;
-    }
-    const agingChart = [
-      { name: "Current", value: Math.round(aging.current) },
-      { name: "1-30", value: Math.round(aging.d30) },
-      { name: "31-60", value: Math.round(aging.d60) },
-      { name: "60+", value: Math.round(aging.d90) },
-    ];
+    const thisMonth = monthBounds(0);
+    const paidToday = (payments ?? [])
+      .filter((p) => p.payment_date === today)
+      .reduce((s, p) => s + Number(p.amount), 0);
+    const cashMonth = (payments ?? [])
+      .filter((p) => inRange(p.payment_date, thisMonth.start, thisMonth.end))
+      .reduce((s, p) => s + Number(p.amount), 0);
+
+    const aging = computeAging(invList, today);
+    const agingChart = agingChartData(aging);
+    const openDisputes = disputeList.filter((d) => d.status === "open");
+    const disputedBalance = openDisputes.reduce(
+      (s, d) => s + Number(d.amount_disputed),
+      0,
+    );
+
+    const podSet = new Set(podList.map((p) => p.shipment_id));
+    const billedSet = new Set(
+      invList
+        .filter((i) => i.status !== "cancelled" && i.shipment_id)
+        .map((i) => i.shipment_id as string),
+    );
+    const { ready, awaitingDocs } = buildUnbilledQueues({
+      shipments: shipList.map((s) => ({
+        id: s.id,
+        load_number: s.load_number,
+        status: s.status,
+        delivery_date: s.delivery_date,
+        customers: s.customers as { name?: string } | null,
+      })),
+      billedShipmentIds: billedSet,
+      podShipmentIds: podSet,
+    });
+
+    const worklist = buildCollectionWorklist({
+      invoices: invList.map((i) => ({
+        id: i.id,
+        invoice_number: i.invoice_number,
+        customer_id: i.customer_id,
+        total: Number(i.total),
+        amount_paid: Number(i.amount_paid),
+        due_date: i.due_date,
+        status: i.status,
+        customers: i.customers as { name?: string } | null,
+      })),
+      disputes: disputeList.map((d) => ({
+        invoice_id: d.invoice_id,
+        status: d.status,
+      })),
+      notes: (collectionNotes ?? []).map((n) => ({
+        invoice_id: n.invoice_id,
+        note: n.note,
+        created_at: n.created_at,
+      })),
+      today,
+    });
+
+    const billingInsights = buildBillingInsights({
+      aging,
+      unbilledReady: ready.length,
+      awaitingDocs: awaitingDocs.length,
+      disputedBalance,
+      cashToday: paidToday,
+      cashMonth,
+      overdueCount: pastDue.length,
+    });
 
     return (
       <div className="space-y-6">
         <Header
-          title="Billing Dashboard"
-          subtitle="Invoices, collections, aging, and disputes"
-          action={<Link href="/payments" className="btn btn-primary btn-sm">Record payment</Link>}
+          title="Billing & Collections Dashboard"
+          subtitle="AR aging, unbilled queues, disputes, and collection actions"
+          action={
+            <div className="flex flex-wrap gap-2">
+              <Link href="/invoices" className="btn btn-outline btn-sm">
+                Ready to bill
+              </Link>
+              <Link href="/payments" className="btn btn-primary btn-sm">
+                Record payment
+              </Link>
+            </div>
+          }
         />
-        <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
-          <Stat title="Open invoices" value={String(openInvoices.length)} />
-          <Stat title="Past due invoices" value={String(pastDue.length)} warn={pastDue.length > 0} />
-          <Stat title="AR balance" value={money(ar)} />
-          <Stat title="Payments received today" value={money(paidToday)} />
-          <Stat title="Open disputes" value={String((disputes ?? []).length)} />
-          <Stat title="60+ day AR" value={money(aging.d90)} warn={aging.d90 > 0} />
-        </div>
-        <div className="grid gap-4 lg:grid-cols-2">
-          <Panel title="Invoice aging"><StatusPie data={agingChart} /></Panel>
-          <Panel title="Billing disputes">
-            {(disputes ?? []).length === 0 ? (
-              <p className="text-sm opacity-70">No open disputes.</p>
-            ) : (
-              <ul className="space-y-2 text-sm">
-                {(disputes ?? []).map((d) => (
-                  <li key={d.id} className="rounded-box bg-warning/15 p-3">
-                    {d.reason} — {money(d.amount_disputed)}
-                  </li>
-                ))}
-              </ul>
-            )}
-            <Link href="/disputes" className="btn btn-ghost btn-sm mt-3">View all disputes</Link>
-          </Panel>
-        </div>
-        <Panel title="Past due invoices">
-          <MiniTable
-            headers={["Invoice", "Customer", "Balance", "Due"]}
-            rows={pastDue.slice(0, 8).map((i) => [
-              i.invoice_number,
-              (i.customers as { name?: string } | null)?.name ?? "—",
-              money(Number(i.total) - Number(i.amount_paid)),
-              i.due_date,
-            ])}
+        <StoryActionChips role="billing" />
+        <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
+          <Stat title="Total AR" value={money(ar)} />
+          <Stat title="Current AR" value={money(aging.current)} />
+          <Stat title="1–30 days past due" value={money(aging.d1_30)} warn={aging.d1_30 > 0} />
+          <Stat title="31–60 days past due" value={money(aging.d31_60)} warn={aging.d31_60 > 0} />
+          <Stat title="61–90 days past due" value={money(aging.d61_90)} warn={aging.d61_90 > 0} />
+          <Stat
+            title="More than 90 days"
+            value={money(aging.d90_plus)}
+            warn={aging.d90_plus > 0}
           />
+          <Stat title="Cash received today" value={money(paidToday)} />
+          <Stat title="Cash received this month" value={money(cashMonth)} />
+          <Stat
+            title="Delivered but unbilled"
+            value={String(ready.length)}
+            warn={ready.length > 0}
+          />
+          <Stat
+            title="Awaiting supporting docs"
+            value={String(awaitingDocs.length)}
+            warn={awaitingDocs.length > 0}
+          />
+          <Stat
+            title="Disputed invoice balance"
+            value={money(disputedBalance)}
+            warn={disputedBalance > 0}
+          />
+          <Stat title="Open invoices" value={String(openInvoices.length)} />
+        </div>
+
+        <div className="grid gap-4 lg:grid-cols-2">
+          <Panel title="Invoice aging">
+            <StatusPie data={agingChart} />
+          </Panel>
+          <BillingInsightsPanel insights={billingInsights} />
+        </div>
+
+        <div className="grid gap-4 lg:grid-cols-2">
+          <UnbilledQueuePanel
+            title="Delivered & ready to bill"
+            items={ready}
+            empty="No POD-complete loads waiting for an invoice."
+          />
+          <UnbilledQueuePanel
+            title="Invoices awaiting supporting documents"
+            items={awaitingDocs}
+            empty="No delivered loads are blocked on missing POD."
+          />
+        </div>
+
+        <CollectionsWorklist items={worklist} />
+
+        <Panel title="Open billing disputes">
+          {openDisputes.length === 0 ? (
+            <p className="text-sm opacity-70">No open disputes.</p>
+          ) : (
+            <ul className="space-y-2 text-sm">
+              {openDisputes.map((d) => (
+                <li key={d.id} className="rounded-box bg-warning/15 p-3">
+                  {sanitizeDemoText(d.reason)} — {money(d.amount_disputed)}
+                </li>
+              ))}
+            </ul>
+          )}
+          <Link href="/disputes" className="btn btn-ghost btn-sm mt-3">
+            View all disputes
+          </Link>
         </Panel>
       </div>
     );
@@ -318,32 +1047,128 @@ export default async function DashboardPage() {
     const recentDeliveries = shipList.filter((s) =>
       ["delivered", "completed"].includes(s.status),
     );
+    const podSet = new Set(podList.map((p) => p.shipment_id));
+    const overdueMine = invList.filter((i) => {
+      const bal = Number(i.total) - Number(i.amount_paid);
+      return bal > 0 && i.due_date < today && !["paid", "cancelled"].includes(i.status);
+    });
+    const openDisputes = disputeList.filter((d) => d.status === "open");
+
+    const statusCards = current.slice(0, 4).map((s) => {
+      const friendly = customerFacingHealth({
+        status: s.status,
+        promised_delivery_date: s.promised_delivery_date,
+        hasPod: podSet.has(s.id),
+        hasCarrier: Boolean(s.carrier_id),
+        hasOpenDispute: disputedShipmentIds.has(s.id),
+        hasOverdueInvoice: overdueMine.length > 0,
+        today,
+      });
+      return { s, friendly };
+    });
+
+    const attention = [
+      ...current
+        .filter(
+          (s) =>
+            s.promised_delivery_date &&
+            s.promised_delivery_date < today &&
+            !["delivered", "completed"].includes(s.status),
+        )
+        .map((s) => ({
+          title: `${s.load_number} is delayed`,
+          detail: "Expected delivery date has passed",
+          href: `/shipments/${s.id}`,
+        })),
+      ...overdueMine.slice(0, 3).map((i) => ({
+        title: `${i.invoice_number} is past due`,
+        detail: `Balance ${money(Number(i.total) - Number(i.amount_paid))}`,
+        href: "/invoices",
+      })),
+      ...openDisputes.slice(0, 2).map((d) => ({
+        title: "Open billing question",
+        detail: d.reason,
+        href: "/support",
+      })),
+    ];
 
     return (
       <div className="space-y-6">
-        <Header title="My Dashboard" subtitle="Your freight status, deliveries, and balance" />
+        <Header
+          title="My Dashboard"
+          subtitle="Your shipments, deliveries, invoices, and balances — only your account"
+          action={
+            <Link href="/warnings" className="btn btn-outline btn-sm">
+              My alerts
+            </Link>
+          }
+        />
+        <StoryActionChips role="customer" />
         <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
           <Stat title="Current shipments" value={String(current.length)} />
           <Stat title="Recent deliveries" value={String(recentDeliveries.length)} />
-          <Stat title="Outstanding balance" value={money(ar)} />
-          <Stat title="Recent invoices" value={String(invList.length)} />
+          <Stat title="Outstanding balance" value={money(ar)} warn={ar > 0} />
+          <Stat title="Past-due invoices" value={String(overdueMine.length)} warn={overdueMine.length > 0} />
         </div>
-        <Panel title="Shipment status">
+
+        {attention.length > 0 ? (
+          <Panel title="Needs your attention">
+            <ul className="space-y-2">
+              {attention.map((a) => (
+                <li
+                  key={a.title + a.detail}
+                  className="flex flex-wrap items-center justify-between gap-2 rounded-box border border-warning/30 bg-warning/10 px-3 py-2"
+                >
+                  <div>
+                    <p className="text-sm font-medium">{a.title}</p>
+                    <p className="text-xs opacity-70">{a.detail}</p>
+                  </div>
+                  <Link href={a.href} className="btn btn-warning btn-xs">
+                    Open
+                  </Link>
+                </li>
+              ))}
+            </ul>
+          </Panel>
+        ) : null}
+
+        <div className="grid gap-4 lg:grid-cols-2">
+          {statusCards.map(({ s, friendly }) => (
+            <div key={s.id} className="space-y-2">
+              <div className="flex items-center justify-between gap-2 px-1">
+                <Link href={`/shipments/${s.id}`} className="link link-primary font-semibold">
+                  {s.load_number}
+                </Link>
+                <span className={`badge badge-sm ${statusBadge(s.status)}`}>{s.status}</span>
+              </div>
+              <CustomerFriendlyStatusCard health={friendly} />
+            </div>
+          ))}
+        </div>
+
+        <Panel title="Active shipments">
           <ShipmentList rows={current} empty="No active shipments." />
         </Panel>
         <div className="grid gap-4 lg:grid-cols-2">
           <Panel title="Recent deliveries">
             <ShipmentList rows={recentDeliveries.slice(0, 5)} empty="No deliveries yet." />
           </Panel>
-          <Panel title="Recent invoices">
+          <Panel title="Your invoices">
             <MiniTable
-              headers={["Invoice", "Status", "Balance"]}
-              rows={invList.slice(0, 5).map((i) => [
+              headers={["Invoice", "Status", "Balance", "Due"]}
+              rows={invList.slice(0, 8).map((i) => [
                 i.invoice_number,
                 i.status,
                 money(Number(i.total) - Number(i.amount_paid)),
+                i.due_date,
               ])}
             />
+            <Link href="/invoices" className="btn btn-ghost btn-sm mt-2">
+              All invoices
+            </Link>
+            <Link href="/support" className="btn btn-ghost btn-sm mt-2">
+              Support & disputes
+            </Link>
           </Panel>
         </div>
       </div>
@@ -351,11 +1176,12 @@ export default async function DashboardPage() {
   }
 
   // ——— CARRIER ———
-  const assigned = shipList.filter((s) =>
-    !["cancelled", "completed"].includes(s.status),
-  );
+  const assigned = shipList.filter((s) => !["cancelled", "completed"].includes(s.status));
   const upcomingPickups = shipList.filter(
-    (s) => s.pickup_date && s.pickup_date >= today && ["assigned", "scheduled", "booked"].includes(s.status),
+    (s) =>
+      s.pickup_date &&
+      s.pickup_date >= today &&
+      ["assigned", "scheduled", "booked"].includes(s.status),
   );
   const dueToday = shipList.filter(
     (s) =>
@@ -365,16 +1191,56 @@ export default async function DashboardPage() {
   const completed = shipList.filter((s) =>
     ["delivered", "completed"].includes(s.status),
   );
+  const podSetCarrier = new Set(podList.map((p) => p.shipment_id));
+  const pendingChargeShips = new Set(
+    chargeList
+      .filter((c) => c.approval_status === "pending")
+      .map((c) => c.shipment_id),
+  );
+  const carrierTasks = buildCarrierTasks({
+    shipments: shipList.map((s) => ({
+      id: s.id,
+      load_number: s.load_number,
+      status: s.status,
+      pickup_date: s.pickup_date,
+      delivery_date: s.delivery_date,
+      promised_delivery_date: s.promised_delivery_date,
+      pickup_location: s.pickup_location,
+      delivery_location: s.delivery_location,
+      origin_city: s.origin_city,
+      dest_city: s.dest_city,
+    })),
+    podShipmentIds: podSetCarrier,
+    pendingChargeShipmentIds: pendingChargeShips,
+    today,
+  });
+  const missingPod = completed.filter((s) => !podSetCarrier.has(s.id));
 
   return (
     <div className="space-y-6">
-      <Header title="Assigned Loads" subtitle="Your pickups, deliveries, and completed work" />
+      <Header
+        title="Assigned Loads"
+        subtitle="Your pickups, deliveries, documents, and status updates"
+        action={
+          <Link href="/warnings" className="btn btn-outline btn-sm">
+            My alerts
+          </Link>
+        }
+      />
+      <StoryActionChips role="carrier" />
       <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
         <Stat title="Assigned loads" value={String(assigned.length)} />
         <Stat title="Upcoming pickups" value={String(upcomingPickups.length)} />
-        <Stat title="Deliveries due today" value={String(dueToday.length)} />
-        <Stat title="Completed loads" value={String(completed.length)} />
+        <Stat title="Deliveries due today" value={String(dueToday.length)} warn={dueToday.length > 0} />
+        <Stat
+          title="POD still needed"
+          value={String(missingPod.length)}
+          warn={missingPod.length > 0}
+        />
       </div>
+
+      <CarrierTaskList tasks={carrierTasks} />
+
       <Panel title="Assigned loads">
         <ShipmentList rows={assigned} empty="No assigned loads." />
       </Panel>
@@ -382,12 +1248,31 @@ export default async function DashboardPage() {
         <Panel title="Upcoming pickups">
           <ShipmentList rows={upcomingPickups} empty="No upcoming pickups." />
         </Panel>
-        <Panel title="POD documents on file">
-          <p className="text-sm opacity-70 mb-2">
-            {(pods ?? []).length} proof-of-delivery record(s).{" "}
-            <Link href="/documents" className="link">Open documents</Link>
+        <Panel title="Document requirements">
+          <p className="mb-2 text-sm opacity-70">
+            {podList.length} POD on file · {missingPod.length} completed load(s) still need
+            paperwork.{" "}
+            <Link href="/documents" className="link">
+              Open documents
+            </Link>
           </p>
-          <ShipmentList rows={completed.slice(0, 5)} empty="No completed loads yet." />
+          {missingPod.length ? (
+            <ul className="space-y-2 text-sm">
+              {missingPod.map((s) => (
+                <li
+                  key={s.id}
+                  className="flex flex-wrap items-center justify-between gap-2 rounded-box bg-warning/10 px-3 py-2"
+                >
+                  <span>{s.load_number} — upload POD</span>
+                  <Link href={`/shipments/${s.id}`} className="btn btn-warning btn-xs">
+                    Upload
+                  </Link>
+                </li>
+              ))}
+            </ul>
+          ) : (
+            <ShipmentList rows={completed.slice(0, 5)} empty="No completed loads yet." />
+          )}
         </Panel>
       </div>
     </div>

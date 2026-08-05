@@ -1,6 +1,9 @@
+import { Suspense } from "react";
 import { requirePathAccess } from "@/lib/authz";
+import { FocusScroll } from "@/components/FocusScroll";
 import { resolveDispute } from "@/lib/actions/freight";
 import { createClient } from "@/lib/supabase/server";
+import { sanitizeDemoText } from "@/lib/display-text";
 import { money, statusBadge } from "@/lib/types";
 import { canManageBilling } from "@/lib/roles";
 
@@ -15,10 +18,14 @@ export default async function DisputesPage() {
 
   return (
     <div className="space-y-6">
+      <Suspense fallback={null}>
+        <FocusScroll />
+      </Suspense>
       <div>
         <h1 className="text-2xl font-bold">Billing Disputes</h1>
         <p className="text-sm opacity-70">
-          Customer challenges to invoices or accessorial charges. Resolve before collecting payment in full.
+          Customer challenges to invoices or accessorial charges. Resolve before collecting payment in
+          full.
         </p>
       </div>
       <div className="space-y-3">
@@ -29,12 +36,18 @@ export default async function DisputesPage() {
             amount_paid?: number;
             total?: number;
           } | null;
+          const focusId = inv?.invoice_number ? `focus-${inv.invoice_number}` : undefined;
           return (
-            <div key={d.id} className="card bg-base-100 shadow-sm">
-              <div className="card-body py-4 gap-3">
+            <div
+              key={d.id}
+              id={focusId}
+              data-focus={inv?.invoice_number}
+              className="card bg-base-100 shadow-sm transition"
+            >
+              <div className="card-body gap-3 py-4">
                 <div className="flex flex-wrap items-start justify-between gap-3">
                   <div>
-                    <p className="font-medium">{d.reason}</p>
+                    <p className="font-medium">{sanitizeDemoText(d.reason)}</p>
                     <p className="text-sm opacity-70">
                       Invoice {inv?.invoice_number ?? "—"} · Load{" "}
                       {(d.shipments as { load_number?: string } | null)?.load_number ?? "—"} ·{" "}
@@ -52,9 +65,7 @@ export default async function DisputesPage() {
                     <form action={resolveDispute}>
                       <input type="hidden" name="dispute_id" value={d.id} />
                       <input type="hidden" name="decision" value="resolved" />
-                      <button className="btn btn-success btn-sm">
-                        Resolve — reinstate invoice
-                      </button>
+                      <button className="btn btn-success btn-sm">Resolve — reinstate invoice</button>
                     </form>
                     <form action={resolveDispute}>
                       <input type="hidden" name="dispute_id" value={d.id} />

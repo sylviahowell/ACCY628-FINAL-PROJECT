@@ -1,5 +1,10 @@
 import Link from "next/link";
 import { notFound, redirect } from "next/navigation";
+import { C2CTimeline } from "@/components/C2CTimeline";
+import {
+  CustomerFriendlyStatusCard,
+  ShipmentHealthCard,
+} from "@/components/ShipmentHealthCard";
 import { getCurrentProfile } from "@/lib/actions/auth";
 import {
   assignCarrier,
@@ -8,9 +13,16 @@ import {
   updateShipmentStatus,
   uploadPod,
 } from "@/lib/actions/freight";
+import { buildC2CTimeline } from "@/lib/c2c-timeline";
+import { DEFAULT_POD_URL, normalizePodUrl, sanitizeDemoText } from "@/lib/display-text";
+import {
+  customerFacingHealth,
+  filterTimelineForAudience,
+} from "@/lib/portal-views";
+import { canManageBilling } from "@/lib/roles";
+import { computeShipmentHealth } from "@/lib/shipment-health";
 import { createClient } from "@/lib/supabase/server";
 import { isOperations, money, statusBadge, type ShipmentStatus } from "@/lib/types";
-import { canManageBilling } from "@/lib/roles";
 
 export default async function ShipmentDetailPage({
   params,
@@ -21,6 +33,11 @@ export default async function ShipmentDetailPage({
   const profile = await getCurrentProfile();
   if (!profile) redirect("/login");
 
+  const isCustomer = profile.role === "customer";
+  const isCarrier = profile.role === "carrier";
+  const showInternalFinance =
+    isOperations(profile.role) || profile.role === "billing";
+
   const supabase = await createClient();
   const { data: s } = await supabase
     .from("shipments")
@@ -29,11 +46,9 @@ export default async function ShipmentDetailPage({
     .maybeSingle();
   if (!s) notFound();
 
-  const { data: profit } = await supabase
-    .from("shipment_profitability")
-    .select("*")
-    .eq("shipment_id", id)
-    .maybeSingle();
+  const { data: profit } = showInternalFinance
+    ? await supabase.from("shipment_profitability").select("*").eq("shipment_id", id).maybeSingle()
+    : { data: null };
   const { data: charges } = await supabase
     .from("shipment_charges")
     .select("*")
@@ -47,15 +62,96 @@ export default async function ShipmentDetailPage({
     .select("*")
     .eq("shipment_id", id)
     .order("created_at", { ascending: false });
-  const { data: invoices } = await supabase
-    .from("invoices")
-    .select("*")
-    .eq("shipment_id", id);
+  const { data: invoices } =
+    isCarrier
+      ? { data: [] as { id: string; invoice_number: string; status: string; amount_paid: number; total: number; created_at: string; due_date: string }[] }
+      : await supabase.from("invoices").select("*").eq("shipment_id", id);
+  const invoiceIds = (invoices ?? []).map((inv) => inv.id);
+  const { data: disputes } =
+    invoiceIds.length > 0
+      ? await supabase
+          .from("disputes")
+          .select("id, status, invoice_id")
+          .in("invoice_id", invoiceIds)
+      : { data: [] as { id: string; status: string; invoice_id: string }[] };
   const { data: allCarriers } = isOperations(profile.role)
     ? await supabase.from("carriers").select("id, name").order("name")
     : { data: [] as { id: string; name: string }[] };
 
-  const margin = Number(profit?.margin ?? 0);
+  const margin = Number(profit?.margin ?? Number(s.customer_rate) - Number(s.carrier_cost));
+  const today = new Date().toISOString().slice(0, 10);
+  const hasPod = (pods ?? []).length > 0;
+  const pendingAccessorials = (charges ?? []).filter(
+    (c) => c.approval_status === "pending",
+  ).length;
+  const primaryInvoice = (invoices ?? []).find((inv) => inv.status !== "cancelled") ?? null;
+  const billed = Boolean(primaryInvoice);
+  let daysSinceDeliveryUnbilled: number | null = null;
+  if (["delivered", "completed"].includes(s.status) && !billed && s.delivery_date) {
+    daysSinceDeliveryUnbilled = Math.floor(
+      (new Date(today + "T00:00:00Z").getTime() -
+        new Date(s.delivery_date + "T00:00:00Z").getTime()) /
+        (1000 * 60 * 60 * 24),
+    );
+  }
+  const hasOpenDispute = (disputes ?? []).some((d) => d.status === "open");
+  const hasOverdueInvoice = (invoices ?? []).some((inv) => {
+    const bal = Number(inv.total) - Number(inv.amount_paid);
+    return (
+      bal > 0 &&
+      inv.due_date < today &&
+      !["paid", "cancelled"].includes(inv.status)
+    );
+  });
+
+  // Health for internal/carrier — omit margin penalty for carrier view
+  const health = computeShipmentHealth({
+    status: s.status,
+    carrier_id: s.carrier_id,
+    promised_delivery_date: s.promised_delivery_date,
+    delivery_date: s.delivery_date,
+    margin: isCarrier ? null : showInternalFinance ? margin : null,
+    hasPod,
+    pendingAccessorials: isCustomer ? 0 : pendingAccessorials,
+    daysSinceDeliveryUnbilled: isCustomer || isCarrier ? null : daysSinceDeliveryUnbilled,
+    hasOpenDispute: isCarrier ? false : hasOpenDispute,
+    hasOverdueInvoice: isCarrier ? false : hasOverdueInvoice,
+    today,
+  });
+
+  const friendly = customerFacingHealth({
+    status: s.status,
+    promised_delivery_date: s.promised_delivery_date,
+    hasPod,
+    hasCarrier: Boolean(s.carrier_id),
+    hasOpenDispute,
+    hasOverdueInvoice,
+    today,
+  });
+
+  const audience = isCustomer ? "customer" : isCarrier ? "carrier" : "internal";
+  const c2cSteps = filterTimelineForAudience(
+    buildC2CTimeline({
+      status: s.status,
+      created_at: s.created_at,
+      carrier_id: s.carrier_id,
+      pickup_date: s.pickup_date,
+      delivery_date: s.delivery_date,
+      hasPod,
+      podAt: (pods ?? [])[0]?.delivered_at ?? null,
+      invoiceNumber: isCarrier ? null : primaryInvoice?.invoice_number ?? null,
+      invoiceAt: isCarrier ? null : primaryInvoice?.created_at ?? null,
+      amountPaid: isCarrier ? 0 : Number(primaryInvoice?.amount_paid ?? 0),
+      invoiceTotal: isCarrier ? 0 : Number(primaryInvoice?.total ?? 0),
+      invoiceStatus: isCarrier ? null : primaryInvoice?.status ?? null,
+      statusEvents: (timeline ?? []).map((t) => ({
+        to_status: t.to_status,
+        created_at: t.created_at,
+      })),
+    }),
+    audience,
+  );
+
   const canOperate =
     isOperations(profile.role) ||
     (profile.role === "carrier" && profile.carrier_id === s.carrier_id);
@@ -63,6 +159,29 @@ export default async function ShipmentDetailPage({
   const canAssign =
     isOperations(profile.role) &&
     !["delivered", "completed", "cancelled"].includes(s.status);
+  const showCharges =
+    showInternalFinance || isCarrier || (isCustomer && (charges ?? []).some((c) => c.billable_to_customer));
+
+  let nextAction: { label: string; href?: string; form?: "invoice" | "pod" | "assign" } | null =
+    null;
+  if (canAssign && !s.carrier_id) {
+    nextAction = { label: "Assign a carrier to cover this load", form: "assign" };
+  } else if (canOperate && ["delivered", "completed"].includes(s.status) && !hasPod) {
+    nextAction = { label: "Confirm delivery and attach proof of delivery", form: "pod" };
+  } else if (canBill && ["delivered", "completed"].includes(s.status) && hasPod && !billed) {
+    nextAction = { label: "Generate customer invoice — POD is on file", form: "invoice" };
+  } else if (profile.role === "manager" && pendingAccessorials > 0) {
+    nextAction = { label: "Review pending accessorial in Approvals", href: "/approvals" };
+  } else if (profile.role === "broker" && pendingAccessorials > 0) {
+    nextAction = {
+      label: "Escalate accessorial — managers approve from Approvals",
+      href: "/warnings",
+    };
+  } else if (isCustomer && hasOverdueInvoice) {
+    nextAction = { label: "Review past-due balance on My Invoices", href: "/invoices" };
+  } else if (isCustomer && hasOpenDispute) {
+    nextAction = { label: "Check Support for your open billing question", href: "/support" };
+  }
 
   async function setStatus(status: ShipmentStatus, _fd?: FormData) {
     "use server";
@@ -73,7 +192,9 @@ export default async function ShipmentDetailPage({
     <div className="space-y-6">
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div>
-          <Link href="/shipments" className="link link-hover text-sm">← Shipments</Link>
+          <Link href="/shipments" className="link link-hover text-sm">
+            ← Shipments
+          </Link>
           <h1 className="text-2xl font-bold">{s.load_number}</h1>
           <p className="text-sm opacity-70">
             {s.pickup_location} → {s.delivery_location}
@@ -82,7 +203,8 @@ export default async function ShipmentDetailPage({
         </div>
         {canOperate || canBill ? (
           <div className="flex flex-wrap gap-2">
-            {canOperate && (s.status === "scheduled" || s.status === "assigned" || s.status === "booked") ? (
+            {canOperate &&
+            (s.status === "scheduled" || s.status === "assigned" || s.status === "booked") ? (
               <form action={setStatus.bind(null, "picked_up")}>
                 <button className="btn btn-sm">Confirm pickup</button>
               </form>
@@ -101,31 +223,169 @@ export default async function ShipmentDetailPage({
         ) : null}
       </div>
 
-      {margin < 0 ? (
+      {showInternalFinance && margin < 0 ? (
         <div className="alert alert-warning">
-          <span>Warning: this shipment is currently unprofitable ({money(margin)} margin).</span>
+          <span>
+            Warning: this shipment is currently unprofitable ({money(margin)} margin).
+          </span>
         </div>
       ) : null}
 
-      <div className="grid gap-4 md:grid-cols-3">
-        <div className="stats bg-base-100 shadow-sm"><div className="stat"><div className="stat-title">Customer rate</div><div className="stat-value text-2xl">{money(s.customer_rate)}</div></div></div>
-        <div className="stats bg-base-100 shadow-sm"><div className="stat"><div className="stat-title">Carrier cost</div><div className="stat-value text-2xl">{money(s.carrier_cost)}</div></div></div>
-        <div className="stats bg-base-100 shadow-sm"><div className="stat"><div className="stat-title">Profit</div><div className={`stat-value text-2xl ${margin < 0 ? "text-error" : "text-success"}`}>{money(margin)}</div></div></div>
+      {nextAction ? (
+        <div className="flex flex-wrap items-center justify-between gap-3 rounded-box border border-primary/30 bg-primary/10 px-4 py-3">
+          <div>
+            <p className="text-xs font-semibold tracking-wide text-primary uppercase">
+              Next action
+            </p>
+            <p className="font-medium">{nextAction.label}</p>
+          </div>
+          <div className="flex flex-wrap gap-2">
+            {nextAction.href ? (
+              <Link href={nextAction.href} className="btn btn-primary btn-sm">
+                Go
+              </Link>
+            ) : null}
+            {nextAction.form === "invoice" ? (
+              <form action={generateInvoice.bind(null, id)}>
+                <button className="btn btn-primary btn-sm">Generate invoice</button>
+              </form>
+            ) : null}
+            {nextAction.form === "pod" ? (
+              <a href="#pod-upload" className="btn btn-success btn-sm">
+                Upload POD
+              </a>
+            ) : null}
+            {nextAction.form === "assign" ? (
+              <a href="#assign-carrier" className="btn btn-primary btn-sm">
+                Assign carrier
+              </a>
+            ) : null}
+          </div>
+        </div>
+      ) : null}
+
+      <div className="grid gap-4 lg:grid-cols-2">
+        {isCustomer ? (
+          <CustomerFriendlyStatusCard health={friendly} />
+        ) : (
+          <ShipmentHealthCard health={health} audience={isCarrier ? "carrier" : "internal"} />
+        )}
+        <C2CTimeline steps={c2cSteps} />
       </div>
+
+      {showInternalFinance ? (
+        <>
+          <div className="grid gap-4 md:grid-cols-3">
+            <div className="stats bg-base-100 shadow-sm">
+              <div className="stat">
+                <div className="stat-title">Customer rate</div>
+                <div className="stat-value text-2xl">{money(s.customer_rate)}</div>
+              </div>
+            </div>
+            <div className="stats bg-base-100 shadow-sm">
+              <div className="stat">
+                <div className="stat-title">Carrier cost (COGS)</div>
+                <div className="stat-value text-2xl">{money(s.carrier_cost)}</div>
+              </div>
+            </div>
+            <div className="stats bg-base-100 shadow-sm">
+              <div className="stat">
+                <div className="stat-title">Profit</div>
+                <div
+                  className={`stat-value text-2xl ${margin < 0 ? "text-error" : "text-success"}`}
+                >
+                  {money(margin)}
+                </div>
+              </div>
+            </div>
+          </div>
+          <div className="card bg-base-100 shadow-sm">
+            <div className="card-body py-4">
+              <h2 className="card-title text-base">Cost & revenue build-up</h2>
+              <div className="grid gap-2 text-sm sm:grid-cols-2 lg:grid-cols-4">
+                <div>
+                  <p className="opacity-60">Billable accessorials / fuel</p>
+                  <p className="font-medium">{money(profit?.billable_accessorials)}</p>
+                </div>
+                <div>
+                  <p className="opacity-60">Payable to carrier</p>
+                  <p className="font-medium">{money(profit?.payable_accessorials)}</p>
+                </div>
+                <div>
+                  <p className="opacity-60">Discount</p>
+                  <p className="font-medium">{money(s.discount_amount)}</p>
+                </div>
+                <div>
+                  <p className="opacity-60">Direct COGS</p>
+                  <p className="font-medium">
+                    {money(Number(s.carrier_cost) + Number(profit?.payable_accessorials ?? 0))}
+                  </p>
+                </div>
+              </div>
+            </div>
+          </div>
+        </>
+      ) : null}
+
+      {isCustomer ? (
+        <div className="stats bg-base-100 shadow-sm w-full max-w-sm">
+          <div className="stat">
+            <div className="stat-title">Your shipment rate</div>
+            <div className="stat-value text-2xl">{money(s.customer_rate)}</div>
+          </div>
+        </div>
+      ) : null}
+
+      {isCarrier ? (
+        <div className="stats bg-base-100 shadow-sm w-full max-w-sm">
+          <div className="stat">
+            <div className="stat-title">Your haul pay</div>
+            <div className="stat-value text-2xl">{money(s.carrier_cost)}</div>
+          </div>
+        </div>
+      ) : null}
 
       <div className="grid gap-4 lg:grid-cols-2">
         <div className="card bg-base-100 shadow-sm">
           <div className="card-body">
             <h2 className="card-title text-base">Details</h2>
-            <ul className="text-sm space-y-1">
-              <li>Customer: {(s.customers as { name?: string } | null)?.name}</li>
-              <li>Carrier: {(s.carriers as { name?: string } | null)?.name ?? "Unassigned"}</li>
-              <li>Contract: {(s.contracts as { contract_number?: string } | null)?.contract_number ?? "Spot"}</li>
-              <li>Freight: {s.freight_type ?? "—"} · Weight {s.weight_lbs ?? "—"} lbs</li>
-              <li>Pickup {s.pickup_date ?? "TBD"} · Delivery {s.delivery_date ?? "TBD"}</li>
+            <ul className="space-y-1 text-sm">
+              {!isCarrier ? (
+                <li>Customer: {(s.customers as { name?: string } | null)?.name}</li>
+              ) : null}
+              {!isCustomer ? (
+                <li>
+                  Carrier: {(s.carriers as { name?: string } | null)?.name ?? "Unassigned"}
+                </li>
+              ) : (
+                <li>
+                  Carrier:{" "}
+                  {(s.carriers as { name?: string } | null)?.name
+                    ? "Assigned"
+                    : "Pending assignment"}
+                </li>
+              )}
+              {!isCarrier ? (
+                <li>
+                  Contract:{" "}
+                  {(s.contracts as { contract_number?: string } | null)?.contract_number ??
+                    "Spot"}
+                </li>
+              ) : null}
+              <li>
+                Freight: {s.freight_type ?? "—"} · Weight {s.weight_lbs ?? "—"} lbs
+              </li>
+              <li>
+                Pickup {s.pickup_date ?? "TBD"} · Delivery {s.delivery_date ?? "TBD"}
+                {s.promised_delivery_date ? ` · Expected ${s.promised_delivery_date}` : ""}
+              </li>
             </ul>
             {canAssign ? (
-              <form action={assignCarrier} className="mt-4 grid gap-2 border-t border-base-200 pt-3">
+              <form
+                id="assign-carrier"
+                action={assignCarrier}
+                className="mt-4 grid gap-2 border-t border-base-200 pt-3"
+              >
                 <input type="hidden" name="shipment_id" value={id} />
                 <label className="form-control w-full">
                   <span className="label-text text-xs">Assign / reassign carrier</span>
@@ -158,101 +418,169 @@ export default async function ShipmentDetailPage({
           </div>
         </div>
 
-        <div className="card bg-base-100 shadow-sm">
+        <div id="pod-upload" className="card bg-base-100 shadow-sm">
           <div className="card-body">
             <h2 className="card-title text-base">Proof of delivery</h2>
             {(pods ?? []).length ? (
-              <ul className="text-sm space-y-2">
+              <ul className="space-y-2 text-sm">
                 {(pods ?? []).map((p) => (
                   <li key={p.id} className="rounded-box bg-base-200 p-3">
                     Signed by {p.signed_by ?? "—"} · {new Date(p.delivered_at).toLocaleString()}
-                    <div className="opacity-70">{p.notes}</div>
-                    {p.file_url ? <a className="link" href={p.file_url}>POD link</a> : null}
+                    {sanitizeDemoText(p.notes) ? (
+                      <div className="opacity-70">{sanitizeDemoText(p.notes)}</div>
+                    ) : null}
+                    {normalizePodUrl(p.file_url) ? (
+                      <a className="link" href={normalizePodUrl(p.file_url)!}>
+                        Open delivery document
+                      </a>
+                    ) : null}
                   </li>
                 ))}
               </ul>
             ) : (
-              <p className="text-sm opacity-70">No POD yet.</p>
+              <p className="text-sm opacity-70">No POD on file yet — required before invoicing.</p>
             )}
-            {canOperate ? (
+            {canOperate && !(pods ?? []).length ? (
               <form action={uploadPod} className="mt-3 grid gap-2">
                 <input type="hidden" name="shipment_id" value={id} />
-                <input name="signed_by" placeholder="Receiver name" className="input input-bordered input-sm" />
-                <input name="file_url" placeholder="POD file URL (simulated)" className="input input-bordered input-sm" />
-                <input name="notes" placeholder="Notes" className="input input-bordered input-sm" />
-                <button className="btn btn-success btn-sm">Confirm delivery + upload POD</button>
+                <input type="hidden" name="file_url" value={DEFAULT_POD_URL} />
+                <input
+                  name="signed_by"
+                  placeholder="Receiver name"
+                  className="input input-bordered input-sm"
+                  required
+                  defaultValue={profile.role === "carrier" ? "Consignee" : ""}
+                />
+                <button className="btn btn-success btn-sm">
+                  Attach signed BOL & confirm delivery
+                </button>
               </form>
             ) : null}
           </div>
         </div>
       </div>
 
-      <div className="card bg-base-100 shadow-sm">
-        <div className="card-body">
-          <h2 className="card-title text-base">Accessorial charges</h2>
-          <ul className="mb-3 space-y-1 text-sm">
-            {(charges ?? []).map((c) => (
-              <li key={c.id} className="flex justify-between gap-2 border-b border-base-200 py-2">
-                <span>{c.description} <span className="badge badge-ghost badge-xs">{c.approval_status}</span></span>
-                <span>{money(c.amount)}</span>
-              </li>
-            ))}
-          </ul>
-          {canOperate ? (
-            <form action={requestAccessorial} className="grid gap-2 md:grid-cols-2">
-              <input type="hidden" name="shipment_id" value={id} />
-              <input name="description" required placeholder="Charge description" className="input input-bordered input-sm" />
-              <input name="amount" type="number" step="0.01" required placeholder="Amount" className="input input-bordered input-sm" />
-              <label className="label cursor-pointer justify-start gap-2">
-                <input type="checkbox" name="payable_to_carrier" className="checkbox checkbox-sm" />
-                <span className="label-text">Payable to carrier</span>
-              </label>
-              <button className="btn btn-outline btn-sm">Request / add charge</button>
-            </form>
-          ) : null}
-        </div>
-      </div>
-
-      <div className="grid gap-4 lg:grid-cols-2">
+      {showCharges ? (
         <div className="card bg-base-100 shadow-sm">
           <div className="card-body">
-            <h2 className="card-title text-base">Invoices</h2>
-            {(invoices ?? []).length === 0 ? (
-              <p className="text-sm opacity-70">Not billed yet.</p>
+            <h2 className="card-title text-base">
+              {isCustomer ? "Extra charges on your shipment" : "Accessorial charges"}
+            </h2>
+            <ul className="mb-3 space-y-1 text-sm">
+              {(charges ?? [])
+                .filter((c) => (isCustomer ? c.billable_to_customer : true))
+                .map((c) => (
+                  <li
+                    key={c.id}
+                    className="flex justify-between gap-2 border-b border-base-200 py-2"
+                  >
+                    <span>
+                      {c.description}{" "}
+                      {!isCustomer ? (
+                        <span className="badge badge-ghost badge-xs">{c.approval_status}</span>
+                      ) : null}
+                    </span>
+                    <span>{money(c.amount)}</span>
+                  </li>
+                ))}
+            </ul>
+            {canOperate && !isCustomer ? (
+              <form action={requestAccessorial} className="grid gap-2 md:grid-cols-2">
+                <input type="hidden" name="shipment_id" value={id} />
+                <input
+                  name="description"
+                  required
+                  placeholder="Charge description"
+                  className="input input-bordered input-sm"
+                />
+                <input
+                  name="amount"
+                  type="number"
+                  step="0.01"
+                  required
+                  placeholder="Amount"
+                  className="input input-bordered input-sm"
+                />
+                <label className="label cursor-pointer justify-start gap-2">
+                  <input type="checkbox" name="payable_to_carrier" className="checkbox checkbox-sm" />
+                  <span className="label-text">Payable to carrier</span>
+                </label>
+                <button className="btn btn-outline btn-sm">Request / add charge</button>
+              </form>
+            ) : null}
+          </div>
+        </div>
+      ) : null}
+
+      <div className="grid gap-4 lg:grid-cols-2">
+        {!isCarrier ? (
+          <div className="card bg-base-100 shadow-sm">
+            <div className="card-body">
+              <h2 className="card-title text-base">Invoices</h2>
+              {(invoices ?? []).length === 0 ? (
+                <p className="text-sm opacity-70">Not billed yet.</p>
+              ) : (
+                <ul className="space-y-2 text-sm">
+                  {(invoices ?? []).map((inv) => (
+                    <li key={inv.id}>
+                      <Link href="/invoices" className="link">
+                        {inv.invoice_number}
+                      </Link>{" "}
+                      <span className={`badge ${statusBadge(inv.status)}`}>{inv.status}</span>{" "}
+                      {money(inv.amount_paid)} / {money(inv.total)}
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </div>
+          </div>
+        ) : (
+          <div className="card bg-base-100 shadow-sm">
+            <div className="card-body">
+              <h2 className="card-title text-base">Document checklist</h2>
+              <ul className="list-disc space-y-1 pl-5 text-sm">
+                <li>Pickup confirmed when freight is on the truck</li>
+                <li>In-transit update while moving</li>
+                <li>
+                  POD required after delivery{" "}
+                  {hasPod ? (
+                    <span className="badge badge-success badge-xs">Done</span>
+                  ) : (
+                    <span className="badge badge-warning badge-xs">Needed</span>
+                  )}
+                </li>
+              </ul>
+              <Link href="/documents" className="btn btn-ghost btn-sm w-fit">
+                Open documents
+              </Link>
+            </div>
+          </div>
+        )}
+        <div className="card bg-base-100 shadow-sm">
+          <div className="card-body">
+            <h2 className="card-title text-base">Status history</h2>
+            {(timeline ?? []).length === 0 ? (
+              <p className="text-sm opacity-70">No status changes logged yet.</p>
             ) : (
-              <ul className="text-sm space-y-2">
-                {(invoices ?? []).map((inv) => (
-                  <li key={inv.id}>
-                    <Link href="/invoices" className="link">{inv.invoice_number}</Link>{" "}
-                    <span className={`badge ${statusBadge(inv.status)}`}>{inv.status}</span>{" "}
-                    {money(inv.amount_paid)} / {money(inv.total)}
+              <ul className="timeline timeline-vertical timeline-compact">
+                {(timeline ?? []).map((t) => (
+                  <li key={t.id}>
+                    <hr />
+                    <div className="timeline-start text-xs opacity-60">
+                      {new Date(t.created_at).toLocaleString()}
+                    </div>
+                    <div className="timeline-middle">
+                      <div className="h-3 w-3 rounded-full bg-primary" />
+                    </div>
+                    <div className="timeline-end timeline-box text-sm">
+                      {t.from_status ?? "—"} → {t.to_status}
+                      {t.note ? ` · ${sanitizeDemoText(t.note)}` : ""}
+                    </div>
+                    <hr />
                   </li>
                 ))}
               </ul>
             )}
-          </div>
-        </div>
-        <div className="card bg-base-100 shadow-sm">
-          <div className="card-body">
-            <h2 className="card-title text-base">Status timeline</h2>
-            <ul className="timeline timeline-vertical timeline-compact">
-              {(timeline ?? []).map((t) => (
-                <li key={t.id}>
-                  <hr />
-                  <div className="timeline-start text-xs opacity-60">
-                    {new Date(t.created_at).toLocaleString()}
-                  </div>
-                  <div className="timeline-middle">
-                    <div className="h-3 w-3 rounded-full bg-primary" />
-                  </div>
-                  <div className="timeline-end timeline-box text-sm">
-                    {t.from_status ?? "—"} → {t.to_status}
-                    {t.note ? ` · ${t.note}` : ""}
-                  </div>
-                  <hr />
-                </li>
-              ))}
-            </ul>
           </div>
         </div>
       </div>

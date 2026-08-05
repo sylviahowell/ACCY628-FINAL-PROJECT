@@ -1,9 +1,26 @@
 import { redirect } from "next/navigation";
+import { EmptyState } from "@/components/EmptyState";
 import { getCurrentProfile } from "@/lib/actions/auth";
 import { recordPayment } from "@/lib/actions/freight";
 import { createClient } from "@/lib/supabase/server";
 import { money, statusBadge } from "@/lib/types";
 import { canManageBilling } from "@/lib/roles";
+
+function paymentMethodLabel(method: string | null | undefined) {
+  switch (method) {
+    case "ach_simulated":
+    case "ach":
+      return "ACH";
+    case "wire_simulated":
+    case "wire":
+      return "Wire";
+    case "check_simulated":
+    case "check":
+      return "Check";
+    default:
+      return method?.replace(/_simulated$/i, "").toUpperCase() || "—";
+  }
+}
 
 export default async function PaymentsPage() {
   const profile = await getCurrentProfile();
@@ -22,12 +39,14 @@ export default async function PaymentsPage() {
     .select("id, invoice_number, total, amount_paid, status, customers(name)")
     .in("status", ["pending", "sent", "partial", "overdue"]);
 
+  const rows = payments ?? [];
+
   return (
     <div className="space-y-6">
       <div>
         <h1 className="text-2xl font-bold">Payments</h1>
         <p className="text-sm opacity-70">
-          Simulated collections — no real bank money moves. Balances update automatically.
+          Record customer collections. Invoice balances update automatically.
         </p>
       </div>
 
@@ -48,9 +67,9 @@ export default async function PaymentsPage() {
               <input name="payment_date" type="date" defaultValue={new Date().toISOString().slice(0, 10)} className="input input-bordered" />
               <input name="amount" type="number" step="0.01" required placeholder="Amount" className="input input-bordered" />
               <select name="method" className="select select-bordered">
-                <option value="ach_simulated">ACH (simulated)</option>
-                <option value="wire_simulated">Wire (simulated)</option>
-                <option value="check_simulated">Check (simulated)</option>
+                <option value="ach_simulated">ACH</option>
+                <option value="wire_simulated">Wire</option>
+                <option value="check_simulated">Check</option>
               </select>
               <input name="reference" placeholder="Reference #" className="input input-bordered" />
               <button className="btn btn-primary md:col-span-2">Save payment</button>
@@ -59,34 +78,41 @@ export default async function PaymentsPage() {
         </div>
       ) : null}
 
-      <div className="overflow-x-auto rounded-box bg-base-100 shadow-sm">
-        <table className="table">
-          <thead>
-            <tr>
-              <th>Date</th>
-              <th>Invoice</th>
-              <th>Amount</th>
-              <th>Method</th>
-              <th>Invoice status</th>
-            </tr>
-          </thead>
-          <tbody>
-            {(payments ?? []).map((p) => (
-              <tr key={p.id}>
-                <td>{p.payment_date}</td>
-                <td>{(p.invoices as { invoice_number?: string } | null)?.invoice_number}</td>
-                <td>{money(p.amount)}</td>
-                <td>{p.method}</td>
-                <td>
-                  <span className={`badge ${statusBadge((p.invoices as { status?: string } | null)?.status ?? "")}`}>
-                    {(p.invoices as { status?: string } | null)?.status}
-                  </span>
-                </td>
+      {rows.length === 0 ? (
+        <EmptyState
+          title="No payments recorded"
+          description="When you collect against an open invoice, the payment appears here and the invoice balance updates."
+        />
+      ) : (
+        <div className="overflow-x-auto rounded-box bg-base-100 shadow-sm">
+          <table className="table">
+            <thead>
+              <tr>
+                <th>Date</th>
+                <th>Invoice</th>
+                <th>Amount</th>
+                <th>Method</th>
+                <th>Invoice status</th>
               </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
+            </thead>
+            <tbody>
+              {rows.map((p) => (
+                <tr key={p.id}>
+                  <td>{p.payment_date}</td>
+                  <td>{(p.invoices as { invoice_number?: string } | null)?.invoice_number}</td>
+                  <td>{money(p.amount)}</td>
+                  <td>{paymentMethodLabel(p.method)}</td>
+                  <td>
+                    <span className={`badge ${statusBadge((p.invoices as { status?: string } | null)?.status ?? "")}`}>
+                      {(p.invoices as { status?: string } | null)?.status}
+                    </span>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
     </div>
   );
 }

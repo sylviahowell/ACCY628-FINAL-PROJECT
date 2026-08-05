@@ -26,6 +26,8 @@ export function allowedPaths(role: UserRole): string[] {
     case "manager":
       return [
         "/dashboard",
+        "/warnings",
+        "/approvals",
         "/customers",
         "/carriers",
         "/contracts",
@@ -34,6 +36,7 @@ export function allowedPaths(role: UserRole): string[] {
         "/payments",
         "/ar",
         "/disputes",
+        "/accounting",
         "/reports",
         "/profitability",
         "/settings",
@@ -41,31 +44,42 @@ export function allowedPaths(role: UserRole): string[] {
     case "broker":
       return [
         "/dashboard",
+        "/warnings",
         "/customers",
         "/contracts",
         "/shipments",
         "/carriers",
+        "/settings",
       ];
     case "billing":
       return [
         "/dashboard",
+        "/warnings",
+        "/shipments",
         "/invoices",
         "/payments",
         "/ar",
         "/disputes",
+        "/accounting",
+        "/profitability",
+        "/settings",
       ];
     case "customer":
       return [
         "/dashboard",
+        "/warnings",
         "/shipments",
         "/invoices",
         "/support",
+        "/settings",
       ];
     case "carrier":
       return [
         "/dashboard",
+        "/warnings",
         "/shipments",
         "/documents",
+        "/settings",
       ];
     default:
       return ["/dashboard"];

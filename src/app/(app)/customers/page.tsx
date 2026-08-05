@@ -1,4 +1,5 @@
 import { redirect } from "next/navigation";
+import { EmptyState } from "@/components/EmptyState";
 import { getCurrentProfile } from "@/lib/actions/auth";
 import { createCustomer } from "@/lib/actions/freight";
 import { createClient } from "@/lib/supabase/server";
@@ -12,9 +13,10 @@ export default async function CustomersPage() {
   const supabase = await createClient();
   const { data: customers } = await supabase.from("customers").select("*").order("name");
   const { data: shipments } = await supabase.from("shipments").select("customer_id, status");
-  const { data: invoices } = await supabase
-    .from("invoices")
-    .select("customer_id, total, amount_paid, status");
+  const showAr = profile.role === "manager";
+  const { data: invoices } = showAr
+    ? await supabase.from("invoices").select("customer_id, total, amount_paid, status")
+    : { data: [] as { customer_id: string; total: number; amount_paid: number; status: string }[] };
 
   return (
     <div className="space-y-6">
@@ -25,9 +27,9 @@ export default async function CustomersPage() {
         </p>
       </div>
 
-      <div className="card bg-base-100 shadow-sm">
-        <div className="card-body">
-          <h2 className="card-title text-base">Add customer</h2>
+      <details className="collapse collapse-arrow rounded-box border border-base-300 bg-base-100">
+        <summary className="collapse-title font-medium">Add customer</summary>
+        <div className="collapse-content">
           <form action={createCustomer} className="grid gap-3 md:grid-cols-2">
             <input name="name" required placeholder="Company name" className="input input-bordered" />
             <input name="contact_name" placeholder="Contact name" className="input input-bordered" />
@@ -41,9 +43,15 @@ export default async function CustomersPage() {
             <button className="btn btn-primary md:col-span-2">Save customer</button>
           </form>
         </div>
-      </div>
+      </details>
 
       <div className="grid gap-4">
+        {(customers ?? []).length === 0 ? (
+          <EmptyState
+            title="No customers yet"
+            description="Add a shipper to attach contracts and book loads."
+          />
+        ) : null}
         {(customers ?? []).map((c) => {
           const openShipments = (shipments ?? []).filter(
             (s) => s.customer_id === c.id && !["completed", "cancelled"].includes(s.status),
@@ -66,9 +74,21 @@ export default async function CustomersPage() {
                     <p className="text-xs opacity-60">{c.billing_address}</p>
                   </div>
                   <div className="text-right text-sm">
-                    <p>Open shipments: <b>{openShipments}</b></p>
-                    <p>Invoices: <b>{custInvoices.length}</b></p>
-                    <p>Outstanding: <b>{money(outstanding)}</b></p>
+                    <p>
+                      Open shipments: <b>{openShipments}</b>
+                    </p>
+                    {showAr ? (
+                      <>
+                        <p>
+                          Invoices: <b>{custInvoices.length}</b>
+                        </p>
+                        <p>
+                          Outstanding: <b>{money(outstanding)}</b>
+                        </p>
+                      </>
+                    ) : (
+                      <p className="text-xs opacity-60">AR balances managed in Billing</p>
+                    )}
                     <p>Credit limit: {money(c.credit_limit)}</p>
                   </div>
                 </div>

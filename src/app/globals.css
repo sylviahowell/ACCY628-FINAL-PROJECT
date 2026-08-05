@@ -1,6 +1,6 @@
 @import "tailwindcss";
 @plugin "daisyui" {
-  themes: corporate --default, business --prefersdark, winter, nord, emerald;
+  themes: corporate --default, business --prefersdark, nord, dim, silk;
 }
 
 body {
@@ -12,4 +12,90 @@ body {
     radial-gradient(ellipse at top left, rgba(56, 189, 248, 0.25), transparent 50%),
     radial-gradient(ellipse at bottom right, rgba(14, 165, 233, 0.15), transparent 45%),
     linear-gradient(160deg, #0b1f36 0%, #123555 45%, #0f2744 100%);
+}
+
+/* Public login — soft canvas + shared soft shadow tokens */
+.login-page {
+  --login-shadow: 0 8px 30px rgba(10, 31, 61, 0.08);
+  --login-shadow-md: 0 12px 36px rgba(10, 31, 61, 0.1);
+  --login-shadow-lg: 0 16px 48px rgba(10, 31, 61, 0.12);
+  background: #f7fbff;
+}
+
+/* Full-page scenic truck/mountain background — one photo, cover, no blur */
+.login-scenic-bg {
+  background-image: url("/images/freightflow-truck-background.png");
+  background-repeat: no-repeat;
+  background-size: cover;
+  /* 1920×1080 / large desktop: cab lower-left, trailer toward center, sky upper-left */
+  background-position: 32% 58%;
+}
+
+/* Laptop ~1440 / below lg */
+@media (max-width: 1439px) {
+  .login-scenic-bg {
+    background-position: 28% 55%;
+  }
+}
+
+/* Tablet */
+@media (max-width: 1023px) {
+  .login-scenic-bg {
+    background-position: 24% 50%;
+  }
+}
+
+/* Phone */
+@media (max-width: 639px) {
+  .login-scenic-bg {
+    background-position: 18% 42%;
+  }
+}
+
+.login-hero {
+  background: transparent;
+}
+
+.login-float-panel {
+  box-shadow: var(--login-shadow-lg);
+}
+
+.login-snapshot {
+  box-shadow: var(--login-shadow-md);
+}
+
+.login-portal-card {
+  box-shadow: 0 1px 2px rgba(10, 31, 61, 0.04), 0 4px 12px rgba(10, 31, 61, 0.05);
+  transition:
+    transform 180ms ease,
+    box-shadow 180ms ease,
+    border-color 180ms ease,
+    filter 180ms ease;
+}
+
+.login-portal-card:hover {
+  transform: translateY(-6px);
+  box-shadow: var(--login-shadow-md);
+  filter: brightness(1.03);
+}
+
+.login-portal-card .portal-bar {
+  height: 4px;
+  transition: height 180ms ease;
+}
+
+.login-portal-card:hover .portal-bar {
+  height: 5px;
+}
+
+.login-portal-grid {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 6px;
+}
+
+@media (max-width: 639px) {
+  .login-portal-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
 }

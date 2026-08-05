@@ -48,3 +48,19 @@ export function lookupCoords(
 export function midpoint(a: LatLng, b: LatLng): LatLng {
   return { lat: (a.lat + b.lat) / 2, lng: (a.lng + b.lng) / 2 };
 }
+
+/** Midpoint offset perpendicular to the chord (degrees) for arced lanes. */
+export function offsetMidpoint(a: LatLng, b: LatLng, offset: number): LatLng {
+  const mid = midpoint(a, b);
+  const dLat = b.lat - a.lat;
+  const dLng = b.lng - a.lng;
+  const len = Math.hypot(dLat, dLng) || 1;
+  return {
+    lat: mid.lat + (-dLng / len) * offset,
+    lng: mid.lng + (dLat / len) * offset,
+  };
+}
+
+export function coordKey(p: LatLng): string {
+  return `${p.lat.toFixed(3)},${p.lng.toFixed(3)}`;
+}

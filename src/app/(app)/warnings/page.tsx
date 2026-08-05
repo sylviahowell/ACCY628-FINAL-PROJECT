@@ -1,7 +1,6 @@
-import Link from "next/link";
 import { requirePathAccess } from "@/lib/authz";
-import { buildAlerts, filterAlertsForProfile, severityBadge } from "@/lib/alerts";
-import { sanitizeDemoText } from "@/lib/display-text";
+import { buildAlerts, filterAlertsForProfile } from "@/lib/alerts";
+import { WarningsTriage } from "@/components/WarningsTriage";
 import { createClient } from "@/lib/supabase/server";
 import { isInternalStaff } from "@/lib/roles";
 
@@ -114,72 +113,17 @@ export default async function WarningsPage() {
     today,
   });
   const alerts = filterAlertsForProfile(all, profile);
-  const critical = alerts.filter((a) => a.severity === "critical").length;
-  const warning = alerts.filter((a) => a.severity === "warning").length;
 
   return (
     <div className="space-y-6">
       <div>
         <h1 className="text-2xl font-bold">Warning Center</h1>
         <p className="text-sm opacity-70">
-          Live exceptions computed from shipments, invoices, carriers, and approvals — not a
-          static list. Only items relevant to your role are shown.
+          Live exceptions for your role — critical first. Use filters to triage, then Resolve.
         </p>
       </div>
 
-      <div className="stats bg-base-100 shadow-sm">
-        <div className="stat">
-          <div className="stat-title">Critical</div>
-          <div className="stat-value text-2xl text-error">{critical}</div>
-        </div>
-        <div className="stat">
-          <div className="stat-title">Warnings</div>
-          <div className="stat-value text-2xl text-warning">{warning}</div>
-        </div>
-        <div className="stat">
-          <div className="stat-title">Total alerts</div>
-          <div className="stat-value text-2xl">{alerts.length}</div>
-        </div>
-      </div>
-
-      {alerts.length === 0 ? (
-        <div className="alert alert-success">
-          <span>No active warnings for your portal right now.</span>
-        </div>
-      ) : (
-        <div className="overflow-x-auto rounded-box border border-base-300 bg-base-100">
-          <table className="table table-sm">
-            <thead>
-              <tr>
-                <th>Severity</th>
-                <th>Issue</th>
-                <th>Why</th>
-                <th>Suggested action</th>
-                <th>Related</th>
-                <th></th>
-              </tr>
-            </thead>
-            <tbody>
-              {alerts.map((a) => (
-                <tr key={a.id}>
-                  <td>
-                    <span className={`badge ${severityBadge(a.severity)}`}>{a.severity}</span>
-                  </td>
-                  <td className="font-medium">{a.title}</td>
-                  <td className="max-w-xs text-sm opacity-80">{sanitizeDemoText(a.reason)}</td>
-                  <td className="text-sm">{a.action}</td>
-                  <td className="text-sm">{a.related}</td>
-                  <td>
-                    <Link href={a.href} className="btn btn-primary btn-xs">
-                      Resolve
-                    </Link>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      )}
+      <WarningsTriage alerts={alerts} />
     </div>
   );
 }

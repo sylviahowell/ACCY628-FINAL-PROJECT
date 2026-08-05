@@ -18,8 +18,7 @@ const CHIPS: Record<UserRole, ChipDef[]> = {
     {
       label: "Approve detention · LD-2012-ACC",
       loadNumber: "LD-2012-ACC",
-      hrefFallback: "/approvals",
-      preferShipment: true,
+      hrefFallback: "/approvals?type=accessorial",
     },
     {
       label: "Review loss load · LD-2011-LOSS",
@@ -43,13 +42,13 @@ const CHIPS: Record<UserRole, ChipDef[]> = {
     {
       label: "Fix delayed load · LD-2010-LATE",
       loadNumber: "LD-2010-LATE",
-      hrefFallback: "/warnings",
+      hrefFallback: "/warnings?severity=critical",
       preferShipment: true,
     },
     {
       label: "Accessorial pending · LD-2012-ACC",
       loadNumber: "LD-2012-ACC",
-      hrefFallback: "/warnings",
+      hrefFallback: "/warnings?severity=info",
       preferShipment: true,
     },
   ],

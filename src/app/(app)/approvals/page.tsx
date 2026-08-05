@@ -1,21 +1,86 @@
 import Link from "next/link";
 import { requirePathAccess } from "@/lib/authz";
-import { reviewApproval } from "@/lib/actions/freight";
+import { ApprovalsTriage, type ApprovalRow } from "@/components/ApprovalsTriage";
 import { sanitizeDemoText } from "@/lib/display-text";
 import { createClient } from "@/lib/supabase/server";
 import { money } from "@/lib/types";
 
-function relatedHref(
-  entityType: string,
-  entityId: string,
-  chargeShipmentIds: Map<string, string>,
-): string | null {
-  if (entityType === "shipment") return `/shipments/${entityId}`;
-  if (entityType === "shipment_charge") {
-    const shipmentId = chargeShipmentIds.get(entityId);
-    return shipmentId ? `/shipments/${shipmentId}` : null;
+type EntityContext = {
+  shipmentId: string;
+  loadNumber: string;
+};
+
+async function buildEntityContext(
+  supabase: Awaited<ReturnType<typeof createClient>>,
+  rows: { entity_type: string; entity_id: string }[],
+): Promise<Map<string, EntityContext>> {
+  const map = new Map<string, EntityContext>();
+
+  const chargeIds = [
+    ...new Set(rows.filter((a) => a.entity_type === "shipment_charge").map((a) => a.entity_id)),
+  ];
+  const shipmentIdsDirect = [
+    ...new Set(rows.filter((a) => a.entity_type === "shipment").map((a) => a.entity_id)),
+  ];
+
+  const chargeToShipment = new Map<string, string>();
+  if (chargeIds.length) {
+    const { data: charges } = await supabase
+      .from("shipment_charges")
+      .select("id, shipment_id")
+      .in("id", chargeIds);
+    for (const c of charges ?? []) chargeToShipment.set(c.id, c.shipment_id);
   }
-  return null;
+
+  const allShipmentIds = [
+    ...new Set([...shipmentIdsDirect, ...chargeToShipment.values()]),
+  ];
+  const loadByShipment = new Map<string, string>();
+  if (allShipmentIds.length) {
+    const { data: ships } = await supabase
+      .from("shipments")
+      .select("id, load_number")
+      .in("id", allShipmentIds);
+    for (const s of ships ?? []) loadByShipment.set(s.id, s.load_number);
+  }
+
+  for (const a of rows) {
+    if (a.entity_type === "shipment") {
+      const loadNumber = loadByShipment.get(a.entity_id);
+      if (loadNumber) map.set(`${a.entity_type}:${a.entity_id}`, { shipmentId: a.entity_id, loadNumber });
+    } else if (a.entity_type === "shipment_charge") {
+      const shipmentId = chargeToShipment.get(a.entity_id);
+      if (!shipmentId) continue;
+      const loadNumber = loadByShipment.get(shipmentId);
+      if (loadNumber) map.set(`${a.entity_type}:${a.entity_id}`, { shipmentId, loadNumber });
+    }
+  }
+
+  return map;
+}
+
+function toRow(
+  a: {
+    id: string;
+    request_type: string;
+    amount: number;
+    reason: string | null;
+    created_at: string | null;
+    entity_type: string;
+    entity_id: string;
+  },
+  ctx: Map<string, EntityContext>,
+): ApprovalRow {
+  const related = ctx.get(`${a.entity_type}:${a.entity_id}`);
+  return {
+    id: a.id,
+    request_type: a.request_type,
+    amount: a.amount,
+    reason: a.reason,
+    created_at: a.created_at,
+    loadNumber: related?.loadNumber ?? null,
+    shipmentHref: related ? `/shipments/${related.shipmentId}` : null,
+  };
 }
 
 export default async function ApprovalsPage() {
@@ -35,25 +100,9 @@ export default async function ApprovalsPage() {
     .order("reviewed_at", { ascending: false })
     .limit(25);
 
-  const chargeIds = [
-    ...new Set(
-      [...(pending ?? []), ...(history ?? [])]
-        .filter((a) => a.entity_type === "shipment_charge")
-        .map((a) => a.entity_id as string),
-    ),
-  ];
-
-  const chargeShipmentIds = new Map<string, string>();
-  if (chargeIds.length) {
-    const { data: charges } = await supabase
-      .from("shipment_charges")
-      .select("id, shipment_id")
-      .in("id", chargeIds);
-    for (const c of charges ?? []) {
-      chargeShipmentIds.set(c.id, c.shipment_id);
-    }
-  }
-
+  const allRows = [...(pending ?? []), ...(history ?? [])];
+  const ctx = await buildEntityContext(supabase, allRows);
+  const pendingRows = (pending ?? []).map((a) => toRow(a, ctx));
   const canDecide = profile.role === "manager";
 
   return (
@@ -61,8 +110,8 @@ export default async function ApprovalsPage() {
       <div>
         <h1 className="text-2xl font-bold">Approval Inbox</h1>
         <p className="text-sm opacity-70">
-          Discounts and large accessorials wait here until a manager decides. Rejections require a
-          short comment (saved on the request reason).
+          Discounts and large accessorials wait here until a manager decides. Approve in one click;
+          rejections need a short comment.
         </p>
       </div>
 
@@ -75,69 +124,16 @@ export default async function ApprovalsPage() {
         </div>
       ) : null}
 
-      <div className="card bg-base-100 shadow-sm">
-        <div className="card-body">
-          <h2 className="card-title text-base">Pending ({(pending ?? []).length})</h2>
-          {(pending ?? []).length === 0 ? (
-            <p className="text-sm opacity-70">Nothing waiting for review.</p>
-          ) : (
-            <ul className="space-y-4">
-              {(pending ?? []).map((a) => {
-                const href = relatedHref(a.entity_type, a.entity_id, chargeShipmentIds);
-                return (
-                  <li key={a.id} className="rounded-box border border-base-300 p-4">
-                    <div className="flex flex-wrap items-start justify-between gap-2">
-                      <div>
-                        <p className="font-medium capitalize">
-                          {a.request_type} · {money(a.amount)}
-                        </p>
-                        <p className="text-sm opacity-70">{sanitizeDemoText(a.reason)}</p>
-                        <p className="mt-1 text-xs opacity-50">
-                          {a.entity_type} · requested{" "}
-                          {a.created_at ? new Date(a.created_at).toLocaleString() : "—"}
-                        </p>
-                      </div>
-                      {href ? (
-                        <Link href={href} className="btn btn-ghost btn-xs">
-                          Related record
-                        </Link>
-                      ) : null}
-                    </div>
-                    {canDecide ? (
-                      <div className="mt-3 flex flex-wrap items-end gap-3">
-                        <form action={reviewApproval}>
-                          <input type="hidden" name="approval_id" value={a.id} />
-                          <input type="hidden" name="decision" value="approved" />
-                          <button className="btn btn-success btn-sm">Approve</button>
-                        </form>
-                        <form action={reviewApproval} className="flex flex-wrap items-end gap-2">
-                          <input type="hidden" name="approval_id" value={a.id} />
-                          <input type="hidden" name="decision" value="rejected" />
-                          <label className="form-control">
-                            <span className="label-text text-xs">Reject comment (required)</span>
-                            <input
-                              name="comment"
-                              required
-                              minLength={3}
-                              placeholder="Why rejected?"
-                              className="input input-bordered input-sm w-64"
-                            />
-                          </label>
-                          <button className="btn btn-error btn-sm">Reject</button>
-                        </form>
-                      </div>
-                    ) : null}
-                  </li>
-                );
-              })}
-            </ul>
-          )}
-        </div>
+      <div className="space-y-3">
+        <h2 className="text-base font-semibold">Pending ({pendingRows.length})</h2>
+        <ApprovalsTriage pending={pendingRows} canDecide={canDecide} />
       </div>
 
-      <div className="card bg-base-100 shadow-sm">
-        <div className="card-body">
-          <h2 className="card-title text-base">Recent decisions</h2>
+      <details className="rounded-box border border-base-300 bg-base-100">
+        <summary className="cursor-pointer px-4 py-3 text-sm font-semibold">
+          Recent decisions ({(history ?? []).length})
+        </summary>
+        <div className="border-t border-base-300 px-4 py-3">
           {(history ?? []).length === 0 ? (
             <p className="text-sm opacity-70">No prior decisions yet.</p>
           ) : (
@@ -146,6 +142,7 @@ export default async function ApprovalsPage() {
                 <thead>
                   <tr>
                     <th>Type</th>
+                    <th>Load</th>
                     <th>Amount</th>
                     <th>Status</th>
                     <th>Reason</th>
@@ -154,10 +151,12 @@ export default async function ApprovalsPage() {
                 </thead>
                 <tbody>
                   {(history ?? []).map((a) => {
-                    const href = relatedHref(a.entity_type, a.entity_id, chargeShipmentIds);
+                    const related = ctx.get(`${a.entity_type}:${a.entity_id}`);
+                    const href = related ? `/shipments/${related.shipmentId}` : null;
                     return (
                       <tr key={a.id}>
                         <td className="capitalize">{a.request_type}</td>
+                        <td className="text-sm">{related?.loadNumber ?? "—"}</td>
                         <td>{money(a.amount)}</td>
                         <td>
                           <span
@@ -168,7 +167,9 @@ export default async function ApprovalsPage() {
                             {a.status}
                           </span>
                         </td>
-                        <td className="max-w-xs truncate text-sm opacity-70">{sanitizeDemoText(a.reason)}</td>
+                        <td className="max-w-xs truncate text-sm opacity-70">
+                          {sanitizeDemoText(a.reason)}
+                        </td>
                         <td>
                           {href ? (
                             <Link href={href} className="link link-primary text-xs">
@@ -184,7 +185,7 @@ export default async function ApprovalsPage() {
             </div>
           )}
         </div>
-      </div>
+      </details>
     </div>
   );
 }

@@ -208,6 +208,8 @@ export function buildAlerts(src: AlertSources): AppAlert[] {
 
   for (const c of src.charges) {
     if (c.approval_status === "pending") {
+      const chargeShip = src.shipments.find((s) => s.id === c.shipment_id);
+      const chargeRelated = chargeShip?.load_number ?? c.description;
       alerts.push({
         id: `charge-${c.id}`,
         severity: "info",
@@ -215,7 +217,7 @@ export function buildAlerts(src: AlertSources): AppAlert[] {
         reason: `${c.description} (${c.amount})`,
         action: "Review in Approvals",
         href: "/approvals",
-        related: c.description,
+        related: chargeRelated,
         detectedAt: src.today,
         roles: ["manager"],
       });
@@ -225,8 +227,8 @@ export function buildAlerts(src: AlertSources): AppAlert[] {
         title: "Accessorial awaits manager approval",
         reason: `${c.description} (${c.amount})`,
         action: "Escalate to a manager — only managers can approve",
-        href: "/warnings",
-        related: c.description,
+        href: `/shipments/${c.shipment_id}`,
+        related: chargeRelated,
         detectedAt: src.today,
         roles: ["broker", "billing"],
       });
@@ -317,7 +319,7 @@ export function filterAlertsForProfile(alerts: AppAlert[], profile: Profile): Ap
       ) {
         return {
           ...a,
-          href: "/warnings",
+          href: "/warnings?severity=info",
           action: "Escalate to a manager — only managers can approve",
         };
       }

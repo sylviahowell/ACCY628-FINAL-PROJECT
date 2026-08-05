@@ -1,7 +1,6 @@
 import Link from "next/link";
 import { redirect } from "next/navigation";
 import {
-  BusinessInsightsPanel,
   KpiRibbon,
   MorningBriefCard,
 } from "@/components/ExecutivePanels";
@@ -27,7 +26,6 @@ import {
   computeAging,
 } from "@/lib/collections";
 import { toHeatRows } from "@/lib/heatmap";
-import { buildBusinessInsights } from "@/lib/insights";
 import { buildExecutiveKpis, inRange, monthBounds } from "@/lib/kpi";
 import { buildMorningBrief } from "@/lib/morning-brief";
 import {
@@ -196,22 +194,11 @@ export default async function DashboardPage() {
     .sort((a, b) => a.margin - b.margin)
     .slice(0, 5);
 
-  const carrierPerf = (carriers ?? []).map((c) => {
-    const loads = shipList.filter((s) => s.carrier_id === c.id);
-    const done = loads.filter((s) =>
-      ["delivered", "completed"].includes(s.status),
-    ).length;
-    return { name: c.name, rating: c.rating, loads: loads.length, delivered: done };
-  });
-
   // ——— EXECUTIVE ———
   if (profile.role === "manager") {
     const activeList = shipList.filter((s) =>
       ["scheduled", "assigned", "booked", "picked_up", "in_transit"].includes(s.status),
     );
-    const delivered = shipList.filter((s) =>
-      ["delivered", "completed"].includes(s.status),
-    ).length;
     const lateList = shipList.filter(
       (s) =>
         s.promised_delivery_date &&
@@ -239,20 +226,11 @@ export default async function DashboardPage() {
         const p = profitByShipment.get(s.id);
         return sum + (p ? Number(p.margin) : Number(s.customer_rate) - Number(s.carrier_cost));
       }, 0);
-    const costInMonth = (start: Date, end: Date) =>
-      shipList.reduce((sum, s) => {
-        const date = s.delivery_date || s.pickup_date || s.created_at;
-        if (!inRange(date, start, end)) return sum;
-        const p = profitByShipment.get(s.id);
-        return sum + (p ? Number(p.carrier_cost) : Number(s.carrier_cost));
-      }, 0);
 
     const revenueThisMonth = revInMonth(thisMonth.start, thisMonth.end);
     const revenueLastMonth = revInMonth(lastMonth.start, lastMonth.end);
     const profitThisMonth = profitInMonth(thisMonth.start, thisMonth.end);
     const profitLastMonth = profitInMonth(lastMonth.start, lastMonth.end);
-    const costThisMonth = costInMonth(thisMonth.start, thisMonth.end);
-    const costLastMonth = costInMonth(lastMonth.start, lastMonth.end);
     const marginThisMonth =
       revenueThisMonth > 0 ? (profitThisMonth / revenueThisMonth) * 100 : 0;
     const marginLastMonth =
@@ -263,9 +241,6 @@ export default async function DashboardPage() {
       .reduce((s, p) => s + Number(p.amount), 0);
     const cashLastMonth = (payments ?? [])
       .filter((p) => inRange(p.payment_date, lastMonth.start, lastMonth.end))
-      .reduce((s, p) => s + Number(p.amount), 0);
-    const paidToday = (payments ?? [])
-      .filter((p) => p.payment_date === today)
       .reduce((s, p) => s + Number(p.amount), 0);
 
     // Approx: loads that were already active a week ago (created before, not finished by then)
@@ -362,105 +337,6 @@ export default async function DashboardPage() {
         podSet.has(s.id) &&
         !billedSet.has(s.id),
     ).length;
-
-    const customerRevMargin = new Map<
-      string,
-      { name: string; revenue: number; profit: number }
-    >();
-    for (const p of profitList) {
-      const rev =
-        Number(p.customer_rate) +
-        Number(p.billable_accessorials) -
-        Number(p.discount_amount || 0);
-      const cur = customerRevMargin.get(p.customer_id) ?? {
-        name: customerName.get(p.customer_id) ?? "Customer",
-        revenue: 0,
-        profit: 0,
-      };
-      cur.revenue += rev;
-      cur.profit += Number(p.margin);
-      customerRevMargin.set(p.customer_id, cur);
-    }
-    const topRevenueCustomer =
-      [...customerRevMargin.values()].sort((a, b) => b.revenue - a.revenue)[0] ?? null;
-
-    const overdueByCustomer = Object.values(
-      pastDue.reduce<Record<string, { name: string; balance: number }>>((acc, inv) => {
-        const name =
-          (inv.customers as { name?: string } | null)?.name ??
-          customerName.get(inv.customer_id) ??
-          "Customer";
-        const bal = Number(inv.total) - Number(inv.amount_paid);
-        acc[name] = acc[name] || { name, balance: 0 };
-        acc[name].balance += bal;
-        return acc;
-      }, {}),
-    );
-
-    const laneStats = new Map<string, { profit: number; revenue: number; loads: number }>();
-    for (const s of shipList) {
-      const lane = `${s.origin_city ?? "?"} → ${s.dest_city ?? "?"}`;
-      const p = profitByShipment.get(s.id);
-      const rev = p
-        ? Number(p.customer_rate) +
-          Number(p.billable_accessorials) -
-          Number(p.discount_amount || 0)
-        : Number(s.customer_rate);
-      const profitAmt = p ? Number(p.margin) : Number(s.customer_rate) - Number(s.carrier_cost);
-      const cur = laneStats.get(lane) ?? { profit: 0, revenue: 0, loads: 0 };
-      cur.profit += profitAmt;
-      cur.revenue += rev;
-      cur.loads += 1;
-      laneStats.set(lane, cur);
-    }
-    const weakLane =
-      [...laneStats.entries()]
-        .map(([lane, v]) => ({
-          lane,
-          marginPct: v.revenue > 0 ? (v.profit / v.revenue) * 100 : 0,
-          loads: v.loads,
-        }))
-        .filter((l) => l.loads >= 1)
-        .sort((a, b) => a.marginPct - b.marginPct)[0] ?? null;
-
-    const chargeByShip = new Map<string, number>();
-    for (const c of chargeList) {
-      chargeByShip.set(c.shipment_id, (chargeByShip.get(c.shipment_id) ?? 0) + 1);
-    }
-    const carrierAccessorial = (carriers ?? []).map((c) => {
-      const loads = shipList.filter((s) => s.carrier_id === c.id);
-      const withCharges = loads.filter((s) => (chargeByShip.get(s.id) ?? 0) > 0).length;
-      return {
-        name: c.name,
-        loads: loads.length,
-        accessorialRate: loads.length ? withCharges / loads.length : 0,
-      };
-    });
-    const highAccessorialCarrier =
-      carrierAccessorial.sort((a, b) => b.accessorialRate - a.accessorialRate)[0] ?? null;
-
-    const insights = buildBusinessInsights({
-      revenueThisMonth,
-      revenueLastMonth,
-      marginThisMonth,
-      marginLastMonth,
-      carrierCostThisMonth: costThisMonth,
-      carrierCostLastMonth: costLastMonth,
-      topRevenueCustomer: topRevenueCustomer
-        ? {
-            name: topRevenueCustomer.name,
-            revenue: topRevenueCustomer.revenue,
-            marginPct:
-              topRevenueCustomer.revenue > 0
-                ? (topRevenueCustomer.profit / topRevenueCustomer.revenue) * 100
-                : 0,
-          }
-        : null,
-      unbilledDelivered,
-      overdueByCustomer,
-      weakLane,
-      highAccessorialCarrier,
-    });
 
     const heatRows = toHeatRows({
       profit: profitList.map((p) => ({
@@ -577,72 +453,80 @@ export default async function DashboardPage() {
           today={brief.today}
           attention={brief.attention}
         />
+        <Panel
+          title={`Pending approvals (${(approvals ?? []).length})`}
+        >
+          {(approvals ?? []).length === 0 ? (
+            <p className="text-sm opacity-70">No pending approvals.</p>
+          ) : (
+            <ul className="space-y-3">
+              {(approvals ?? []).slice(0, 4).map((a) => {
+                let focusLoad: string | null = null;
+                if (a.entity_type === "shipment") {
+                  focusLoad = shipList.find((s) => s.id === a.entity_id)?.load_number ?? null;
+                } else if (a.entity_type === "shipment_charge") {
+                  const shipId = chargeList.find((c) => c.id === a.entity_id)?.shipment_id;
+                  focusLoad = shipId
+                    ? (shipList.find((s) => s.id === shipId)?.load_number ?? null)
+                    : null;
+                }
+                const reviewHref = focusLoad
+                  ? `/approvals?type=${encodeURIComponent(a.request_type)}&focus=${encodeURIComponent(focusLoad)}`
+                  : `/approvals?type=${encodeURIComponent(a.request_type)}`;
+                return (
+                  <li
+                    key={a.id}
+                    className="flex flex-wrap items-center justify-between gap-3 rounded-box border border-warning/40 bg-warning/10 p-3"
+                  >
+                    <div>
+                      <p className="font-medium capitalize">
+                        {a.request_type}
+                        {focusLoad ? ` · ${focusLoad}` : ""} · {money(a.amount)}
+                      </p>
+                      <p className="text-sm opacity-70">{sanitizeDemoText(a.reason)}</p>
+                    </div>
+                    <Link href={reviewHref} className="btn btn-warning btn-xs">
+                      Review
+                    </Link>
+                  </li>
+                );
+              })}
+            </ul>
+          )}
+          {(approvals ?? []).length > 0 ? (
+            <Link href="/approvals" className="btn btn-ghost btn-sm mt-3">
+              Open Approval Inbox
+            </Link>
+          ) : null}
+        </Panel>
         <KpiRibbon items={kpis} />
+        <ProfitabilityHeatmap rows={heatRows} />
         <ShipmentMapLazy shipments={mapShipments} today={today} />
-        <div className="grid gap-4 lg:grid-cols-2">
-          <BusinessInsightsPanel insights={insights} />
-          <div className="space-y-4">
-            <div className="grid gap-4 sm:grid-cols-2">
-              <Stat title="Delivered (all time)" value={String(delivered)} />
-              <Stat title="Pending approvals" value={String((approvals ?? []).length)} />
-              <Stat title="Cash received today" value={money(paidToday)} />
-              <Stat title="Open invoices" value={String(openInvoices.length)} />
-            </div>
-            <Panel title="Alerts requiring approval">
-              {(approvals ?? []).length === 0 ? (
-                <p className="text-sm opacity-70">No pending approvals.</p>
-              ) : (
-                <ul className="space-y-3">
-                  {(approvals ?? []).slice(0, 4).map((a) => (
-                    <li
-                      key={a.id}
-                      className="flex flex-wrap items-center justify-between gap-3 rounded-box border border-warning/40 bg-warning/10 p-3"
-                    >
-                      <div>
-                        <p className="font-medium capitalize">
-                          {a.request_type} · {money(a.amount)}
-                        </p>
-                        <p className="text-sm opacity-70">{sanitizeDemoText(a.reason)}</p>
-                      </div>
-                      <Link href="/approvals" className="btn btn-warning btn-xs">
-                        Review
-                      </Link>
-                    </li>
-                  ))}
-                </ul>
-              )}
+        <div className="space-y-3">
+          <div>
+            <h2 className="text-lg font-bold">Performance trends</h2>
+            <p className="text-sm opacity-70">
+              Monthly revenue and profit, top customers by margin, and weakest loads.
+            </p>
+          </div>
+          <div className="grid gap-4 lg:grid-cols-2">
+            <Panel title="Monthly revenue">
+              <MonthlyBars data={monthlyRev} name="Revenue" />
+            </Panel>
+            <Panel title="Monthly profit">
+              <MonthlyBars data={monthlyProfit} name="Profit" />
+            </Panel>
+            <Panel title="Top customers">
+              <HorizontalBars data={topCustomers} name="Margin" />
+            </Panel>
+            <Panel title="Least profitable shipments">
+              <MiniTable
+                headers={["Load", "Customer", "Margin"]}
+                rows={leastProfitable.map((r) => [r.load, r.customer, money(r.margin)])}
+              />
             </Panel>
           </div>
         </div>
-        <ProfitabilityHeatmap rows={heatRows} />
-        <div className="grid gap-4 lg:grid-cols-2">
-          <Panel title="Monthly revenue">
-            <MonthlyBars data={monthlyRev} name="Revenue" />
-          </Panel>
-          <Panel title="Monthly profit">
-            <MonthlyBars data={monthlyProfit} name="Profit" />
-          </Panel>
-          <Panel title="Top customers">
-            <HorizontalBars data={topCustomers} name="Margin" />
-          </Panel>
-          <Panel title="Least profitable shipments">
-            <MiniTable
-              headers={["Load", "Customer", "Margin"]}
-              rows={leastProfitable.map((r) => [r.load, r.customer, money(r.margin)])}
-            />
-          </Panel>
-        </div>
-        <Panel title="Carrier performance">
-          <MiniTable
-            headers={["Carrier", "Rating", "Loads", "Delivered"]}
-            rows={carrierPerf.map((c) => [
-              c.name,
-              String(c.rating ?? "—"),
-              String(c.loads),
-              String(c.delivered),
-            ])}
-          />
-        </Panel>
       </div>
     );
   }

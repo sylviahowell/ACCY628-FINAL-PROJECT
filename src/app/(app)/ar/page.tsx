@@ -1,4 +1,3 @@
-import Link from "next/link";
 import { Suspense } from "react";
 import { CollectionsWorklist } from "@/components/CollectionsWorklist";
 import { FocusScroll } from "@/components/FocusScroll";
@@ -11,7 +10,7 @@ import {
 } from "@/lib/collections";
 import { sanitizeDemoText } from "@/lib/display-text";
 import { createClient } from "@/lib/supabase/server";
-import { money, statusBadge } from "@/lib/types";
+import { money } from "@/lib/types";
 
 export default async function AccountsReceivablePage() {
   await requirePathAccess("/ar");
@@ -32,6 +31,7 @@ export default async function AccountsReceivablePage() {
   const aging = computeAging(invList, today);
   const totalAr =
     aging.current + aging.d1_30 + aging.d31_60 + aging.d61_90 + aging.d90_plus;
+  const pastDue = aging.d1_30 + aging.d31_60 + aging.d61_90 + aging.d90_plus;
 
   const worklist = buildCollectionWorklist({
     invoices: invList.map((i) => ({
@@ -68,7 +68,7 @@ export default async function AccountsReceivablePage() {
         </p>
       </div>
 
-      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6">
+      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
         <div className="stats bg-base-100 shadow-sm">
           <div className="stat">
             <div className="stat-title">Total AR</div>
@@ -83,20 +83,8 @@ export default async function AccountsReceivablePage() {
         </div>
         <div className="stats bg-base-100 shadow-sm">
           <div className="stat">
-            <div className="stat-title">1–30 days</div>
-            <div className="stat-value text-xl">{money(aging.d1_30)}</div>
-          </div>
-        </div>
-        <div className="stats bg-base-100 shadow-sm">
-          <div className="stat">
-            <div className="stat-title">31–60 days</div>
-            <div className="stat-value text-xl">{money(aging.d31_60)}</div>
-          </div>
-        </div>
-        <div className="stats bg-base-100 shadow-sm">
-          <div className="stat">
-            <div className="stat-title">61–90 days</div>
-            <div className="stat-value text-xl">{money(aging.d61_90)}</div>
+            <div className="stat-title">Past due</div>
+            <div className="stat-value text-xl">{money(pastDue)}</div>
           </div>
         </div>
         <div className="stats bg-base-100 shadow-sm">
@@ -115,41 +103,6 @@ export default async function AccountsReceivablePage() {
       </div>
 
       <CollectionsWorklist items={worklist} />
-
-      <div className="overflow-x-auto rounded-box bg-base-100 shadow-sm">
-        <table className="table">
-          <thead>
-            <tr>
-              <th>Invoice</th>
-              <th>Customer</th>
-              <th>Status</th>
-              <th>Balance</th>
-              <th>Due</th>
-              <th></th>
-            </tr>
-          </thead>
-          <tbody>
-            {worklist.map((i) => (
-              <tr key={i.invoiceId}>
-                <td>{i.invoiceNumber}</td>
-                <td>{i.customerName}</td>
-                <td>
-                  <span className={`badge ${statusBadge(i.status)}`}>{i.status}</span>
-                </td>
-                <td>{money(i.balance)}</td>
-                <td className={i.daysOutstanding > 0 ? "text-error font-medium" : ""}>
-                  {i.dueDate}
-                </td>
-                <td>
-                  <Link href="/payments" className="link link-primary text-sm">
-                    Collect
-                  </Link>
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
     </div>
   );
 }

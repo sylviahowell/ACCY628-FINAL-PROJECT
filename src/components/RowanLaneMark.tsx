@@ -1,8 +1,8 @@
 /** Approved orbital logo — transparent PNG, no white plate. */
-export function FreightFlowMark({
+export function RowanLaneMark({
   size = 46,
   className = "",
-  title = "FreightFlow",
+  title = "RowanLane",
 }: {
   size?: number;
   className?: string;

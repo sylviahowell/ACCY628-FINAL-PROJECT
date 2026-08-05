@@ -23,7 +23,7 @@ import {
 import { AppNavLinks, type ShellNavItem } from "@/components/AppNavLinks";
 import { DemoRoleSelector } from "@/components/DemoRoleSelector";
 import { FlashToast } from "@/components/FlashToast";
-import { FreightFlowMark } from "@/components/FreightFlowMark";
+import { RowanLaneMark } from "@/components/RowanLaneMark";
 import { GlobalSearch } from "@/components/GlobalSearch";
 import { signOut } from "@/lib/actions/auth";
 import { demoRoleLabel } from "@/lib/demo-mode";
@@ -152,9 +152,9 @@ export function AppShell({
           </div>
           <div className="flex min-w-0 flex-1 items-center gap-3 sm:gap-4">
             <div className="flex shrink-0 items-center gap-2">
-              <FreightFlowMark size={34} />
+              <RowanLaneMark size={34} />
               <div className="min-w-0">
-                <p className="text-lg font-bold tracking-tight text-primary">FreightFlow</p>
+                <p className="text-lg font-bold tracking-tight text-primary">RowanLane</p>
                 <p className="hidden text-xs opacity-60 sm:block">
                   Freight Brokerage & Logistics Management System
                 </p>
@@ -196,8 +196,8 @@ export function AppShell({
         <aside className="flex min-h-full w-72 flex-col bg-base-100 text-base-content">
           <div className="border-b border-base-300 p-5">
             <div className="flex items-center gap-2.5">
-              <FreightFlowMark size={36} />
-              <p className="text-xl font-bold text-primary">FreightFlow</p>
+              <RowanLaneMark size={36} />
+              <p className="text-xl font-bold text-primary">RowanLane</p>
             </div>
             <p className="mt-1 text-sm font-medium">{roleDisplay}</p>
             <p className="mt-0.5 text-xs opacity-60">{ROLE_PORTAL_BLURB[profile.role]}</p>

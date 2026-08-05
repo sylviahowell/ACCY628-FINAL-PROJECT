@@ -1,5 +1,5 @@
 /**
- * FreightFlow smoke test — auth + contract-to-cash spine via Supabase.
+ * RowanLane smoke test — auth + contract-to-cash spine via Supabase.
  * Run: node scripts/smoke-test.mjs
  */
 import { createClient } from "@supabase/supabase-js";
@@ -52,7 +52,7 @@ async function ensureUser(email, meta) {
 }
 
 async function main() {
-  console.log("\n=== FreightFlow smoke test ===\n");
+  console.log("\n=== RowanLane smoke test ===\n");
 
   // 1) HTTP pages
   for (const path of ["/login", "/signup"]) {

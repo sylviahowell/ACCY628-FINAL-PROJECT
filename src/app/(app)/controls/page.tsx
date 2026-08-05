@@ -11,7 +11,7 @@ import { resolveSearchParams } from "@/components/FilterBanner";
 import { money } from "@/lib/types";
 import { createClient } from "@/lib/supabase/server";
 
-type ActivityKind = "override" | "approval" | "collection";
+type ActivityKind = "override" | "approval" | "collection" | "billing";
 
 type ActivityRow = {
   id: string;
@@ -27,6 +27,7 @@ const KIND_TABS: { id: ControlActivityKindFilter; label: string }[] = [
   { id: "override", label: "Overrides" },
   { id: "approval", label: "Approvals" },
   { id: "collection", label: "Collections" },
+  { id: "billing", label: "Billing" },
   { id: "all", label: "All" },
 ];
 
@@ -38,6 +39,8 @@ function kindBadge(kind: ActivityKind) {
       return "badge-info";
     case "collection":
       return "badge-accent";
+    case "billing":
+      return "badge-secondary";
     default:
       return "badge-ghost";
   }
@@ -51,6 +54,8 @@ function kindLabel(kind: ActivityKind) {
       return "Approval";
     case "collection":
       return "Collection";
+    case "billing":
+      return "Billing";
     default:
       return "Activity";
   }
@@ -58,7 +63,8 @@ function kindLabel(kind: ActivityKind) {
 
 /**
  * Manager-only Control activity — override-first audit trail of credit/discount
- * overrides, decided approvals, and collection notes (not routine status history).
+ * overrides, decided approvals, collection notes, and billing events
+ * (invoice status, payments, disputes).
  */
 export default async function ControlsPage({
   searchParams,
@@ -81,6 +87,7 @@ export default async function ControlsPage({
     { data: approvals },
     { data: notes },
     { count: pendingApprovalCount },
+    { data: billingEvents },
   ] = await Promise.all([
     supabase
       .from("shipment_status_updates")
@@ -104,6 +111,12 @@ export default async function ControlsPage({
       .from("approval_requests")
       .select("id", { count: "exact", head: true })
       .eq("status", "pending"),
+    supabase
+      .from("status_events")
+      .select("id, entity_type, entity_id, from_status, to_status, note, changed_by, created_at")
+      .in("entity_type", ["invoice", "payment", "dispute"])
+      .order("created_at", { ascending: false })
+      .limit(40),
   ]);
 
   const overrideStatusRows = (statusRows ?? []).filter((r) =>
@@ -145,7 +158,12 @@ export default async function ControlsPage({
   ];
 
   const invoiceIds = [
-    ...new Set((notes ?? []).map((n) => n.invoice_id).filter(Boolean) as string[]),
+    ...new Set([
+      ...((notes ?? []).map((n) => n.invoice_id).filter(Boolean) as string[]),
+      ...(billingEvents ?? [])
+        .filter((e) => e.entity_type === "invoice")
+        .map((e) => e.entity_id),
+    ]),
   ];
 
   const profileIds = [
@@ -154,6 +172,7 @@ export default async function ControlsPage({
         ...overrideStatusRows.map((r) => r.changed_by),
         ...(approvals ?? []).flatMap((a) => [a.requested_by, a.reviewed_by]),
         ...(notes ?? []).map((n) => n.created_by),
+        ...(billingEvents ?? []).map((e) => e.changed_by),
       ].filter(Boolean) as string[],
     ),
   ];
@@ -222,10 +241,38 @@ export default async function ControlsPage({
     };
   });
 
+  const billingActivities: ActivityRow[] = (billingEvents ?? []).map((e) => {
+    const invNum = e.entity_type === "invoice" ? invById.get(e.entity_id) : null;
+    const note = sanitizeDemoText(e.note);
+    const transition =
+      e.from_status && e.to_status ? `${e.from_status} → ${e.to_status}` : e.to_status;
+    return {
+      id: `billing-${e.id}`,
+      kind: "billing" as const,
+      at: e.created_at,
+      actor: e.changed_by ? nameById.get(e.changed_by) ?? "Staff" : "Staff",
+      summary: `${e.entity_type}: ${transition}${note ? ` · ${note}` : ""}`,
+      href:
+        e.entity_type === "invoice"
+          ? "/invoices"
+          : e.entity_type === "payment"
+            ? "/payments"
+            : "/disputes",
+      hrefLabel:
+        invNum ??
+        (e.entity_type === "payment"
+          ? "Payments"
+          : e.entity_type === "dispute"
+            ? "Disputes"
+            : "Invoices"),
+    };
+  });
+
   const byKind: Record<ActivityKind, ActivityRow[]> = {
     override: overrideActivities,
     approval: approvalActivities,
     collection: collectionActivities,
+    billing: billingActivities,
   };
 
   const fellBackToAll = requestedKind === null && overrideActivities.length === 0;
@@ -234,8 +281,13 @@ export default async function ControlsPage({
 
   const pool =
     kindFilter === "all"
-      ? [...overrideActivities, ...approvalActivities, ...collectionActivities]
-      : byKind[kindFilter];
+      ? [
+          ...overrideActivities,
+          ...approvalActivities,
+          ...collectionActivities,
+          ...billingActivities,
+        ]
+      : byKind[kindFilter as ActivityKind];
 
   const recent = [...pool]
     .sort((a, b) => new Date(b.at).getTime() - new Date(a.at).getTime())
@@ -244,11 +296,13 @@ export default async function ControlsPage({
   const pendingApprovals = pendingApprovalCount ?? 0;
   const overrideCount = overrideActivities.length;
   const decidedApprovalCount = approvalActivities.length;
+  const billingCount = billingActivities.length;
 
   const emptyCopy: Record<ControlActivityKindFilter, string> = {
     override: "No control overrides logged yet (credit, discount, or contract-window).",
     approval: "No decided approvals in the recent window.",
     collection: "No collection notes yet.",
+    billing: "No billing audit events yet (invoice status, payments, disputes).",
     all: "No control-relevant activity yet.",
   };
 
@@ -258,8 +312,9 @@ export default async function ControlsPage({
         <div>
           <h1 className="text-2xl font-bold">Control activity</h1>
           <p className="mt-1 text-sm opacity-70">
-            Compensating audit trail: logged overrides, decided approvals, and collection notes.
-            Routine shipment status lives on each load timeline.
+            Compensating audit trail: logged overrides, decided approvals, collection notes, and
+            billing events (invoice status, payments, disputes). Routine shipment status lives on
+            each load timeline.
           </p>
         </div>
         <div className="flex flex-wrap gap-x-4 gap-y-1 text-sm">
@@ -275,7 +330,7 @@ export default async function ControlsPage({
         </div>
       </header>
 
-      <div className="grid gap-3 sm:grid-cols-3">
+      <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
         <div className="stats bg-base-100 shadow-sm">
           <div className="stat py-3">
             <div className="stat-title">Overrides</div>
@@ -288,6 +343,12 @@ export default async function ControlsPage({
             <div className="stat-title">Decided approvals</div>
             <div className="stat-value text-2xl">{decidedApprovalCount}</div>
             <div className="stat-desc">Approved or rejected</div>
+          </div>
+        </div>
+        <div className="stats bg-base-100 shadow-sm">
+          <div className="stat py-3">
+            <div className="stat-title">Billing events</div>
+            <div className="stat-value text-2xl">{billingCount}</div>
           </div>
         </div>
         <div className="stats bg-base-100 shadow-sm">
@@ -316,12 +377,17 @@ export default async function ControlsPage({
           const href = `/controls?kind=${tab.id}`;
           const count =
             tab.id === "all"
-              ? overrideCount + decidedApprovalCount + collectionActivities.length
+              ? overrideCount +
+                decidedApprovalCount +
+                collectionActivities.length +
+                billingCount
               : tab.id === "override"
                 ? overrideCount
                 : tab.id === "approval"
                   ? decidedApprovalCount
-                  : collectionActivities.length;
+                  : tab.id === "billing"
+                    ? billingCount
+                    : collectionActivities.length;
           return (
             <Link
               key={tab.id}

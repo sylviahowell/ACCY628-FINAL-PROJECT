@@ -2,10 +2,15 @@ import { redirect } from "next/navigation";
 import { requirePathAccess } from "@/lib/authz";
 import { createShipment } from "@/lib/actions/freight";
 import { createClient } from "@/lib/supabase/server";
-import { isOperations } from "@/lib/types";
+import { isOperations, money } from "@/lib/types";
 import { ContractGuidedFields } from "@/components/ContractGuidedFields";
 import type { ContractTermsInfo } from "@/lib/contract-terms";
 import { insuranceRiskStatus } from "@/lib/risk-credit";
+import {
+  isOnCreditHold,
+  PAST_DUE_CREDIT_HOLD_THRESHOLD,
+  pastDueBalanceFromInvoices,
+} from "@/lib/credit-hold";
 
 export default async function NewShipmentPage() {
   const profile = await requirePathAccess("/shipments");
@@ -24,6 +29,19 @@ export default async function NewShipmentPage() {
       "id, contract_number, title, customer_id, start_date, end_date, payment_terms, billing_terms, fuel_surcharge_pct, shipping_rates, status, renewal_option",
     )
     .eq("status", "active");
+  const { data: invoices } = await supabase
+    .from("invoices")
+    .select("customer_id, total, amount_paid, status, due_date")
+    .neq("status", "cancelled");
+
+  const pastDueByCustomer = new Map<string, number>();
+  for (const c of customers ?? []) {
+    const invs = (invoices ?? []).filter((i) => i.customer_id === c.id);
+    pastDueByCustomer.set(c.id, pastDueBalanceFromInvoices(invs, today));
+  }
+  const heldCustomers = (customers ?? []).filter((c) =>
+    isOnCreditHold(pastDueByCustomer.get(c.id) ?? 0),
+  );
 
   // Suspended tier = expired insurance — hide from booking picker
   const assignableCarriers = (carriers ?? []).filter(
@@ -46,6 +64,21 @@ export default async function NewShipmentPage() {
           expired insurance (Suspended) are omitted from the list.
         </p>
       </div>
+
+      {heldCustomers.length > 0 ? (
+        <div className="rounded-box border border-warning/40 bg-warning/10 px-4 py-3 text-sm">
+          <p className="font-medium">Credit hold warning</p>
+          <p className="mt-1 opacity-80">
+            Past-due AR ≥ {money(PAST_DUE_CREDIT_HOLD_THRESHOLD)} blocks broker booking
+            {profile.role === "manager" ? " (you can override; it is logged)" : ""}. On hold:{" "}
+            {heldCustomers
+              .map((c) => `${c.name} (${money(pastDueByCustomer.get(c.id) ?? 0)})`)
+              .join(", ")}
+            .
+          </p>
+        </div>
+      ) : null}
+
       <form action={action} className="card bg-base-100 shadow-sm">
         <div className="card-body grid gap-3 md:grid-cols-2">
           <input
@@ -56,11 +89,15 @@ export default async function NewShipmentPage() {
           />
           <select name="customer_id" required className="select select-bordered">
             <option value="">Customer…</option>
-            {(customers ?? []).map((c) => (
-              <option key={c.id} value={c.id}>
-                {c.name}
-              </option>
-            ))}
+            {(customers ?? []).map((c) => {
+              const held = isOnCreditHold(pastDueByCustomer.get(c.id) ?? 0);
+              return (
+                <option key={c.id} value={c.id}>
+                  {c.name}
+                  {held ? " · CREDIT HOLD" : ""}
+                </option>
+              );
+            })}
           </select>
           <select name="carrier_id" className="select select-bordered">
             <option value="">Carrier (optional)…</option>
@@ -108,11 +145,12 @@ export default async function NewShipmentPage() {
           />
           {profile.role === "manager" ? (
             <p className="md:col-span-2 text-xs opacity-60">
-              Managers may book above a customer credit limit; the override is logged.
+              Managers may override credit limit and past-due credit holds; overrides are logged.
             </p>
           ) : (
             <p className="md:col-span-2 text-xs opacity-60">
-              Booking is blocked if open AR + this rate exceeds the customer credit limit.
+              Booking is blocked if open AR + this rate exceeds the credit limit, or if past-due AR
+              meets the credit-hold threshold.
             </p>
           )}
           <button className="btn btn-primary md:col-span-2">Create shipment</button>

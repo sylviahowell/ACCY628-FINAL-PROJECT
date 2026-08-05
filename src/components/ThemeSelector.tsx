@@ -1,7 +1,7 @@
 "use client";
 
-import { useEffect, useState } from "react";
-import { Palette } from "lucide-react";
+import { useEffect } from "react";
+import { useHydrated, useLocalString } from "@/lib/local-prefs";
 
 export const APPEARANCE_STORAGE_KEY = "freightflow-theme";
 export const DEFAULT_APPEARANCE = "corporate";
@@ -30,37 +30,25 @@ export function applyAppearance(theme: AppearanceId) {
 
 /** Settings-only Application Theme control (not used in chrome/login). */
 export function ThemeSelector() {
-  const [theme, setTheme] = useState<AppearanceId>(DEFAULT_APPEARANCE);
-  const [ready, setReady] = useState(false);
+  const [theme, setTheme] = useLocalString<AppearanceId>(
+    APPEARANCE_STORAGE_KEY,
+    DEFAULT_APPEARANCE,
+    resolveAppearance,
+  );
+  const ready = useHydrated();
 
   useEffect(() => {
-    const saved = resolveAppearance(localStorage.getItem(APPEARANCE_STORAGE_KEY));
-    setTheme(saved);
-    applyAppearance(saved);
-    if (localStorage.getItem(APPEARANCE_STORAGE_KEY) !== saved) {
-      localStorage.setItem(APPEARANCE_STORAGE_KEY, saved);
-    }
-    setReady(true);
-  }, []);
-
-  function onChange(next: string) {
-    const resolved = resolveAppearance(next);
-    setTheme(resolved);
-    localStorage.setItem(APPEARANCE_STORAGE_KEY, resolved);
-    applyAppearance(resolved);
-  }
+    applyAppearance(theme);
+  }, [theme]);
 
   return (
-    <label className="form-control w-full max-w-md">
-      <span className="label-text mb-1.5 flex items-center gap-2 font-medium">
-        <Palette className="h-4 w-4 opacity-70" aria-hidden />
-        Application Theme
-      </span>
+    <fieldset className="fieldset max-w-xs">
+      <legend className="fieldset-legend">Application theme</legend>
       <select
-        className="select select-bordered w-full min-w-[12rem] bg-base-100 text-base-content"
+        className="select w-full bg-base-100 text-base-content"
         value={theme}
-        onChange={(e) => onChange(e.target.value)}
-        aria-label="Application Theme"
+        onChange={(e) => setTheme(resolveAppearance(e.target.value))}
+        aria-label="Application theme"
         disabled={!ready}
       >
         {APPEARANCE_OPTIONS.map((opt) => (
@@ -69,6 +57,7 @@ export function ThemeSelector() {
           </option>
         ))}
       </select>
-    </label>
+      <p className="fieldset-label">Applies to this browser only.</p>
+    </fieldset>
   );
 }

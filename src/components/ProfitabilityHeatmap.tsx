@@ -1,10 +1,13 @@
 "use client";
 
 import Link from "next/link";
-import { useMemo, useState } from "react";
+import { Suspense, useEffect, useMemo, useState } from "react";
+import { useSearchParams } from "next/navigation";
 import {
   bandClasses,
   buildHeatmap,
+  parseBandParam,
+  parseDimParam,
   type HeatDimension,
   type HeatCell,
   type MarginBand,
@@ -76,16 +79,96 @@ function compareCells(a: HeatCell, b: HeatCell, key: SortKey, dir: "asc" | "desc
   return mul * (Number(a[key]) - Number(b[key]));
 }
 
-export function ProfitabilityHeatmap({ rows }: { rows: HeatRowInput[] }) {
-  const [dimension, setDimension] = useState<HeatDimension>("customer");
+export function ProfitabilityHeatmap({
+  rows,
+  initialDim,
+  initialBand,
+}: {
+  rows: HeatRowInput[];
+  initialDim?: HeatDimension | null;
+  initialBand?: MarginBand | null;
+}) {
+  return (
+    <Suspense
+      fallback={
+        <HeatmapBody
+          rows={rows}
+          dimension={initialDim ?? (initialBand ? "shipment" : "customer")}
+          bandFilter={initialBand ?? null}
+          onDimension={() => {}}
+          onBandFilter={() => {}}
+        />
+      }
+    >
+      <ProfitabilityHeatmapInner
+        rows={rows}
+        initialDim={initialDim}
+        initialBand={initialBand}
+      />
+    </Suspense>
+  );
+}
+
+function ProfitabilityHeatmapInner({
+  rows,
+  initialDim,
+  initialBand,
+}: {
+  rows: HeatRowInput[];
+  initialDim?: HeatDimension | null;
+  initialBand?: MarginBand | null;
+}) {
+  const params = useSearchParams();
+  const bandFromUrl = parseBandParam(params.get("band")) ?? initialBand ?? null;
+  const dimFromUrl =
+    parseDimParam(params.get("dim")) ??
+    initialDim ??
+    (bandFromUrl ? "shipment" : "customer");
+
+  const [dimension, setDimension] = useState<HeatDimension>(dimFromUrl);
+  const [bandFilter, setBandFilter] = useState<MarginBand | null>(bandFromUrl);
+
+  useEffect(() => {
+    const b = parseBandParam(params.get("band"));
+    const d = parseDimParam(params.get("dim"));
+    setBandFilter(b);
+    if (d) setDimension(d);
+    else if (b) setDimension("shipment");
+  }, [params]);
+
+  return (
+    <HeatmapBody
+      rows={rows}
+      dimension={dimension}
+      bandFilter={bandFilter}
+      onDimension={setDimension}
+      onBandFilter={setBandFilter}
+    />
+  );
+}
+
+function HeatmapBody({
+  rows,
+  dimension,
+  bandFilter,
+  onDimension,
+  onBandFilter,
+}: {
+  rows: HeatRowInput[];
+  dimension: HeatDimension;
+  bandFilter: MarginBand | null;
+  onDimension: (d: HeatDimension) => void;
+  onBandFilter: (b: MarginBand | null) => void;
+}) {
   const [sortKey, setSortKey] = useState<SortKey>("marginPct");
   const [sortDir, setSortDir] = useState<"asc" | "desc">("asc");
 
   const baseCells = useMemo(() => buildHeatmap(rows, dimension), [rows, dimension]);
-  const cells = useMemo(
-    () => [...baseCells].sort((a, b) => compareCells(a, b, sortKey, sortDir)),
-    [baseCells, sortKey, sortDir],
-  );
+  const cells = useMemo(() => {
+    const filtered = bandFilter ? baseCells.filter((c) => c.band === bandFilter) : baseCells;
+    return [...filtered].sort((a, b) => compareCells(a, b, sortKey, sortDir));
+  }, [baseCells, bandFilter, sortKey, sortDir]);
+
   const dimLabel = DIMENSIONS.find((d) => d.id === dimension)?.label ?? "Customer";
 
   function onSortSelect(next: SortKey) {
@@ -117,14 +200,19 @@ export function ProfitabilityHeatmap({ rows }: { rows: HeatRowInput[] }) {
           }`;
 
   return (
-    <div className="card bg-base-100 shadow-sm">
+    <div
+      id="focus-margin-leaderboard"
+      data-focus="margin-leaderboard"
+      className="card bg-base-100 shadow-sm transition"
+    >
       <div className="card-body gap-3">
         <div className="flex flex-wrap items-end justify-between gap-3">
           <div>
             <h3 className="card-title text-base">Margin by {dimLabel.toLowerCase()}</h3>
             <p className="text-sm opacity-70">
               Gross profit = customer revenue − carrier cost − approved direct costs. Color-coded by
-              margin band · sorted {sortSummary}.
+              margin band · sorted {sortSummary}
+              {bandFilter ? ` · showing ${bandFilter}` : ""}.
             </p>
           </div>
           <div className="flex flex-wrap items-center gap-2">
@@ -157,7 +245,7 @@ export function ProfitabilityHeatmap({ rows }: { rows: HeatRowInput[] }) {
                   key={d.id}
                   type="button"
                   className={`btn btn-xs join-item ${dimension === d.id ? "btn-primary" : "btn-ghost"}`}
-                  onClick={() => setDimension(d.id)}
+                  onClick={() => onDimension(d.id)}
                 >
                   {d.label}
                 </button>
@@ -167,15 +255,33 @@ export function ProfitabilityHeatmap({ rows }: { rows: HeatRowInput[] }) {
         </div>
 
         <div className="flex flex-wrap gap-2 text-xs">
+          <button
+            type="button"
+            className={`badge badge-outline ${!bandFilter ? "badge-primary" : ""}`}
+            onClick={() => onBandFilter(null)}
+          >
+            All bands
+          </button>
           {BANDS.map((b) => (
-            <span key={b} className={`badge badge-outline ${bandClasses(b)}`}>
+            <button
+              key={b}
+              type="button"
+              className={`badge badge-outline ${bandClasses(b)} ${
+                bandFilter === b ? "ring-2 ring-primary" : ""
+              }`}
+              onClick={() => onBandFilter(bandFilter === b ? null : b)}
+            >
               {b}
-            </span>
+            </button>
           ))}
         </div>
 
         {cells.length === 0 ? (
-          <p className="text-sm opacity-70">No profitability rows for this view yet.</p>
+          <p className="text-sm opacity-70">
+            {bandFilter
+              ? `No ${bandFilter.toLowerCase()} rows in this view.`
+              : "No profitability rows for this view yet."}
+          </p>
         ) : (
           <div className="overflow-x-auto rounded-box border border-base-300">
             <table className="table table-sm">

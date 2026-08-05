@@ -112,7 +112,7 @@ export default async function RiskCreditPage() {
       <div className="rounded-box border border-info/30 bg-info/10 px-4 py-3 text-sm">
         <p className="font-medium text-info-content">Control in this workspace</p>
         <p className="mt-1 opacity-80">
-          This business faces credit over-extension and uninsured carrier risk. FreightFlow
+          This business faces credit over-extension and uninsured carrier risk. RowanLane
           surfaces limit utilization and certificate expiry here, and blocks non-manager booking
           when open AR plus a new rate would exceed the customer credit limit.
         </p>

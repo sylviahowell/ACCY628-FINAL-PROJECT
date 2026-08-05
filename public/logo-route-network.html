@@ -1,0 +1,172 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>FreightFlow — Route Network concepts</title>
+  <style>
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      padding: 40px 32px 64px;
+      font-family: "Segoe UI", system-ui, sans-serif;
+      background: #f2f6fb;
+      color: #0a1f3d;
+    }
+    h1 { font-size: 1.2rem; margin: 0 0 6px; }
+    .intro { color: #7a8ba0; font-size: 0.9rem; margin: 0 0 32px; max-width: 640px; line-height: 1.45; }
+    .stack { display: flex; flex-direction: column; gap: 28px; max-width: 560px; }
+    .card {
+      background: #fff;
+      border: 1px solid #e2eaf3;
+      border-radius: 16px;
+      padding: 28px 32px;
+      box-shadow: 0 8px 24px rgba(10, 31, 61, 0.06);
+    }
+    .label {
+      font-size: 0.75rem;
+      font-weight: 700;
+      letter-spacing: 0.04em;
+      text-transform: uppercase;
+      color: #0866d9;
+      margin-bottom: 18px;
+    }
+    .brand {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+    .wordmark {
+      font-size: 1.4rem;
+      font-weight: 800;
+      letter-spacing: -0.02em;
+      line-height: 1;
+      color: #0a1f3d;
+    }
+    .subtitle {
+      margin-top: 6px;
+      font-size: 11px;
+      font-weight: 400;
+      line-height: 1.35;
+      color: #9aabbd;
+    }
+    .note { margin-top: 14px; font-size: 0.82rem; color: #607089; line-height: 1.45; }
+    .sizes {
+      display: flex;
+      align-items: center;
+      gap: 20px;
+      margin-top: 18px;
+      padding-top: 16px;
+      border-top: 1px solid #eef2f7;
+    }
+    .size-label { font-size: 0.7rem; color: #9aabbd; text-align: center; }
+  </style>
+</head>
+<body>
+  <h1>Route Network — choose one</h1>
+  <p class="intro">
+    Temporary preview only. Your login page logo is unchanged.
+    Reply with <strong>1</strong>, <strong>2</strong>, or <strong>3</strong> and that mark will be implemented permanently.
+  </p>
+
+  <div class="stack">
+
+    <!-- Variation 1 -->
+    <div class="card">
+      <div class="label">Variation 1 — Minimal three-node route</div>
+      <div class="brand">
+        <svg width="46" height="46" viewBox="0 0 48 48" fill="none" aria-hidden>
+          <!-- Hubs: top, SW, SE -->
+          <circle cx="24" cy="9" r="5.25" fill="#0866D9"/>
+          <circle cx="9" cy="39" r="5.25" fill="#0866D9"/>
+          <circle cx="39" cy="39" r="5.25" fill="#0866D9"/>
+          <!-- Gentle arcs -->
+          <path d="M9 39C11 24 18 16 24 9" stroke="#0866D9" stroke-width="4.25" stroke-linecap="round" fill="none"/>
+          <path d="M24 9C30 16 37 24 39 39" stroke="#0866D9" stroke-width="4.25" stroke-linecap="round" fill="none"/>
+        </svg>
+        <div>
+          <div class="wordmark">FreightFlow</div>
+          <div class="subtitle">Freight Brokerage &amp; Logistics Management System</div>
+        </div>
+      </div>
+      <p class="note">Quiet, balanced Y-network. Soft arcs only — reads as locations on a map, not a tech diagram.</p>
+      <div class="sizes">
+        <div>
+          <svg width="40" height="40" viewBox="0 0 48 48" fill="none"><circle cx="24" cy="9" r="5.25" fill="#0866D9"/><circle cx="9" cy="39" r="5.25" fill="#0866D9"/><circle cx="39" cy="39" r="5.25" fill="#0866D9"/><path d="M9 39C11 24 18 16 24 9" stroke="#0866D9" stroke-width="4.25" stroke-linecap="round"/><path d="M24 9C30 16 37 24 39 39" stroke="#0866D9" stroke-width="4.25" stroke-linecap="round"/></svg>
+          <div class="size-label">40px</div>
+        </div>
+        <div>
+          <svg width="32" height="32" viewBox="0 0 48 48" fill="none"><circle cx="24" cy="9" r="5.25" fill="#0866D9"/><circle cx="9" cy="39" r="5.25" fill="#0866D9"/><circle cx="39" cy="39" r="5.25" fill="#0866D9"/><path d="M9 39C11 24 18 16 24 9" stroke="#0866D9" stroke-width="4.25" stroke-linecap="round"/><path d="M24 9C30 16 37 24 39 39" stroke="#0866D9" stroke-width="4.25" stroke-linecap="round"/></svg>
+          <div class="size-label">32px</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Variation 2 -->
+    <div class="card">
+      <div class="label">Variation 2 — Stronger flowing curves</div>
+      <div class="brand">
+        <svg width="46" height="46" viewBox="0 0 48 48" fill="none" aria-hidden>
+          <circle cx="10" cy="36" r="5.25" fill="#0866D9"/>
+          <circle cx="24" cy="10" r="5.25" fill="#0866D9"/>
+          <circle cx="38" cy="36" r="5.25" fill="#0866D9"/>
+          <!-- One arc bows up/left, one bows down/right for FLOW -->
+          <path d="M10 36C8 22 14 12 24 10" stroke="#0866D9" stroke-width="4.5" stroke-linecap="round" fill="none"/>
+          <path d="M24 10C36 12 40 22 38 36" stroke="#0866D9" stroke-width="4.5" stroke-linecap="round" fill="none"/>
+          <!-- Subtle base connector for continuity (same blue, same weight family) -->
+          <path d="M10 36C18 42 30 42 38 36" stroke="#0866D9" stroke-width="4.5" stroke-linecap="round" fill="none"/>
+        </svg>
+        <div>
+          <div class="wordmark">FreightFlow</div>
+          <div class="subtitle">Freight Brokerage &amp; Logistics Management System</div>
+        </div>
+      </div>
+      <p class="note">More motion: arcs bow in opposite directions, plus a soft base route so origin → network → destination feels continuous.</p>
+      <div class="sizes">
+        <div>
+          <svg width="40" height="40" viewBox="0 0 48 48" fill="none"><circle cx="10" cy="36" r="5.25" fill="#0866D9"/><circle cx="24" cy="10" r="5.25" fill="#0866D9"/><circle cx="38" cy="36" r="5.25" fill="#0866D9"/><path d="M10 36C8 22 14 12 24 10" stroke="#0866D9" stroke-width="4.5" stroke-linecap="round"/><path d="M24 10C36 12 40 22 38 36" stroke="#0866D9" stroke-width="4.5" stroke-linecap="round"/><path d="M10 36C18 42 30 42 38 36" stroke="#0866D9" stroke-width="4.5" stroke-linecap="round"/></svg>
+          <div class="size-label">40px</div>
+        </div>
+        <div>
+          <svg width="32" height="32" viewBox="0 0 48 48" fill="none"><circle cx="10" cy="36" r="5.25" fill="#0866D9"/><circle cx="24" cy="10" r="5.25" fill="#0866D9"/><circle cx="38" cy="36" r="5.25" fill="#0866D9"/><path d="M10 36C8 22 14 12 24 10" stroke="#0866D9" stroke-width="4.5" stroke-linecap="round"/><path d="M24 10C36 12 40 22 38 36" stroke="#0866D9" stroke-width="4.5" stroke-linecap="round"/><path d="M10 36C18 42 30 42 38 36" stroke="#0866D9" stroke-width="4.5" stroke-linecap="round"/></svg>
+          <div class="size-label">32px</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Variation 3 -->
+    <div class="card">
+      <div class="label">Variation 3 — Flow with subtle F structure (not a letter)</div>
+      <div class="brand">
+        <svg width="46" height="46" viewBox="0 0 48 48" fill="none" aria-hidden>
+          <!-- Left spine hub, upper-right hub, mid-right hub — F-like negative space without drawing an F -->
+          <circle cx="12" cy="38" r="5.25" fill="#0866D9"/>
+          <circle cx="12" cy="12" r="5.25" fill="#0866D9"/>
+          <circle cx="38" cy="20" r="5.25" fill="#0866D9"/>
+          <!-- Vertical-ish left route (spine) with soft curve -->
+          <path d="M12 12C10 20 10 30 12 38" stroke="#0866D9" stroke-width="4.5" stroke-linecap="round" fill="none"/>
+          <!-- Upper flow to right hub -->
+          <path d="M12 12C22 8 32 12 38 20" stroke="#0866D9" stroke-width="4.5" stroke-linecap="round" fill="none"/>
+          <!-- Mid flow — shorter arm, curves slightly down -->
+          <path d="M12 26C22 28 30 26 36 22" stroke="#0866D9" stroke-width="4.5" stroke-linecap="round" fill="none"/>
+        </svg>
+        <div>
+          <div class="wordmark">FreightFlow</div>
+          <div class="subtitle">Freight Brokerage &amp; Logistics Management System</div>
+        </div>
+      </div>
+      <p class="note">Same three hubs + routes. Left spine and two eastward lanes only <em>hint</em> at an F in negative space — still clearly a route network, not a lettermark.</p>
+      <div class="sizes">
+        <div>
+          <svg width="40" height="40" viewBox="0 0 48 48" fill="none"><circle cx="12" cy="38" r="5.25" fill="#0866D9"/><circle cx="12" cy="12" r="5.25" fill="#0866D9"/><circle cx="38" cy="20" r="5.25" fill="#0866D9"/><path d="M12 12C10 20 10 30 12 38" stroke="#0866D9" stroke-width="4.5" stroke-linecap="round"/><path d="M12 12C22 8 32 12 38 20" stroke="#0866D9" stroke-width="4.5" stroke-linecap="round"/><path d="M12 26C22 28 30 26 36 22" stroke="#0866D9" stroke-width="4.5" stroke-linecap="round"/></svg>
+          <div class="size-label">40px</div>
+        </div>
+        <div>
+          <svg width="32" height="32" viewBox="0 0 48 48" fill="none"><circle cx="12" cy="38" r="5.25" fill="#0866D9"/><circle cx="12" cy="12" r="5.25" fill="#0866D9"/><circle cx="38" cy="20" r="5.25" fill="#0866D9"/><path d="M12 12C10 20 10 30 12 38" stroke="#0866D9" stroke-width="4.5" stroke-linecap="round"/><path d="M12 12C22 8 32 12 38 20" stroke="#0866D9" stroke-width="4.5" stroke-linecap="round"/><path d="M12 26C22 28 30 26 36 22" stroke="#0866D9" stroke-width="4.5" stroke-linecap="round"/></svg>
+          <div class="size-label">32px</div>
+        </div>
+      </div>
+    </div>
+
+  </div>
+</body>
+</html>

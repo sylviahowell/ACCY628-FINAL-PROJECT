@@ -326,6 +326,7 @@ export default async function SettingsPage() {
                     "Expired carrier insurance blocked on create/assign (all roles)",
                     "Only active contracts on new shipments; outside-window dates need confirm",
                     "Broker discounts and accessorials above threshold need manager approval",
+                    "Negative-margin loads blocked for brokers; manager override logged",
                   ].map((rule) => (
                     <li key={rule} className="flex gap-2 opacity-80">
                       <span
@@ -343,7 +344,6 @@ export default async function SettingsPage() {
                 </p>
                 <ul className="grid gap-x-6 gap-y-2 sm:grid-cols-2">
                   {[
-                    "Negative-margin / loss loads warn on shipment pages — booking is not blocked",
                     "Insurance expiring ≤30 days and Watch List carriers surface on Risk & Warnings",
                     "Approvals inbox, Control activity log, AR collections notes for follow-up",
                   ].map((rule) => (

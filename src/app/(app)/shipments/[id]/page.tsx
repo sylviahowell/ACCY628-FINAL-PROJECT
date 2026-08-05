@@ -1,5 +1,6 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
+import { AssignCarrierForm } from "@/components/AssignCarrierForm";
 import { C2CTimeline } from "@/components/C2CTimeline";
 import {
   CustomerFriendlyStatusCard,
@@ -619,85 +620,42 @@ export default async function ShipmentDetailPage({
               </li>
             </ul>
             {canAssign ? (
-              <form
-                id="assign-carrier"
+              <AssignCarrierForm
+                shipmentId={id}
+                customerRate={Number(s.customer_rate) || 0}
+                defaultCarrierCost={s.carrier_cost ?? ""}
+                defaultCarrierId={currentCarrierExpired ? "" : (s.carrier_id ?? "")}
+                isManager={profile.role === "manager"}
                 action={assignCarrier}
-                className="mt-4 grid gap-2 border-t border-base-200 pt-3"
-              >
-                <input type="hidden" name="shipment_id" value={id} />
-                <p className="text-xs opacity-60">
-                  Match using scorecards → confirm insurance → assign → book rate. Prefer
-                  Preferred / Approved carriers.
-                </p>
-                {suggestedCarriers.length > 0 ? (
-                  <div className="rounded-box border border-primary/30 bg-primary/5 p-3">
-                    <p className="text-xs font-semibold uppercase tracking-wide text-primary">
-                      Suggested for this load
-                    </p>
-                    <ul className="mt-2 space-y-1.5 text-sm">
-                      {suggestedCarriers.map((c) => (
-                        <li key={c.carrierId} className="flex flex-wrap items-center gap-2">
-                          <span className={`badge badge-sm ${tierBadge(c.tier)}`}>{c.tier}</span>
-                          <span className="font-medium">{c.name}</span>
-                          <span className="text-xs opacity-60">
-                            OTD {c.onTimeDeliveryPct ?? "—"}%
-                            {c.avgCarrierCost != null ? ` · avg cost ${money(c.avgCarrierCost)}` : ""}
-                            {c.insuranceExpiration ? ` · insured thru ${c.insuranceExpiration}` : ""}
-                          </span>
-                        </li>
-                      ))}
-                    </ul>
-                  </div>
-                ) : null}
-                <label className="form-control w-full">
-                  <span className="label-text text-xs">Assign / reassign carrier</span>
-                  <select
-                    name="carrier_id"
-                    className="select select-bordered select-sm"
-                    defaultValue={currentCarrierExpired ? "" : (s.carrier_id ?? "")}
-                  >
-                    <option value="">Unassigned</option>
-                    {assignableCarriers
-                      .filter(
-                        (c) =>
-                          c.id !== s.carrier_id ||
-                          insuranceRiskStatus(c.insurance_expiration ?? null, today).status !==
-                            "expired",
-                      )
-                      .map((c) => {
-                        const risk = insuranceRiskStatus(c.insurance_expiration ?? null, today);
-                        const insuranceLabel =
-                          risk.status === "expiring"
-                            ? ` · insurance ${c.insurance_expiration} (≤30d)`
-                            : risk.status === "unknown"
-                              ? " · insurance unknown"
-                              : c.insurance_expiration
-                                ? ` · insured thru ${c.insurance_expiration}`
-                                : "";
-                        return (
-                          <option key={c.id} value={c.id}>
-                            {c.name}
-                            {insuranceLabel}
-                          </option>
-                        );
-                      })}
-                  </select>
-                  <span className="label-text-alt opacity-60">
-                    Suspended carriers (expired insurance) are hidden and blocked server-side.
-                  </span>
-                </label>
-                <label className="form-control w-full">
-                  <span className="label-text text-xs">Carrier cost (optional update)</span>
-                  <input
-                    name="carrier_cost"
-                    type="number"
-                    step="0.01"
-                    defaultValue={s.carrier_cost ?? ""}
-                    className="input input-bordered input-sm"
-                  />
-                </label>
-                <button className="btn btn-primary btn-sm">Save carrier assignment</button>
-              </form>
+                suggestedCarriers={suggestedCarriers.map((c) => ({
+                  carrierId: c.carrierId,
+                  name: c.name,
+                  tier: c.tier,
+                  onTimeDeliveryPct: c.onTimeDeliveryPct,
+                  avgCarrierCost: c.avgCarrierCost,
+                  insuranceExpiration: c.insuranceExpiration,
+                  tierBadgeClass: tierBadge(c.tier),
+                }))}
+                carriers={assignableCarriers
+                  .filter(
+                    (c) =>
+                      c.id !== s.carrier_id ||
+                      insuranceRiskStatus(c.insurance_expiration ?? null, today).status !==
+                        "expired",
+                  )
+                  .map((c) => {
+                    const risk = insuranceRiskStatus(c.insurance_expiration ?? null, today);
+                    const insuranceLabel =
+                      risk.status === "expiring"
+                        ? ` · insurance ${c.insurance_expiration} (≤30d)`
+                        : risk.status === "unknown"
+                          ? " · insurance unknown"
+                          : c.insurance_expiration
+                            ? ` · insured thru ${c.insurance_expiration}`
+                            : "";
+                    return { id: c.id, name: c.name, insuranceLabel };
+                  })}
+              />
             ) : null}
           </div>
         </div>

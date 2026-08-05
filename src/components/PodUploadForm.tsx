@@ -1,7 +1,7 @@
 "use client";
 
 import { useFormStatus } from "react-dom";
-import { useEffect, useId, useRef, useState, type DragEvent } from "react";
+import { useId, useRef, useState, type DragEvent } from "react";
 import { uploadPod } from "@/lib/actions/freight";
 
 const ACCEPT = "application/pdf,image/jpeg,image/png,image/webp";
@@ -55,23 +55,23 @@ export function PodUploadForm({
 }: Props) {
   const inputId = useId();
   const inputRef = useRef<HTMLInputElement>(null);
+  const previewRef = useRef<string | null>(null);
   const [file, setFile] = useState<File | null>(null);
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [dragging, setDragging] = useState(false);
 
-  useEffect(() => {
-    if (!file || !file.type.startsWith("image/")) {
-      setPreviewUrl(null);
-      return;
+  function clearPreview() {
+    if (previewRef.current) {
+      URL.revokeObjectURL(previewRef.current);
+      previewRef.current = null;
     }
-    const url = URL.createObjectURL(file);
-    setPreviewUrl(url);
-    return () => URL.revokeObjectURL(url);
-  }, [file]);
+    setPreviewUrl(null);
+  }
 
   function pickFile(next: File | null) {
     setError(null);
+    clearPreview();
     if (!next) {
       setFile(null);
       return;
@@ -92,6 +92,11 @@ export function PodUploadForm({
       return;
     }
     setFile(next);
+    if (next.type.startsWith("image/")) {
+      const url = URL.createObjectURL(next);
+      previewRef.current = url;
+      setPreviewUrl(url);
+    }
   }
 
   function onDrop(e: DragEvent<HTMLDivElement>) {

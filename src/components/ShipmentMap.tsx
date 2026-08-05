@@ -50,8 +50,8 @@ type CityHub = {
 };
 
 const QUICK: { id: string; label: string; status: string }[] = [
-  { id: "active", label: "Active", status: "active" },
   { id: "exceptions", label: "Exceptions", status: "delayed" },
+  { id: "active", label: "Active", status: "active" },
   { id: "all", label: "All", status: "all" },
 ];
 
@@ -110,11 +110,14 @@ export function ShipmentMap({
   shipments: MapShipment[];
   today: string;
 }) {
-  const [statusFilter, setStatusFilter] = useState("active");
+  const [statusFilter, setStatusFilter] = useState(() =>
+    shipments.some((s) => isDelayed(s, today)) ? "delayed" : "active",
+  );
   const [customerFilter, setCustomerFilter] = useState("all");
   const [carrierFilter, setCarrierFilter] = useState("all");
   const [fromDate, setFromDate] = useState("");
   const [toDate, setToDate] = useState("");
+  const [showFilters, setShowFilters] = useState(false);
 
   const customers = useMemo(
     () => [...new Set(shipments.map((s) => s.customer_name))].sort(),
@@ -220,103 +223,131 @@ export function ShipmentMap({
           ? "all"
           : null;
 
+  const advancedFilterCount =
+    (customerFilter !== "all" ? 1 : 0) +
+    (carrierFilter !== "all" ? 1 : 0) +
+    (fromDate ? 1 : 0) +
+    (toDate ? 1 : 0) +
+    (statusFilter !== "active" && statusFilter !== "delayed" && statusFilter !== "all" ? 1 : 0);
+
+  const exceptionCount = useMemo(
+    () => shipments.filter((s) => isDelayed(s, today)).length,
+    [shipments, today],
+  );
+
   return (
     <div className="card bg-base-100 shadow-sm">
       <div className="card-body gap-3">
-        <div>
-          <h3 className="card-title text-base">Shipment network map</h3>
-          <p className="text-sm opacity-70">
-            Active lanes by default · city hubs show load counts. OpenStreetMap tiles.
-          </p>
+        <div className="flex flex-wrap items-start justify-between gap-3">
+          <div>
+            <h3 className="card-title text-base">Shipment network map</h3>
+            <p className="text-sm opacity-70">
+              Exceptions first when present · city hubs show load counts
+            </p>
+          </div>
+          {exceptionCount > 0 ? (
+            <span className="badge badge-error badge-outline">
+              {exceptionCount} exception{exceptionCount === 1 ? "" : "s"}
+            </span>
+          ) : null}
         </div>
 
-        <div className="flex flex-wrap gap-2">
+        <div className="flex flex-wrap items-center gap-2">
           {QUICK.map((q) => (
             <button
               key={q.id}
               type="button"
-              className={`btn btn-xs ${quickActive === q.id ? "btn-primary" : "btn-ghost"}`}
+              className={`btn btn-sm ${quickActive === q.id ? "btn-primary" : "btn-ghost"}`}
               onClick={() => setStatusFilter(q.status)}
             >
               {q.label}
+              {q.id === "exceptions" && exceptionCount > 0 ? (
+                <span className="badge badge-xs badge-error ml-1">{exceptionCount}</span>
+              ) : null}
             </button>
           ))}
+          <button
+            type="button"
+            className={`btn btn-sm ml-auto ${showFilters || advancedFilterCount > 0 ? "btn-outline" : "btn-ghost"}`}
+            aria-expanded={showFilters}
+            onClick={() => setShowFilters((v) => !v)}
+          >
+            Filters
+            {advancedFilterCount > 0 ? (
+              <span className="badge badge-xs badge-primary">{advancedFilterCount}</span>
+            ) : null}
+          </button>
         </div>
 
-        <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-5">
-          <select
-            className="select select-bordered select-sm"
-            value={statusFilter}
-            onChange={(e) => setStatusFilter(e.target.value)}
-          >
-            <option value="active">Active (hide delivered)</option>
-            <option value="all">All statuses</option>
-            <option value="scheduled">Scheduled</option>
-            <option value="assigned">Assigned</option>
-            <option value="in_transit">In transit</option>
-            <option value="delivered">Delivered</option>
-            <option value="delayed">Delayed / exceptions</option>
-          </select>
-          <select
-            className="select select-bordered select-sm"
-            value={customerFilter}
-            onChange={(e) => setCustomerFilter(e.target.value)}
-          >
-            <option value="all">All customers</option>
-            {customers.map((c) => (
-              <option key={c} value={c}>
-                {c}
-              </option>
-            ))}
-          </select>
-          <select
-            className="select select-bordered select-sm"
-            value={carrierFilter}
-            onChange={(e) => setCarrierFilter(e.target.value)}
-          >
-            <option value="all">All carriers</option>
-            {carriers.map((c) => (
-              <option key={c} value={c}>
-                {c}
-              </option>
-            ))}
-          </select>
-          <input
-            type="date"
-            className="input input-bordered input-sm"
-            value={fromDate}
-            onChange={(e) => setFromDate(e.target.value)}
-            aria-label="From expected delivery"
-          />
-          <input
-            type="date"
-            className="input input-bordered input-sm"
-            value={toDate}
-            onChange={(e) => setToDate(e.target.value)}
-            aria-label="To expected delivery"
-          />
-        </div>
+        {showFilters ? (
+          <div className="grid gap-2 rounded-box border border-base-300 bg-base-200/40 p-3 sm:grid-cols-2 lg:grid-cols-5">
+            <select
+              className="select select-bordered select-sm"
+              value={statusFilter}
+              onChange={(e) => setStatusFilter(e.target.value)}
+            >
+              <option value="active">Active (hide delivered)</option>
+              <option value="all">All statuses</option>
+              <option value="scheduled">Scheduled</option>
+              <option value="assigned">Assigned</option>
+              <option value="in_transit">In transit</option>
+              <option value="delivered">Delivered</option>
+              <option value="delayed">Delayed / exceptions</option>
+            </select>
+            <select
+              className="select select-bordered select-sm"
+              value={customerFilter}
+              onChange={(e) => setCustomerFilter(e.target.value)}
+            >
+              <option value="all">All customers</option>
+              {customers.map((c) => (
+                <option key={c} value={c}>
+                  {c}
+                </option>
+              ))}
+            </select>
+            <select
+              className="select select-bordered select-sm"
+              value={carrierFilter}
+              onChange={(e) => setCarrierFilter(e.target.value)}
+            >
+              <option value="all">All carriers</option>
+              {carriers.map((c) => (
+                <option key={c} value={c}>
+                  {c}
+                </option>
+              ))}
+            </select>
+            <input
+              type="date"
+              className="input input-bordered input-sm"
+              value={fromDate}
+              onChange={(e) => setFromDate(e.target.value)}
+              aria-label="From expected delivery"
+            />
+            <input
+              type="date"
+              className="input input-bordered input-sm"
+              value={toDate}
+              onChange={(e) => setToDate(e.target.value)}
+              aria-label="To expected delivery"
+            />
+          </div>
+        ) : null}
 
-        <div className="flex flex-wrap gap-3 text-xs">
-          <span className="flex items-center gap-1">
-            <span className="inline-block h-2.5 w-2.5 rounded-full bg-[#eab308]" /> Scheduled /
-            assigned
-          </span>
-          <span className="flex items-center gap-1">
-            <span className="inline-block h-2.5 w-2.5 rounded-full bg-[#0284c7]" /> In transit
-          </span>
-          <span className="flex items-center gap-1">
-            <span className="inline-block h-2.5 w-2.5 rounded-full bg-[#ef4444]" /> Delayed
-          </span>
-          <span className="flex items-center gap-1">
-            <span className="inline-block h-2.5 w-2.5 rounded-full bg-[#22c55e]" /> Delivered
-          </span>
-        </div>
-
-        <div className="h-[420px] overflow-hidden rounded-box border border-base-300">
+        <div className="relative h-[420px] overflow-hidden rounded-box border border-base-300">
           {plotted.length === 0 ? (
-            <div className="flex h-full items-center justify-center text-sm opacity-70">
-              No shipments match these filters (or cities lack demo coordinates).
+            <div className="flex h-full flex-col items-center justify-center gap-2 px-4 text-center text-sm opacity-70">
+              <p>No shipments match these filters (or cities lack demo coordinates).</p>
+              {statusFilter === "delayed" ? (
+                <button
+                  type="button"
+                  className="btn btn-primary btn-xs"
+                  onClick={() => setStatusFilter("active")}
+                >
+                  Show active lanes
+                </button>
+              ) : null}
             </div>
           ) : (
             <MapContainer
@@ -326,8 +357,8 @@ export function ShipmentMap({
               scrollWheelZoom={false}
             >
               <TileLayer
-                attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>'
-                url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
+                attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> &copy; <a href="https://carto.com/attributions">CARTO</a>'
+                url="https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png"
               />
               <FitBounds points={allPoints} />
               {plotted.map((lane) => (
@@ -342,6 +373,8 @@ export function ShipmentMap({
                     color: lane.color,
                     weight: lane.weight,
                     opacity: lane.opacity,
+                    lineCap: "round",
+                    lineJoin: "round",
                   }}
                 />
               ))}
@@ -383,12 +416,27 @@ export function ShipmentMap({
               ))}
             </MapContainer>
           )}
+          <div className="pointer-events-none absolute bottom-3 left-3 z-[1000] flex flex-wrap gap-2 rounded-box border border-base-300/80 bg-base-100/90 px-2.5 py-1.5 text-[11px] shadow-sm backdrop-blur-sm">
+            <span className="flex items-center gap-1">
+              <span className="inline-block h-2 w-2 rounded-full bg-[#eab308]" /> Scheduled
+            </span>
+            <span className="flex items-center gap-1">
+              <span className="inline-block h-2 w-2 rounded-full bg-[#0284c7]" /> In transit
+            </span>
+            <span className="flex items-center gap-1">
+              <span className="inline-block h-2 w-2 rounded-full bg-[#ef4444]" /> Delayed
+            </span>
+            <span className="flex items-center gap-1">
+              <span className="inline-block h-2 w-2 rounded-full bg-[#22c55e]" /> Delivered
+            </span>
+          </div>
         </div>
         <p className="text-xs opacity-60">
           Showing {plotted.length} lane{plotted.length === 1 ? "" : "s"} · {hubs.length} city hub
           {hubs.length === 1 ? "" : "s"}
-          {statusFilter === "active" ? " · delivered hidden until All" : ""}. Hollow hubs = pickup;
-          filled = delivery.
+          {statusFilter === "delayed" ? " · exceptions only" : ""}
+          {statusFilter === "active" ? " · delivered hidden" : ""}. Hollow hubs = pickup; filled =
+          delivery.
         </p>
       </div>
     </div>

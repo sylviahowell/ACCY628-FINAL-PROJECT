@@ -37,31 +37,39 @@ export function DecideNowRail({ items }: { items: DecideNowItem[] }) {
           </p>
         ) : (
           <ul className="space-y-2">
-            {items.map((item) => (
-              <li
-                key={item.id}
-                className={`flex flex-wrap items-center justify-between gap-3 rounded-box border px-3 py-2.5 ${toneRowClass(item.tone)}`}
-              >
-                <div className="min-w-0 flex-1">
-                  <div className="flex flex-wrap items-baseline gap-x-2 gap-y-0.5">
-                    <p className="font-semibold">{item.title}</p>
-                    <p
-                      className={`text-sm font-bold tabular-nums ${toneMetricClass(item.tone)}`}
-                    >
-                      {item.metric}
-                    </p>
-                  </div>
-                  <p className="text-sm opacity-70">{item.detail}</p>
-                </div>
-                <Link
-                  href={item.href}
-                  aria-label={`${item.cta ?? "Review"} — ${item.title} (${item.metric})`}
-                  className={`btn btn-sm shrink-0 ${toneBtnClass(item.tone)}`}
+            {items.map((item) => {
+              const cta = item.cta ?? "Review";
+              return (
+                <li
+                  key={item.id}
+                  className={`grid grid-cols-1 items-center gap-3 rounded-box border px-3 py-2.5 sm:grid-cols-[minmax(0,1fr)_6.5rem] ${toneRowClass(item.tone)}`}
                 >
-                  {item.cta ?? "Review"}
-                </Link>
-              </li>
-            ))}
+                  <div className="min-w-0">
+                    <div className="flex flex-wrap items-baseline gap-x-2 gap-y-0.5">
+                      <p className="font-semibold">{item.title}</p>
+                      <p
+                        className={`text-sm font-bold tabular-nums ${toneMetricClass(item.tone)}`}
+                      >
+                        {item.metric}
+                        {item.metricKind === "count" && item.metricUnit ? (
+                          <span className="ml-1 text-xs font-medium opacity-60">
+                            {item.metricUnit}
+                          </span>
+                        ) : null}
+                      </p>
+                    </div>
+                    <p className="text-sm opacity-70">{item.detail}</p>
+                  </div>
+                  <Link
+                    href={item.href}
+                    aria-label={`${cta} — ${item.title} (${item.metric})`}
+                    className={`btn btn-sm w-full justify-center ${toneBtnClass(item.tone)}`}
+                  >
+                    {cta}
+                  </Link>
+                </li>
+              );
+            })}
           </ul>
         )}
       </div>

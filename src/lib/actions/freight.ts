@@ -229,7 +229,12 @@ export async function createShipment(formData: FormData) {
   const supabase = await createClient();
 
   if (carrierId) {
-    await assertCarrierInsuranceCurrent(carrierId);
+    try {
+      await assertCarrierInsuranceCurrent(carrierId);
+    } catch (err) {
+      const message = err instanceof Error ? err.message : "Carrier insurance check failed.";
+      redirect(toastErrorPath("/shipments/new", message));
+    }
   }
 
   // Credit controls: past-due hold + open AR vs credit limit
@@ -238,7 +243,9 @@ export async function createShipment(formData: FormData) {
     .select("id, credit_limit, payment_terms, name")
     .eq("id", customerId)
     .single();
-  if (!customer) throw new Error("Customer not found");
+  if (!customer) {
+    redirect(toastErrorPath("/shipments/new", "Customer not found."));
+  }
 
   const today = new Date().toISOString().slice(0, 10);
   const { data: openInvoices } = await supabase
@@ -253,15 +260,18 @@ export async function createShipment(formData: FormData) {
   const pastDue = pastDueBalanceFromInvoices(openInvoices ?? [], today);
   const onCreditHold = isOnCreditHold(pastDue);
   if (onCreditHold && profile.role !== "manager") {
-    throw new Error(creditHoldMessage(customer.name, pastDue));
+    redirect(toastErrorPath("/shipments/new", creditHoldMessage(customer.name, pastDue)));
   }
 
   const creditLimit = Number(customer.credit_limit ?? 0);
   const projected = openAr + customerRate;
   if (creditLimit > 0 && projected > creditLimit) {
     if (profile.role !== "manager") {
-      throw new Error(
-        `Credit limit exceeded for ${customer.name}: open AR ${openAr.toFixed(0)} + rate ${customerRate.toFixed(0)} > limit ${creditLimit.toFixed(0)}. Ask a manager to book this load.`,
+      redirect(
+        toastErrorPath(
+          "/shipments/new",
+          `Credit limit exceeded for ${customer.name}: open AR ${openAr.toFixed(0)} + rate ${customerRate.toFixed(0)} > limit ${creditLimit.toFixed(0)}. Ask a manager to book this load.`,
+        ),
       );
     }
   }
@@ -272,19 +282,24 @@ export async function createShipment(formData: FormData) {
       .select("*")
       .eq("id", contractId)
       .single();
-    if (!contract) throw new Error("Contract not found");
+    if (!contract) {
+      redirect(toastErrorPath("/shipments/new", "Contract not found."));
+    }
     if (contract.status !== "active") {
-      throw new Error("Only active contracts can be used on new shipments.");
+      redirect(toastErrorPath("/shipments/new", "Only active contracts can be used on new shipments."));
     }
     if (contract.customer_id !== customerId) {
-      throw new Error("Selected contract does not belong to this customer.");
+      redirect(toastErrorPath("/shipments/new", "Selected contract does not belong to this customer."));
     }
     const outside =
       isDateOutsideContractWindow(pickupDate, contract.start_date, contract.end_date) ||
       isDateOutsideContractWindow(deliveryDate, contract.start_date, contract.end_date);
     if (outside && formData.get("confirm_outside_contract_dates") !== "on") {
-      throw new Error(
-        "Pickup/delivery is outside the contract window. Confirm the override on the form, or adjust dates.",
+      redirect(
+        toastErrorPath(
+          "/shipments/new",
+          "Pickup/delivery is outside the contract window. Confirm the override on the form, or adjust dates.",
+        ),
       );
     }
   }

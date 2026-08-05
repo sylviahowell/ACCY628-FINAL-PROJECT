@@ -13,12 +13,6 @@ import { CustomerFriendlyStatusCard } from "@/components/ShipmentHealthCard";
 import { ProfitabilityHeatmap } from "@/components/ProfitabilityHeatmap";
 import { ShipmentMapLazy } from "@/components/ShipmentMapLazy";
 import { StoryActionChips } from "@/components/StoryActionChips";
-import { DecideNowQueue } from "@/components/DecideNowQueue";
-import {
-  ManagerOverridesLog,
-  approvalOverrideSummary,
-  type OverrideLogRow,
-} from "@/components/ManagerOverridesLog";
 import { HorizontalBars, MonthlyBars, StatusPie } from "@/components/Charts";
 import { getCurrentProfile } from "@/lib/actions/auth";
 import { bucketByMonth } from "@/lib/analytics";
@@ -59,8 +53,6 @@ export default async function DashboardPage() {
     { data: payments },
     { data: disputes },
     { data: approvals },
-    { data: decidedApprovals },
-    { data: creditOverrideNotes },
     { data: pods },
     { data: charges },
     { data: contracts },
@@ -86,30 +78,6 @@ export default async function DashboardPage() {
       .from("disputes")
       .select("id, reason, amount_disputed, status, invoice_id, customer_id"),
     supabase.from("approval_requests").select("*").eq("status", "pending"),
-    profile.role === "manager"
-      ? supabase
-          .from("approval_requests")
-          .select("*")
-          .in("status", ["approved", "rejected"])
-          .order("reviewed_at", { ascending: false })
-          .limit(10)
-      : Promise.resolve({ data: [] as Record<string, unknown>[] }),
-    profile.role === "manager"
-      ? supabase
-          .from("shipment_status_updates")
-          .select("id, shipment_id, note, created_at, changed_by")
-          .ilike("note", "Credit override:%")
-          .order("created_at", { ascending: false })
-          .limit(10)
-      : Promise.resolve({
-          data: [] as {
-            id: string;
-            shipment_id: string;
-            note: string | null;
-            created_at: string;
-            changed_by: string | null;
-          }[],
-        }),
     supabase
       .from("proof_of_delivery")
       .select("id, shipment_id, delivered_at, signed_by"),
@@ -459,93 +427,6 @@ export default async function DashboardPage() {
         };
       });
 
-    const decidedList = (decidedApprovals ?? []) as {
-      id: string;
-      request_type: string;
-      entity_type: string;
-      entity_id: string;
-      amount: number;
-      reason: string | null;
-      status: string;
-      reviewed_by: string | null;
-      reviewed_at: string | null;
-    }[];
-    const creditList = (creditOverrideNotes ?? []) as {
-      id: string;
-      shipment_id: string;
-      note: string | null;
-      created_at: string;
-      changed_by: string | null;
-    }[];
-
-    const actorIds = [
-      ...decidedList.map((a) => a.reviewed_by).filter(Boolean),
-      ...creditList.map((c) => c.changed_by).filter(Boolean),
-    ] as string[];
-    const uniqueActorIds = [...new Set(actorIds)];
-    const actorName = new Map<string, string>();
-    if (uniqueActorIds.length) {
-      const { data: actors } = await supabase
-        .from("profiles")
-        .select("id, full_name")
-        .in("id", uniqueActorIds);
-      for (const p of actors ?? []) {
-        actorName.set(p.id, p.full_name ?? "Manager");
-      }
-    }
-
-    const overrideRows: OverrideLogRow[] = [
-      ...decidedList.map((a) => {
-        let loadNumber: string | null = null;
-        let href: string | null = `/approvals?focus=${encodeURIComponent(a.id)}`;
-        if (a.entity_type === "shipment") {
-          const ship = shipList.find((s) => s.id === a.entity_id);
-          loadNumber = ship?.load_number ?? null;
-          if (ship) href = `/shipments/${ship.id}`;
-        } else if (a.entity_type === "shipment_charge") {
-          const shipId = chargeList.find((c) => c.id === a.entity_id)?.shipment_id;
-          const ship = shipId ? shipList.find((s) => s.id === shipId) : undefined;
-          loadNumber = ship?.load_number ?? null;
-          if (ship) href = `/shipments/${ship.id}`;
-        }
-        return {
-          id: `appr-${a.id}`,
-          at: a.reviewed_at ?? "",
-          actor: a.reviewed_by
-            ? (actorName.get(a.reviewed_by) ?? "Manager")
-            : "Manager",
-          kind: "approval" as const,
-          summary: approvalOverrideSummary({
-            status: a.status,
-            requestType: a.request_type,
-            amount: Number(a.amount),
-            loadNumber,
-          }),
-          detail: a.reason,
-          href,
-        };
-      }),
-      ...creditList.map((c) => {
-        const ship = shipList.find((s) => s.id === c.shipment_id);
-        return {
-          id: `cred-${c.id}`,
-          at: c.created_at,
-          actor: c.changed_by
-            ? (actorName.get(c.changed_by) ?? "Manager")
-            : "Manager",
-          kind: "credit" as const,
-          summary: ship
-            ? `Booked over credit limit · ${ship.load_number}`
-            : "Booked over credit limit",
-          detail: c.note,
-          href: ship ? `/shipments/${ship.id}` : null,
-        };
-      }),
-    ]
-      .filter((r) => r.at)
-      .sort((a, b) => new Date(b.at).getTime() - new Date(a.at).getTime())
-      .slice(0, 10);
-
     return (
       <div className="space-y-6">
         <Header
@@ -593,47 +474,52 @@ export default async function DashboardPage() {
           today={brief.today}
           attention={brief.attention}
         />
-        <DecideNowQueue
-          approvals={(approvals ?? []).map((a) => {
-            let loadNumber: string | null = null;
-            if (a.entity_type === "shipment") {
-              loadNumber =
-                shipList.find((s) => s.id === a.entity_id)?.load_number ?? null;
-            } else if (a.entity_type === "shipment_charge") {
-              const shipId = chargeList.find((c) => c.id === a.entity_id)?.shipment_id;
-              loadNumber = shipId
-                ? (shipList.find((s) => s.id === shipId)?.load_number ?? null)
-                : null;
-            }
-            return {
-              id: a.id as string,
-              request_type: String(a.request_type),
-              amount: Number(a.amount),
-              reason: (a.reason as string | null) ?? null,
-              loadNumber,
-            };
-          })}
-          openItems={[
-            (() => {
-              const loss = shipList.find((s) => s.load_number === "LD-2011-LOSS");
-              return {
-                id: "open-loss",
-                badge: "loss load",
-                title: "LD-2011-LOSS",
-                detail: "Negative-margin / loss story — review before next book",
-                href: loss ? `/shipments/${loss.id}` : "/shipments?focus=LD-2011-LOSS",
-              };
-            })(),
-            {
-              id: "open-cash",
-              badge: "cash at risk",
-              title: "INV-EDGE-OVERDUE",
-              detail: "Past-due invoice — collections exposure",
-              href: "/ar?filter=cash-at-risk&focus=INV-EDGE-OVERDUE",
-            },
-          ]}
-        />
-        <ManagerOverridesLog rows={overrideRows} />
+        <Panel
+          title={`Pending approvals (${(approvals ?? []).length})`}
+        >
+          {(approvals ?? []).length === 0 ? (
+            <p className="text-sm opacity-70">No pending approvals.</p>
+          ) : (
+            <ul className="space-y-3">
+              {(approvals ?? []).slice(0, 4).map((a) => {
+                let focusLoad: string | null = null;
+                if (a.entity_type === "shipment") {
+                  focusLoad = shipList.find((s) => s.id === a.entity_id)?.load_number ?? null;
+                } else if (a.entity_type === "shipment_charge") {
+                  const shipId = chargeList.find((c) => c.id === a.entity_id)?.shipment_id;
+                  focusLoad = shipId
+                    ? (shipList.find((s) => s.id === shipId)?.load_number ?? null)
+                    : null;
+                }
+                const reviewHref = focusLoad
+                  ? `/approvals?type=${encodeURIComponent(a.request_type)}&focus=${encodeURIComponent(focusLoad)}`
+                  : `/approvals?type=${encodeURIComponent(a.request_type)}`;
+                return (
+                  <li
+                    key={a.id}
+                    className="flex flex-wrap items-center justify-between gap-3 rounded-box border border-warning/40 bg-warning/10 p-3"
+                  >
+                    <div>
+                      <p className="font-medium capitalize">
+                        {a.request_type}
+                        {focusLoad ? ` · ${focusLoad}` : ""} · {money(a.amount)}
+                      </p>
+                      <p className="text-sm opacity-70">{sanitizeDemoText(a.reason)}</p>
+                    </div>
+                    <Link href={reviewHref} className="btn btn-warning btn-xs">
+                      Review
+                    </Link>
+                  </li>
+                );
+              })}
+            </ul>
+          )}
+          {(approvals ?? []).length > 0 ? (
+            <Link href="/approvals" className="btn btn-ghost btn-sm mt-3">
+              Open Approval Inbox
+            </Link>
+          ) : null}
+        </Panel>
         <KpiRibbon items={kpis} />
         <ProfitabilityHeatmap rows={heatRows} />
         <ShipmentMapLazy shipments={mapShipments} today={today} />

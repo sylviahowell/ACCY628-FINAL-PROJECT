@@ -1,6 +1,6 @@
 import { redirect } from "next/navigation";
 import { RiskCreditWorkspace } from "@/components/RiskCreditWorkspace";
-import { getCurrentProfile } from "@/lib/actions/auth";
+import { requirePathAccess } from "@/lib/authz";
 import {
   type CarrierRiskRow,
   type CustomerCreditRow,
@@ -12,8 +12,7 @@ import {
 import { createClient } from "@/lib/supabase/server";
 
 export default async function RiskCreditPage() {
-  const profile = await getCurrentProfile();
-  if (!profile) redirect("/login");
+  const profile = await requirePathAccess("/risk");
   if (profile.role !== "manager") redirect("/dashboard");
 
   const supabase = await createClient();

@@ -1,13 +1,12 @@
 import { redirect } from "next/navigation";
 import { EmptyState } from "@/components/EmptyState";
-import { getCurrentProfile } from "@/lib/actions/auth";
+import { requirePathAccess } from "@/lib/authz";
 import { createCustomer } from "@/lib/actions/freight";
 import { createClient } from "@/lib/supabase/server";
 import { isOperations, money } from "@/lib/types";
 
 export default async function CustomersPage() {
-  const profile = await getCurrentProfile();
-  if (!profile) redirect("/login");
+  const profile = await requirePathAccess("/customers");
   if (!isOperations(profile.role)) redirect("/dashboard");
 
   const supabase = await createClient();

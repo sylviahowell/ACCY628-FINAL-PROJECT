@@ -1,6 +1,7 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
+import { headers } from "next/headers";
 import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
 import {
@@ -10,6 +11,13 @@ import {
 import { isDemoMode, setDemoModeCookie } from "@/lib/demo-mode-server";
 import { DEMO_PASSWORD, DEMO_USERS, type Profile, type UserRole } from "@/lib/types";
 import { AUTH_FETCH_TIMEOUT_MS, withTimeout } from "@/lib/with-timeout";
+import { clientKeyFromHeaders, rateLimit } from "@/lib/rate-limit";
+import { logEvent } from "@/lib/log-event";
+
+function demoEnabled() {
+  // Default on for local/course pitch; set DEMO_ENABLED=false to disable open demo entry.
+  return process.env.DEMO_ENABLED !== "false";
+}
 
 function isMissingDemoUserError(message: string): boolean {
   const m = message.toLowerCase();
@@ -142,15 +150,24 @@ export async function signUp(formData: FormData) {
 }
 
 export async function signIn(formData: FormData) {
+  const h = await headers();
+  const limited = rateLimit(clientKeyFromHeaders(h, "signin"), 20, 60_000);
+  if (!limited.ok) {
+    logEvent({ level: "warn", action: "signIn", error: "rate_limited" });
+    throw new Error("Too many sign-in attempts. Please wait a minute and try again.");
+  }
+
   const email = String(formData.get("email") || "").trim();
   const password = String(formData.get("password") || "");
 
-  // Normal users must never inherit Demo Mode UI / switching
   await setDemoModeCookie(false);
 
   const supabase = await createClient();
   const { error } = await supabase.auth.signInWithPassword({ email, password });
-  if (error) throw new Error(error.message);
+  if (error) {
+    logEvent({ level: "warn", action: "signIn", error: error.message });
+    throw new Error(error.message);
+  }
   redirect("/dashboard");
 }
 
@@ -164,8 +181,20 @@ export async function loginAsDemo(email: string, _formData?: FormData) {
 /**
  * Enter Demo Mode from an Explore Demo Portals card.
  * Credentials stay server-side; the visitor never enters a password.
+ * Disable with DEMO_ENABLED=false in the environment.
  */
 export async function enterDemoMode(role: UserRole, _formData?: FormData) {
+  if (!demoEnabled()) {
+    throw new Error("Demo portals are disabled in this environment.");
+  }
+
+  const h = await headers();
+  const limited = rateLimit(clientKeyFromHeaders(h, "demo"), 30, 60_000);
+  if (!limited.ok) {
+    logEvent({ level: "warn", action: "enterDemoMode", error: "rate_limited" });
+    throw new Error("Too many demo launches. Please wait a minute and try again.");
+  }
+
   if (!DEMO_USERS.some((u) => u.role === role)) {
     throw new Error("Unknown demo role");
   }

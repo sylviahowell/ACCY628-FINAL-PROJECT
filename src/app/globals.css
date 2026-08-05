@@ -24,7 +24,7 @@ body {
 
 /* Full-page scenic truck/mountain background — one photo, cover, no blur */
 .login-scenic-bg {
-  background-image: url("/images/freightflow-truck-background.png");
+  background-image: url("/images/rowanlane-truck-background.png");
   background-repeat: no-repeat;
   background-size: cover;
   /* 1920×1080 / large desktop: cab lower-left, trailer toward center, sky upper-left */

@@ -1,0 +1,20 @@
+-- Snapshot of public RLS policies as of 2026-08-05 (ACCY628-Final-Project).
+-- Source of truth after hardening: live DB + migrations in this folder.
+-- Do not re-apply this file blindly; use it for review/rebuild reference.
+
+-- Key policies (post-hardening):
+-- profiles: select self|staff; update self with role = current_role() + trigger protect_profile_privileged_columns
+-- shipments: staff ALL; customer SELECT by customer_id; carrier SELECT/UPDATE by carrier_id
+-- invoices/payments/contracts/customers/carriers: staff ALL + tenant SELECT
+-- proof_of_delivery: staff ALL; carrier insert/select assigned; customer select own
+-- shipment_charges: staff ALL; carrier insert assigned; related SELECT
+-- shipment_status_updates / status_events: scoped SELECT (not true for all authenticated)
+-- app_settings: read authenticated; update manager
+-- disputes: customer insert/select; staff ALL
+-- approval_requests: staff ALL (carrier allowed in WITH CHECK for insert paths)
+
+-- Rebuild notes:
+-- 1. Apply foundation schema (see supabase/README.md / MCP history)
+-- 2. Apply story seed if needed
+-- 3. Apply migrations/*.sql in filename order
+-- 4. Re-run Supabase security advisors after policy changes

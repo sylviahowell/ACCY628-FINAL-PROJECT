@@ -82,7 +82,7 @@ async function main() {
   // 2) Auth + profile for broker
   let broker;
   try {
-    broker = await ensureUser("broker@freightflow.example", {
+    broker = await ensureUser("broker@rowanlane.example", {
       full_name: "Blake Broker",
       role: "broker",
     });
@@ -167,7 +167,7 @@ async function main() {
   // 5) Carrier auth + update
   let carrier;
   try {
-    carrier = await ensureUser("carrier@freightflow.example", {
+    carrier = await ensureUser("carrier@rowanlane.example", {
       full_name: "Chris Carrier",
       role: "carrier",
       carrier_id: carrierId,
@@ -236,7 +236,7 @@ async function main() {
 
   let billing;
   try {
-    billing = await ensureUser("billing@freightflow.example", {
+    billing = await ensureUser("billing@rowanlane.example", {
       full_name: "Bailey Billing",
       role: "billing",
     });
@@ -300,7 +300,7 @@ async function main() {
 
   // 8) Customer can read own invoices
   try {
-    const customer = await ensureUser("customer@freightflow.example", {
+    const customer = await ensureUser("customer@rowanlane.example", {
       full_name: "Casey Customer",
       role: "customer",
       customer_id: customerId,
@@ -359,7 +359,7 @@ async function main() {
 
   // 10) Manager auth
   try {
-    const manager = await ensureUser("manager@freightflow.example", {
+    const manager = await ensureUser("manager@rowanlane.example", {
       full_name: "Morgan Manager",
       role: "manager",
     });

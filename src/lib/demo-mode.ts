@@ -1,11 +1,11 @@
 import { DEMO_USERS, type UserRole } from "@/lib/types";
 
 /** Cookie flag for Demo Mode (server-readable). Not production authorization. */
-export const DEMO_MODE_COOKIE = "freightflow_demo_mode";
+export const DEMO_MODE_COOKIE = "rowanlane_demo_mode";
 
 /** sessionStorage keys mirrored on the client for Demo Mode UI. */
-export const DEMO_MODE_STORAGE_KEY = "freightflow_demo_mode";
-export const DEMO_ROLE_STORAGE_KEY = "freightflow_demo_role";
+export const DEMO_MODE_STORAGE_KEY = "rowanlane_demo_mode";
+export const DEMO_ROLE_STORAGE_KEY = "rowanlane_demo_role";
 
 export const DEMO_ROLE_OPTIONS: {
   role: UserRole;

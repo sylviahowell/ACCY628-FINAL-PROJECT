@@ -1,5 +1,4 @@
 import Link from "next/link";
-import { redirect } from "next/navigation";
 import {
   KpiRibbon,
   MorningBriefCard,
@@ -14,7 +13,7 @@ import { ProfitabilityHeatmap } from "@/components/ProfitabilityHeatmap";
 import { ShipmentMapLazy } from "@/components/ShipmentMapLazy";
 import { StoryActionChips } from "@/components/StoryActionChips";
 import { HorizontalBars, MonthlyBars, StatusPie } from "@/components/Charts";
-import { getCurrentProfile } from "@/lib/actions/auth";
+import { requirePathAccess } from "@/lib/authz";
 import { bucketByMonth } from "@/lib/analytics";
 import { buildBrokerTasks, brokerTaskStats } from "@/lib/broker-tasks";
 import { buildCarrierScorecards } from "@/lib/carrier-scorecard";
@@ -38,8 +37,7 @@ import { sanitizeDemoText } from "@/lib/display-text";
 import { money, statusBadge } from "@/lib/types";
 
 export default async function DashboardPage() {
-  const profile = await getCurrentProfile();
-  if (!profile) redirect("/login");
+  const profile = await requirePathAccess("/dashboard");
 
   const supabase = await createClient();
   const today = new Date().toISOString().slice(0, 10);

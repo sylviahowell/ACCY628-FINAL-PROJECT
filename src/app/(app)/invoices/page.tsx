@@ -3,7 +3,7 @@ import { redirect } from "next/navigation";
 import { EmptyState } from "@/components/EmptyState";
 import { FilterBanner, resolveSearchParams } from "@/components/FilterBanner";
 import { InvoicesTriage, type InvoiceCardMeta } from "@/components/InvoicesTriage";
-import { getCurrentProfile } from "@/lib/actions/auth";
+import { requirePathAccess } from "@/lib/authz";
 import { generateInvoice, openDispute } from "@/lib/actions/freight";
 import { filterInvoices, invoiceFilterLabel } from "@/lib/list-filters";
 import { createClient } from "@/lib/supabase/server";
@@ -27,8 +27,7 @@ export default async function InvoicesPage({
     | Promise<Record<string, string | string[] | undefined>>
     | Record<string, string | string[] | undefined>;
 }) {
-  const profile = await getCurrentProfile();
-  if (!profile) redirect("/login");
+  const profile = await requirePathAccess("/invoices");
   if (profile.role === "carrier" || profile.role === "broker") redirect("/dashboard");
 
   const params = await resolveSearchParams(searchParams);

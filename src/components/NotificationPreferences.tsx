@@ -3,7 +3,7 @@
 import { useHydrated, useLocalObject, useSavedFlash } from "@/lib/local-prefs";
 import type { UserRole } from "@/lib/types";
 
-export const NOTIFY_STORAGE_KEY = "freightflow-notify-prefs";
+export const NOTIFY_STORAGE_KEY = "rowanlane-notify-prefs";
 
 type NotifyKey =
   | "approvals"
@@ -87,7 +87,9 @@ export function NotificationPreferences({ role }: { role: UserRole }) {
         ))}
       </ul>
       <p className="flex flex-wrap items-center gap-2 text-xs">
-        <span className="opacity-60">Saved on this device for the demo.</span>
+        <span className="opacity-60">
+          Demo mock only — stored in this browser; no outbound email or SMS.
+        </span>
         <span
           aria-live="polite"
           className={`text-success transition-opacity ${flashed ? "opacity-100" : "opacity-0"}`}

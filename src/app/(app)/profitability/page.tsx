@@ -1,7 +1,7 @@
 import { Suspense } from "react";
 import { ProfitabilityHeatmap } from "@/components/ProfitabilityHeatmap";
 import { FocusScroll } from "@/components/FocusScroll";
-import { getCurrentProfile } from "@/lib/actions/auth";
+import { requirePathAccess } from "@/lib/authz";
 import { createClient } from "@/lib/supabase/server";
 import { money } from "@/lib/types";
 import { HorizontalBars, MonthlyBars } from "@/components/Charts";
@@ -19,8 +19,7 @@ export default async function ProfitabilityPage({
 }: {
   searchParams: Promise<{ band?: string; dim?: string; focus?: string }>;
 }) {
-  const profile = await getCurrentProfile();
-  if (!profile) redirect("/login");
+  const profile = await requirePathAccess("/profitability");
   if (profile.role !== "manager" && profile.role !== "billing") redirect("/dashboard");
 
   const params = await searchParams;

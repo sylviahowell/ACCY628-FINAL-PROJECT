@@ -3,7 +3,7 @@
 import { useEffect } from "react";
 import { useHydrated, useLocalString } from "@/lib/local-prefs";
 
-export const APPEARANCE_STORAGE_KEY = "freightflow-theme";
+export const APPEARANCE_STORAGE_KEY = "rowanlane-theme";
 export const DEFAULT_APPEARANCE = "corporate";
 
 /** daisyUI theme ids → labels shown as Application Theme options */

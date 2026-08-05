@@ -3,7 +3,7 @@
 import { useState, type FormEvent } from "react";
 import { useHydrated, useLocalObject, useSavedFlash } from "@/lib/local-prefs";
 
-export const BROKER_OPS_STORAGE_KEY = "freightflow-broker-ops-prefs";
+export const BROKER_OPS_STORAGE_KEY = "rowanlane-broker-ops-prefs";
 
 type BrokerOpsPrefs = {
   defaultBookingNotes: string;

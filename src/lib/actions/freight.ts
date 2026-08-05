@@ -5,16 +5,45 @@ import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
 import { getCurrentProfile } from "@/lib/actions/auth";
 import { isOperations, type ShipmentStatus } from "@/lib/types";
-import { canManageBilling } from "@/lib/roles";
+import { canManageBilling, canManageOperations } from "@/lib/roles";
 import {
   dueDateFromTerms,
   fuelSurchargeAmount,
   isDateOutsideContractWindow,
 } from "@/lib/contract-terms";
+import { formString, moneyAmount, nonEmptyString, parseForm, uuidSchema } from "@/lib/action-schema";
+import { logEvent } from "@/lib/log-event";
+import { insuranceRiskStatus } from "@/lib/risk-credit";
+import { z } from "zod";
+
+/** Hard-block assigning a carrier whose insurance certificate is expired. */
+async function assertCarrierInsuranceCurrent(carrierId: string) {
+  const supabase = await createClient();
+  const { data: carrier } = await supabase
+    .from("carriers")
+    .select("id, name, insurance_expiration")
+    .eq("id", carrierId)
+    .maybeSingle();
+  if (!carrier) throw new Error("Carrier not found.");
+  const today = new Date().toISOString().slice(0, 10);
+  const { status } = insuranceRiskStatus(carrier.insurance_expiration ?? null, today);
+  if (status === "expired") {
+    throw new Error(
+      `Cannot assign ${carrier.name}: insurance expired${
+        carrier.insurance_expiration ? ` on ${carrier.insurance_expiration}` : ""
+      }. Update the certificate before booking this carrier.`,
+    );
+  }
+}
 
 function toastPath(path: string, message: string) {
   const join = path.includes("?") ? "&" : "?";
   return `${path}${join}toast=${encodeURIComponent(message)}`;
+}
+
+function toastErrorPath(path: string, message: string) {
+  const join = path.includes("?") ? "&" : "?";
+  return `${path}${join}toastError=${encodeURIComponent(message)}`;
 }
 async function logStatus(
   shipmentId: string,
@@ -191,6 +220,10 @@ export async function createShipment(formData: FormData) {
   const status: ShipmentStatus = carrierId ? "assigned" : "scheduled";
   const supabase = await createClient();
 
+  if (carrierId) {
+    await assertCarrierInsuranceCurrent(carrierId);
+  }
+
   // Credit limit control: open AR + this rate cannot exceed customer credit
   const { data: customer } = await supabase
     .from("customers")
@@ -322,6 +355,10 @@ export async function assignCarrier(formData: FormData) {
     throw new Error("Cannot reassign a delivered, completed, or cancelled load.");
   }
 
+  if (carrierId) {
+    await assertCarrierInsuranceCurrent(carrierId);
+  }
+
   const patch: {
     carrier_id: string | null;
     status?: string;
@@ -405,38 +442,90 @@ export async function uploadPod(formData: FormData) {
   if (!profile || !["carrier", "manager", "broker"].includes(profile.role)) {
     throw new Error("Not allowed to upload POD.");
   }
-  const shipmentId = String(formData.get("shipment_id") || "");
+
+  const input = parseForm(
+    z.object({
+      shipment_id: uuidSchema,
+      file_url: z.string().trim().optional(),
+      notes: z.string().trim().max(2000).optional(),
+      signed_by: z.string().trim().max(200).optional(),
+    }),
+    {
+      shipment_id: formString(formData, "shipment_id"),
+      file_url: formString(formData, "file_url") || undefined,
+      notes: formString(formData, "notes") || undefined,
+      signed_by: formString(formData, "signed_by") || undefined,
+    },
+  );
+
   const supabase = await createClient();
+  const { data: shipment, error: shipErr } = await supabase
+    .from("shipments")
+    .select("id, carrier_id")
+    .eq("id", input.shipment_id)
+    .maybeSingle();
+  if (shipErr) throw new Error(shipErr.message);
+  if (!shipment) throw new Error("Shipment not found.");
+
+  if (profile.role === "carrier") {
+    if (!profile.carrier_id || shipment.carrier_id !== profile.carrier_id) {
+      logEvent({
+        level: "warn",
+        action: "uploadPod",
+        userId: profile.id,
+        role: profile.role,
+        error: "carrier_not_assigned",
+      });
+      redirect(
+        toastErrorPath(
+          `/shipments/${input.shipment_id}`,
+          "You can only upload POD for loads assigned to your carrier.",
+        ),
+      );
+    }
+  }
+
   const { error } = await supabase.from("proof_of_delivery").insert({
-    shipment_id: shipmentId,
+    shipment_id: input.shipment_id,
     uploaded_by: profile.id,
-    file_url:
-      String(formData.get("file_url") || "").trim() ||
-      "https://docs.freightflow.com/pod/signed-bol.pdf",
-    notes: String(formData.get("notes") || "").trim() || null,
-    signed_by: String(formData.get("signed_by") || "").trim() || null,
+    file_url: input.file_url || "https://docs.rowanlane.com/pod/signed-bol.pdf",
+    notes: input.notes || null,
+    signed_by: input.signed_by || null,
     delivered_at: new Date().toISOString(),
   });
   if (error) throw new Error(error.message);
 
-  await updateShipmentStatus(shipmentId, "delivered");
+  await updateShipmentStatus(input.shipment_id, "delivered");
   revalidatePath("/", "layout");
-  revalidatePath(`/shipments/${shipmentId}`);
+  revalidatePath(`/shipments/${input.shipment_id}`);
   revalidatePath("/shipments");
   revalidatePath("/invoices");
   revalidatePath("/documents");
   revalidatePath("/dashboard");
-  // Query param forces a real navigation so the POD card refreshes after same-route action.
-  redirect(toastPath(`/shipments/${shipmentId}?pod=1`, "Proof of delivery saved"));
+  redirect(toastPath(`/shipments/${input.shipment_id}?pod=1`, "Proof of delivery saved"));
 }
 
 export async function requestAccessorial(formData: FormData) {
   const profile = await getCurrentProfile();
-  if (!profile) throw new Error("Not signed in");
+  if (!profile || !canManageOperations(profile.role)) {
+    throw new Error("Only broker or manager operations can request accessorials.");
+  }
 
-  const shipmentId = String(formData.get("shipment_id") || "");
-  const amount = Number(formData.get("amount") || 0);
-  const description = String(formData.get("description") || "").trim();
+  const input = parseForm(
+    z.object({
+      shipment_id: uuidSchema,
+      amount: moneyAmount,
+      description: nonEmptyString("Description", 500),
+      payable_to_carrier: z.boolean(),
+    }),
+    {
+      shipment_id: formString(formData, "shipment_id"),
+      amount: formData.get("amount"),
+      description: formString(formData, "description"),
+      payable_to_carrier: formData.get("payable_to_carrier") === "on",
+    },
+  );
+
   const supabase = await createClient();
 
   const { data: settings } = await supabase
@@ -445,17 +534,17 @@ export async function requestAccessorial(formData: FormData) {
     .eq("id", 1)
     .maybeSingle();
   const threshold = Number(settings?.accessorial_approval_threshold ?? 250);
-  const needsApproval = amount > threshold && profile.role !== "manager";
+  const needsApproval = input.amount > threshold && profile.role !== "manager";
 
   const { data: charge, error } = await supabase
     .from("shipment_charges")
     .insert({
-      shipment_id: shipmentId,
+      shipment_id: input.shipment_id,
       charge_type: "accessorial",
-      description,
-      amount,
+      description: input.description,
+      amount: input.amount,
       billable_to_customer: true,
-      payable_to_carrier: formData.get("payable_to_carrier") === "on",
+      payable_to_carrier: input.payable_to_carrier,
       approval_status: needsApproval ? "pending" : "approved",
       requested_by: profile.id,
     })
@@ -468,14 +557,23 @@ export async function requestAccessorial(formData: FormData) {
       entity_type: "shipment_charge",
       entity_id: charge.id,
       request_type: "accessorial",
-      amount,
-      reason: description,
+      amount: input.amount,
+      reason: input.description,
       requested_by: profile.id,
       status: "pending",
     });
   }
 
-  revalidatePath(`/shipments/${shipmentId}`);
+  revalidatePath(`/shipments/${input.shipment_id}`);
+  revalidatePath("/approvals");
+  revalidatePath("/warnings");
+  revalidatePath("/dashboard");
+  redirect(
+    toastPath(
+      `/shipments/${input.shipment_id}`,
+      needsApproval ? "Accessorial submitted for approval" : "Accessorial added",
+    ),
+  );
 }
 
 export async function generateInvoice(shipmentId: string, _formData?: FormData) {
@@ -621,7 +719,9 @@ export async function recordPayment(formData: FormData) {
     .single();
   if (!invoice) throw new Error("Invoice not found");
   if (invoice.status === "disputed") {
-    throw new Error("Resolve the dispute before applying payment to paid-in-full.");
+    throw new Error(
+      "Cannot record any payment while this invoice is disputed. Resolve the dispute first.",
+    );
   }
 
   const { error } = await supabase.from("payments").insert({
@@ -652,21 +752,69 @@ export async function recordPayment(formData: FormData) {
 
 export async function openDispute(formData: FormData) {
   const profile = await getCurrentProfile();
-  // Shippers open disputes; billing/managers resolve them elsewhere.
   if (!profile || profile.role !== "customer") {
     throw new Error("Only shippers can open billing disputes.");
   }
   if (!profile.customer_id) {
     throw new Error("No customer account linked to this profile.");
   }
+
+  const invoiceRaw = formString(formData, "invoice_id");
+  const shipmentRaw = formString(formData, "shipment_id");
+  const input = parseForm(
+    z.object({
+      reason: nonEmptyString("Dispute reason", 1000),
+      amount_disputed: moneyAmount,
+    }),
+    {
+      reason: formString(formData, "reason"),
+      amount_disputed: formData.get("amount_disputed"),
+    },
+  );
+  const invoiceId = invoiceRaw
+    ? parseForm(z.object({ id: uuidSchema }), { id: invoiceRaw }).id
+    : null;
+  const shipmentId = shipmentRaw
+    ? parseForm(z.object({ id: uuidSchema }), { id: shipmentRaw }).id
+    : null;
+
   const supabase = await createClient();
-  const invoiceId = String(formData.get("invoice_id") || "") || null;
+
+  if (invoiceId) {
+    const { data: invoice } = await supabase
+      .from("invoices")
+      .select("id, customer_id")
+      .eq("id", invoiceId)
+      .maybeSingle();
+    if (!invoice || invoice.customer_id !== profile.customer_id) {
+      logEvent({
+        level: "warn",
+        action: "openDispute",
+        userId: profile.id,
+        role: profile.role,
+        error: "invoice_tenant_mismatch",
+      });
+      redirect(toastErrorPath("/invoices", "That invoice is not on your account."));
+    }
+  }
+
+  if (shipmentId) {
+    const { data: shipment } = await supabase
+      .from("shipments")
+      .select("id, customer_id")
+      .eq("id", shipmentId)
+      .maybeSingle();
+    if (!shipment || shipment.customer_id !== profile.customer_id) {
+      redirect(toastErrorPath("/invoices", "That shipment is not on your account."));
+    }
+  }
+
   const { error } = await supabase.from("disputes").insert({
     invoice_id: invoiceId,
-    shipment_id: String(formData.get("shipment_id") || "") || null,
+    shipment_id: shipmentId,
     customer_id: profile.customer_id,
-    reason: String(formData.get("reason") || "").trim(),
-    amount_disputed: Number(formData.get("amount_disputed") || 0),
+    reason: input.reason,
+    amount_disputed: input.amount_disputed,
     opened_by: profile.id,
     status: "open",
   });
@@ -677,6 +825,7 @@ export async function openDispute(formData: FormData) {
   revalidatePath("/invoices");
   revalidatePath("/disputes");
   revalidatePath("/dashboard");
+  redirect(toastPath("/invoices", "Dispute submitted"));
 }
 
 /** Close a billing dispute and return the invoice to a collectible status. */

@@ -1,9 +1,8 @@
 import Link from "next/link";
-import { redirect } from "next/navigation";
 import { EmptyState } from "@/components/EmptyState";
 import { FilterBanner, resolveSearchParams } from "@/components/FilterBanner";
 import { ShipmentsTriage, type ShipmentListRow } from "@/components/ShipmentsTriage";
-import { getCurrentProfile } from "@/lib/actions/auth";
+import { requirePathAccess } from "@/lib/authz";
 import { filterShipments, shipmentFilterLabel } from "@/lib/list-filters";
 import { createClient } from "@/lib/supabase/server";
 import { isOperations, money } from "@/lib/types";
@@ -25,8 +24,7 @@ export default async function ShipmentsPage({
     | Promise<Record<string, string | string[] | undefined>>
     | Record<string, string | string[] | undefined>;
 }) {
-  const profile = await getCurrentProfile();
-  if (!profile) redirect("/login");
+  const profile = await requirePathAccess("/shipments");
 
   const params = await resolveSearchParams(searchParams);
   const filter = resolveShipmentFilter(params);

@@ -9,7 +9,7 @@ import Image from "next/image";
 export function RouteMapGraphic({ className = "" }: { className?: string }) {
   return (
     <Image
-      src="/images/freightflow-us-route-map.png"
+      src="/images/rowanlane-us-route-map.png"
       alt=""
       width={640}
       height={360}

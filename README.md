@@ -34,11 +34,11 @@ Password for all demo users: `FreightDemo2026!`
 
 | Email | Role | Linked org |
 |-------|------|------------|
-| manager@freightflow.example | Executive / Manager | — |
-| broker@freightflow.example | Broker Operations | — |
-| billing@freightflow.example | Billing & Accounting | — |
-| customer@freightflow.example | Shipper (Customer) | Midwest Retail Group |
-| carrier@freightflow.example | Carrier | Prairie Haulers LLC |
+| manager@rowanlane.example | Executive / Manager | — |
+| broker@rowanlane.example | Broker Operations | — |
+| billing@rowanlane.example | Billing & Accounting | — |
+| customer@rowanlane.example | Shipper (Customer) | Midwest Retail Group |
+| carrier@rowanlane.example | Carrier | Prairie Haulers LLC |
 
 Appearance (theme) lives only under **Settings** after login.
 
@@ -68,6 +68,16 @@ With the app running locally:
 npm run smoke
 ```
 Optional: `SMOKE_BASE_URL=http://localhost:3001 npm run smoke` if your dev server is not on 3000.
+
+Health probe (while the app is running): `GET /api/health`
+
+## Dependability & governance
+See [docs/DEPENDABILITY.md](docs/DEPENDABILITY.md) for the pitch framing on security, reliability, scalability, observability, and governance—including RLS migrations under `supabase/migrations/`.
+
+## Internal controls
+See [docs/INTERNAL_CONTROLS.md](docs/INTERNAL_CONTROLS.md) for how booking/billing controls map to live screens (SoD matrix, risk register, closed-loop Morning Brief → Warnings → Approvals → Risk → AR demo). Managers also have a **Control activity** view at `/controls`.
+
+Demo portals can be disabled with `DEMO_ENABLED=false` in `.env.local`.
 
 ## Branch
 Work on your personal branch (e.g. `SylviaHowell`), not directly on `main`.

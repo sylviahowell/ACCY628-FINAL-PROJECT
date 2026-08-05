@@ -3,7 +3,7 @@
 import { useState, type FormEvent } from "react";
 import { useHydrated, useLocalObject, useSavedFlash } from "@/lib/local-prefs";
 
-export const COMPANY_STORAGE_KEY = "freightflow-company-profile";
+export const COMPANY_STORAGE_KEY = "rowanlane-company-profile";
 
 export type CompanyProfile = {
   companyName: string;

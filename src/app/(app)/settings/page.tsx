@@ -1,5 +1,5 @@
 import type { ReactNode } from "react";
-import { redirect } from "next/navigation";
+import Link from "next/link";
 import {
   Bell,
   Building2,
@@ -12,7 +12,8 @@ import {
   Truck,
   User,
 } from "lucide-react";
-import { getCurrentProfile, signOut } from "@/lib/actions/auth";
+import { signOut } from "@/lib/actions/auth";
+import { requirePathAccess } from "@/lib/authz";
 import { createClient } from "@/lib/supabase/server";
 import { ThemeSelector } from "@/components/ThemeSelector";
 import { NotificationPreferences } from "@/components/NotificationPreferences";
@@ -78,8 +79,7 @@ function DetailRow({ label, value }: { label: string; value: ReactNode }) {
  * Account preferences for all roles; company / workspace controls gated by role.
  */
 export default async function SettingsPage() {
-  const profile = await getCurrentProfile();
-  if (!profile) redirect("/login");
+  const profile = await requirePathAccess("/settings");
 
   const isManager = profile.role === "manager";
   const isBroker = profile.role === "broker";
@@ -149,8 +149,8 @@ export default async function SettingsPage() {
 
         <SettingsCard
           icon={<Bell className="h-5 w-5" aria-hidden />}
-          title="Notifications"
-          description="Choose which attention items get surfaced for this role."
+          title="Notification preferences"
+          description="Device-local demo checkboxes only — they do not send email or SMS. Preferences stay in this browser for the pitch walkthrough."
         >
           <NotificationPreferences role={profile.role} />
         </SettingsCard>
@@ -283,25 +283,64 @@ export default async function SettingsPage() {
           <SettingsCard
             icon={<Shield className="h-5 w-5" aria-hidden />}
             title="System control policies"
-            description="Rules the application always enforces. These are not toggles - they protect margin, billing integrity, and revenue recognition."
+            description="Rules the application always enforces in server actions. These are not toggles."
           >
-            <ul className="grid gap-x-6 gap-y-2 text-sm sm:grid-cols-2">
-              {[
-                "Proof of delivery required before invoicing or completing a load",
-                "Duplicate invoice numbers blocked",
-                "Cancelled shipments cannot be invoiced",
-                "Cannot complete without an assigned carrier",
-                "Negative margin warnings on shipment pages",
-                "Disputed invoices cannot be marked paid in full until resolved",
-                "Credit limit checked at booking, with manager override logged",
-                "Revenue earned at delivery plus POD, shown in Accounting",
-              ].map((rule) => (
-                <li key={rule} className="flex gap-2 opacity-80">
-                  <span aria-hidden className="mt-1.5 h-1.5 w-1.5 shrink-0 rounded-full bg-primary/60" />
-                  <span>{rule}</span>
-                </li>
-              ))}
-            </ul>
+            <div className="space-y-4 text-sm">
+              <div>
+                <p className="mb-2 text-xs font-semibold uppercase tracking-wide opacity-55">
+                  Preventive (hard stops)
+                </p>
+                <ul className="grid gap-x-6 gap-y-2 sm:grid-cols-2">
+                  {[
+                    "Proof of delivery required before invoicing or completing a load",
+                    "Cannot complete a shipment without an assigned carrier",
+                    "Cancelled shipments cannot be invoiced",
+                    "Duplicate invoice numbers blocked",
+                    "Any payment blocked while an invoice is disputed",
+                    "Credit limit checked at booking — brokers blocked; manager override logged",
+                    "Expired carrier insurance blocked on create/assign (all roles)",
+                    "Only active contracts on new shipments; outside-window dates need confirm",
+                    "Broker discounts and accessorials above threshold need manager approval",
+                  ].map((rule) => (
+                    <li key={rule} className="flex gap-2 opacity-80">
+                      <span
+                        aria-hidden
+                        className="mt-1.5 h-1.5 w-1.5 shrink-0 rounded-full bg-error/70"
+                      />
+                      <span>{rule}</span>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+              <div>
+                <p className="mb-2 text-xs font-semibold uppercase tracking-wide opacity-55">
+                  Detective / monitoring (warnings only)
+                </p>
+                <ul className="grid gap-x-6 gap-y-2 sm:grid-cols-2">
+                  {[
+                    "Negative-margin / loss loads warn on shipment pages — booking is not blocked",
+                    "Insurance expiring ≤30 days and Watch List carriers surface on Risk & Warnings",
+                    "Approvals inbox, Control activity log, AR collections notes for follow-up",
+                  ].map((rule) => (
+                    <li key={rule} className="flex gap-2 opacity-80">
+                      <span
+                        aria-hidden
+                        className="mt-1.5 h-1.5 w-1.5 shrink-0 rounded-full bg-warning/80"
+                      />
+                      <span>{rule}</span>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+              <p className="rounded-lg border border-base-300 bg-base-200/60 px-3 py-2 text-xs opacity-80">
+                Separation of duties: managers may book, bill, and approve in this demo. Compensating
+                controls are logged overrides, the Approvals inbox, Risk & Credit, and{" "}
+                <Link href="/controls" className="link">
+                  Control activity
+                </Link>
+                — not a second approver.
+              </p>
+            </div>
           </SettingsCard>
         </SettingsSection>
       ) : null}

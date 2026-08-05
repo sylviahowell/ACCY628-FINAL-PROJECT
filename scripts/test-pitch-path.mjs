@@ -218,7 +218,7 @@ async function main() {
     /without internal cost/i.test(support)
       ? fail("Support copy cleaned")
       : ok("Support copy cleaned");
-    /freightflow\.example/i.test(support)
+    /rowanlane\.example/i.test(support)
       ? fail("Support email product domain")
       : ok("Support email product domain");
     /class demo/i.test(support) ? fail("Support no class demo") : ok("Support no class demo");

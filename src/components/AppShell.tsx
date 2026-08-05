@@ -13,6 +13,7 @@ import {
   LogOut,
   MoreHorizontal,
   Package,
+  ScrollText,
   Settings,
   ShieldAlert,
   Truck,
@@ -52,6 +53,7 @@ async function loadManagerShipCounts(): Promise<ShipNavCounts> {
   const supabase = await createClient();
   const today = new Date().toISOString().slice(0, 10);
 
+  // Narrow columns only — enough to derive badge counts without full row payloads.
   const { data: ships } = await supabase
     .from("shipments")
     .select("id, status, carrier_id, promised_delivery_date");
@@ -59,24 +61,20 @@ async function loadManagerShipCounts(): Promise<ShipNavCounts> {
   const rows = ships ?? [];
   let delayed = 0;
   let unassigned = 0;
+  const deliveredIds: string[] = [];
 
   for (const s of rows) {
     const closed = ["delivered", "completed", "cancelled"].includes(s.status);
-    if (
-      s.promised_delivery_date &&
-      s.promised_delivery_date < today &&
-      !closed
-    ) {
+    if (s.promised_delivery_date && s.promised_delivery_date < today && !closed) {
       delayed += 1;
     }
     if (!s.carrier_id && !closed) {
       unassigned += 1;
     }
+    if (["delivered", "completed"].includes(s.status)) {
+      deliveredIds.push(s.id);
+    }
   }
-
-  const deliveredIds = rows
-    .filter((s) => ["delivered", "completed"].includes(s.status))
-    .map((s) => s.id);
 
   let ready = 0;
   if (deliveredIds.length) {
@@ -85,13 +83,12 @@ async function loadManagerShipCounts(): Promise<ShipNavCounts> {
       supabase
         .from("invoices")
         .select("shipment_id, status")
-        .in("shipment_id", deliveredIds),
+        .in("shipment_id", deliveredIds)
+        .neq("status", "cancelled"),
     ]);
     const podSet = new Set((pods ?? []).map((p) => p.shipment_id));
     const billedSet = new Set(
-      (invoices ?? [])
-        .filter((i) => i.status !== "cancelled" && i.shipment_id)
-        .map((i) => i.shipment_id as string),
+      (invoices ?? []).map((i) => i.shipment_id as string).filter(Boolean),
     );
     ready = deliveredIds.filter((id) => podSet.has(id) && !billedSet.has(id)).length;
   }
@@ -105,12 +102,12 @@ async function loadManagerInvoiceCounts(readyFromShips: number): Promise<Invoice
 
   const { data: invoices } = await supabase
     .from("invoices")
-    .select("id, status, total, amount_paid, due_date");
+    .select("status, total, amount_paid, due_date")
+    .not("status", "in", '("paid","cancelled")');
 
   let overdue = 0;
   let open = 0;
   for (const inv of invoices ?? []) {
-    if (["paid", "cancelled"].includes(inv.status)) continue;
     const balance = Number(inv.total) - Number(inv.amount_paid);
     if (balance <= 0) continue;
     open += 1;
@@ -126,6 +123,7 @@ async function loadManagerInvoiceCounts(readyFromShips: number): Promise<Invoice
 
 async function loadManagerProfitCounts(): Promise<ProfitNavCounts> {
   const supabase = await createClient();
+  // View columns only — avoid select("*") on every shell render.
   const { data } = await supabase
     .from("shipment_profitability")
     .select("margin, customer_rate, billable_accessorials, discount_amount");
@@ -172,6 +170,7 @@ function navFor(
           { href: "/warnings", label: "Warnings", icon: i(<AlertTriangle className="h-4 w-4" />) },
           { href: "/risk", label: "Risk & Credit", icon: i(<ShieldAlert className="h-4 w-4" />) },
           { href: "/approvals", label: "Approvals", icon: i(<CheckSquare className="h-4 w-4" />) },
+          { href: "/controls", label: "Control activity", icon: i(<ScrollText className="h-4 w-4" />) },
           {
             href: "/shipments",
             label: "Shipments",
@@ -300,12 +299,14 @@ export async function AppShell({
   isDemoMode: boolean;
   children: React.ReactNode;
 }) {
-  const shipCounts = profile.role === "manager" ? await loadManagerShipCounts() : null;
+  const isManager = profile.role === "manager";
+  const [shipCounts, profitCounts] = isManager
+    ? await Promise.all([loadManagerShipCounts(), loadManagerProfitCounts()])
+    : [null, null];
   const invCounts =
-    profile.role === "manager" && shipCounts
+    isManager && shipCounts
       ? await loadManagerInvoiceCounts(shipCounts.ready)
       : null;
-  const profitCounts = profile.role === "manager" ? await loadManagerProfitCounts() : null;
   const { primary, more } = navFor(profile.role, shipCounts, invCounts, profitCounts);
   const showDemoSelector = isDemoMode;
   const roleDisplay = showDemoSelector

@@ -2,7 +2,7 @@
 
 import { useHydrated, useLocalObject, useSavedFlash } from "@/lib/local-prefs";
 
-export const BILLING_PREFS_STORAGE_KEY = "freightflow-billing-prefs";
+export const BILLING_PREFS_STORAGE_KEY = "rowanlane-billing-prefs";
 
 type BillingPrefs = {
   prioritizeOverdue: boolean;

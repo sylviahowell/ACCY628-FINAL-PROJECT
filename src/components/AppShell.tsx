@@ -168,8 +168,8 @@ function navFor(
         primary: [
           { href: "/dashboard", label: "Executive Dashboard", icon: i(<LayoutDashboard className="h-4 w-4" />) },
           { href: "/warnings", label: "Warnings", icon: i(<AlertTriangle className="h-4 w-4" />) },
-          { href: "/risk", label: "Risk & Credit", icon: i(<ShieldAlert className="h-4 w-4" />) },
           { href: "/approvals", label: "Approvals", icon: i(<CheckSquare className="h-4 w-4" />) },
+          { href: "/risk", label: "Risk & Credit", icon: i(<ShieldAlert className="h-4 w-4" />) },
           { href: "/controls", label: "Control activity", icon: i(<ScrollText className="h-4 w-4" />) },
           {
             href: "/shipments",
@@ -194,6 +194,7 @@ function navFor(
             ],
           },
           { href: "/ar", label: "Accounts Receivable", icon: i(<BarChart3 className="h-4 w-4" />) },
+          { href: "/disputes", label: "Disputes", icon: i(<AlertTriangle className="h-4 w-4" />) },
           {
             href: "/profitability",
             label: "Profitability",
@@ -222,7 +223,6 @@ function navFor(
           { href: "/carriers", label: "Carriers", icon: i(<Truck className="h-4 w-4" />) },
           { href: "/contracts", label: "Contracts", icon: i(<ClipboardList className="h-4 w-4" />) },
           { href: "/payments", label: "Payments", icon: i(<Wallet className="h-4 w-4" />) },
-          { href: "/disputes", label: "Disputes", icon: i(<AlertTriangle className="h-4 w-4" />) },
           { href: "/accounting", label: "Accounting", icon: i(<ClipboardList className="h-4 w-4" />) },
         ],
       };

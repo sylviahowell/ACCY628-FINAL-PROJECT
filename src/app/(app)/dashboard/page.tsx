@@ -32,6 +32,11 @@ import {
   buildCarrierTasks,
   customerFacingHealth,
 } from "@/lib/portal-views";
+import {
+  creditStatus,
+  insuranceRiskStatus,
+  openArFromInvoices,
+} from "@/lib/risk-credit";
 import { computeShipmentHealth } from "@/lib/shipment-health";
 import { createClient } from "@/lib/supabase/server";
 import { sanitizeDemoText } from "@/lib/display-text";
@@ -68,7 +73,7 @@ export default async function DashboardPage() {
         "id, invoice_number, status, total, amount_paid, due_date, issue_date, shipment_id, customer_id, customers(name)",
       ),
     supabase.from("shipment_profitability").select("*"),
-    supabase.from("customers").select("id, name"),
+    supabase.from("customers").select("id, name, credit_limit"),
     supabase
       .from("carriers")
       .select("id, name, rating, insurance_expiration, equipment_type, service_area"),
@@ -460,6 +465,45 @@ export default async function DashboardPage() {
 
     const openDisputeCount = disputeList.filter((d) => d.status === "open").length;
 
+    const invoicesByCustomer = new Map<
+      string,
+      { total: number; amount_paid: number; status: string }[]
+    >();
+    for (const inv of invList) {
+      if (inv.status === "cancelled") continue;
+      const list = invoicesByCustomer.get(inv.customer_id as string) ?? [];
+      list.push({
+        total: Number(inv.total),
+        amount_paid: Number(inv.amount_paid),
+        status: inv.status,
+      });
+      invoicesByCustomer.set(inv.customer_id as string, list);
+    }
+    const customersOverCredit = (customers ?? []).filter((c) => {
+      const openAr = openArFromInvoices(invoicesByCustomer.get(c.id) ?? []);
+      return creditStatus(openAr, Number(c.credit_limit ?? 0)) === "over";
+    }).length;
+    const insuranceExpired = (carriers ?? []).filter(
+      (c) => insuranceRiskStatus(c.insurance_expiration ?? null, today).status === "expired",
+    ).length;
+    const riskIssueCount = customersOverCredit + insuranceExpired + insuranceExpiring;
+    const riskDetailParts: string[] = [];
+    if (customersOverCredit > 0) {
+      riskDetailParts.push(
+        `${customersOverCredit} customer${customersOverCredit === 1 ? "" : "s"} over credit`,
+      );
+    }
+    if (insuranceExpired > 0) {
+      riskDetailParts.push(
+        `${insuranceExpired} carrier${insuranceExpired === 1 ? "" : "s"} insurance expired`,
+      );
+    }
+    if (insuranceExpiring > 0) {
+      riskDetailParts.push(
+        `${insuranceExpiring} carrier${insuranceExpiring === 1 ? "" : "s"} insurance expiring ≤30d`,
+      );
+    }
+
     const decideNowItems: DecideNowItem[] = [];
     if (pendingApprovals.length > 0) {
       decideNowItems.push({
@@ -475,12 +519,12 @@ export default async function DashboardPage() {
     if (lateList.length > 0) {
       decideNowItems.push({
         id: "late",
-        title: "Late shipments",
+        title: "Delayed shipments",
         metric: String(lateList.length),
-        detail: "Promised delivery date has passed — ops exception",
-        href: "/warnings?severity=critical",
+        detail: "Promised delivery date has passed — still open",
+        href: "#shipment-network-map",
         tone: "error",
-        cta: "Open",
+        cta: "View map",
       });
     }
     if (cashAtRisk > 0) {
@@ -492,6 +536,17 @@ export default async function DashboardPage() {
         href: "/ar?filter=cash-at-risk",
         tone: "error",
         cta: "Open AR",
+      });
+    }
+    if (riskIssueCount > 0) {
+      decideNowItems.push({
+        id: "risk-credit",
+        title: "Risk & credit",
+        metric: String(riskIssueCount),
+        detail: riskDetailParts.join(" · ") || "Credit or carrier insurance needs review",
+        href: "/risk",
+        tone: insuranceExpired > 0 || customersOverCredit > 0 ? "error" : "warning",
+        cta: "Open Risk",
       });
     }
     if (unbilledDelivered > 0) {
@@ -532,99 +587,36 @@ export default async function DashboardPage() {
       <div className="space-y-6">
         <Header
           title="Executive Dashboard"
-          subtitle="Company performance, exceptions, and contract-to-cash health"
+          subtitle="Decide now, scan the brief, then review margin and network health"
+          action={
+            <Link href="/controls" className="link link-hover text-sm opacity-70">
+              Recent control overrides →
+            </Link>
+          }
         />
-        <StoryActionChips role="manager" />
         <DecideNowRail items={decideNowItems.slice(0, 5)} />
-        <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
-          <Stat
-            title="Cash at risk"
-            value={money(cashAtRisk)}
-            warn
-            href="/ar?filter=cash-at-risk"
-          />
-          <Stat
-            title="POD-ready unbilled"
-            value={String(unbilledDelivered)}
-            warn={unbilledDelivered > 0}
-            href="/shipments?filter=ready-to-bill"
-          />
-          <Stat
-            title="Overdue invoices"
-            value={String(pastDue.length)}
-            warn={pastDue.length > 0}
-            href="/ar?filter=past-due"
-          />
-          <Stat
-            title="Open disputes"
-            value={String(disputeList.filter((d) => d.status === "open").length)}
-            warn={disputeList.some((d) => d.status === "open")}
-            href="/disputes?filter=open"
-          />
-        </div>
         <MorningBriefCard
           greeting={brief.greeting}
           yesterday={brief.yesterday}
           today={brief.today}
           attention={brief.attention}
         />
-        <Panel
-          title={`Pending approvals (${(approvals ?? []).length})`}
-        >
-          {(approvals ?? []).length === 0 ? (
-            <p className="text-sm opacity-70">No pending approvals.</p>
-          ) : (
-            <ul className="space-y-3">
-              {(approvals ?? []).slice(0, 4).map((a) => {
-                let focusLoad: string | null = null;
-                if (a.entity_type === "shipment") {
-                  focusLoad = shipList.find((s) => s.id === a.entity_id)?.load_number ?? null;
-                } else if (a.entity_type === "shipment_charge") {
-                  const shipId = chargeList.find((c) => c.id === a.entity_id)?.shipment_id;
-                  focusLoad = shipId
-                    ? (shipList.find((s) => s.id === shipId)?.load_number ?? null)
-                    : null;
-                }
-                const reviewHref = focusLoad
-                  ? `/approvals?type=${encodeURIComponent(a.request_type)}&focus=${encodeURIComponent(focusLoad)}`
-                  : `/approvals?type=${encodeURIComponent(a.request_type)}`;
-                return (
-                  <li
-                    key={a.id}
-                    className="flex flex-wrap items-center justify-between gap-3 rounded-box border border-warning/40 bg-warning/10 p-3"
-                  >
-                    <div>
-                      <p className="font-medium capitalize">
-                        {a.request_type}
-                        {focusLoad ? ` · ${focusLoad}` : ""} · {money(a.amount)}
-                      </p>
-                      <p className="text-sm opacity-70">{sanitizeDemoText(a.reason)}</p>
-                    </div>
-                    <Link href={reviewHref} className="btn btn-warning btn-xs">
-                      Review
-                    </Link>
-                  </li>
-                );
-              })}
-            </ul>
-          )}
-          {(approvals ?? []).length > 0 ? (
-            <Link href="/approvals" className="btn btn-ghost btn-sm mt-3">
-              Open Approval Inbox
-            </Link>
-          ) : null}
-        </Panel>
         <KpiRibbon items={kpis} />
         <ProfitabilityHeatmap rows={heatRows} />
         <ShipmentMapLazy shipments={mapShipments} today={today} />
-        <div className="space-y-3">
-          <div>
-            <h2 className="text-lg font-bold">Performance trends</h2>
-            <p className="text-sm opacity-70">
-              Monthly revenue and profit, top customers by margin, and weakest loads.
-            </p>
-          </div>
-          <div className="grid gap-4 lg:grid-cols-2">
+        <details className="rounded-box border border-base-300 bg-base-100">
+          <summary className="cursor-pointer list-none px-4 py-3 marker:content-none [&::-webkit-details-marker]:hidden">
+            <span className="flex flex-wrap items-end justify-between gap-2">
+              <span>
+                <span className="block text-lg font-bold">Performance trends</span>
+                <span className="text-sm font-normal opacity-70">
+                  Monthly revenue and profit, top customers by margin, and weakest loads
+                </span>
+              </span>
+              <span className="text-xs opacity-60">Expand</span>
+            </span>
+          </summary>
+          <div className="grid gap-4 border-t border-base-300 p-4 lg:grid-cols-2">
             <Panel title="Monthly revenue">
               <MonthlyBars data={monthlyRev} name="Revenue" />
             </Panel>
@@ -641,7 +633,7 @@ export default async function DashboardPage() {
               />
             </Panel>
           </div>
-        </div>
+        </details>
       </div>
     );
   }

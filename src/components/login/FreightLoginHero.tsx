@@ -1,5 +1,5 @@
 import { Shield } from "lucide-react";
-import { FreightFlowBrand } from "@/components/login/FreightFlowBrand";
+import { RowanLaneBrand } from "@/components/login/RowanLaneBrand";
 import { RouteMapGraphic } from "@/components/login/RouteMapGraphic";
 import { DemoSnapshot } from "@/components/login/DemoSnapshot";
 
@@ -21,7 +21,7 @@ export function FreightLoginHero() {
       />
 
       <div className="relative z-10 shrink-0">
-        <FreightFlowBrand />
+        <RowanLaneBrand />
       </div>
 
       {/* Upper hero: copy | US route map */}

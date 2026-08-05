@@ -97,7 +97,7 @@ export function LoginForm() {
       </form>
 
       <p className="mt-2.5 text-center text-sm text-[#607089]">
-        Sign in with your company account, or launch a Demo Portal below to explore FreightFlow
+        Sign in with your company account, or launch a Demo Portal below to explore RowanLane
         without signing in.
       </p>
     </div>

@@ -9,7 +9,7 @@ const sans = Source_Sans_3({
 });
 
 export const metadata: Metadata = {
-  title: "FreightFlow | Freight Brokerage & Logistics",
+  title: "RowanLane | Freight Brokerage & Logistics",
   description:
     "Contract-to-cash management for freight brokerage and logistics",
 };

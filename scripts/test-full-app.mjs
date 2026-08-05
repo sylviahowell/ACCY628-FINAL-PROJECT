@@ -1,5 +1,5 @@
 /**
- * Full FreightFlow role + feature E2E suite.
+ * Full RowanLane role + feature E2E suite.
  * Usage: node scripts/test-full-app.mjs
  */
 import { chromium } from "playwright";
@@ -143,8 +143,8 @@ async function visitAndCheck(page, path, label) {
     return false;
   }
   // Must still look like the app shell when authenticated
-  if (!/FreightFlow/i.test(text) && !/Sign|Welcome|Create/i.test(text)) {
-    fail(`${label} ${path}`, "missing FreightFlow chrome");
+  if (!/RowanLane/i.test(text) && !/Sign|Welcome|Create/i.test(text)) {
+    fail(`${label} ${path}`, "missing RowanLane chrome");
     return false;
   }
   ok(`${label} ${path}`, `HTTP ${status || "ok"} · ${text.length} chars`);
@@ -181,7 +181,7 @@ async function switchDemoRole(page, role, expectedName) {
 }
 
 async function main() {
-  console.log(`\n=== FreightFlow FULL E2E @ ${BASE} ===\n`);
+  console.log(`\n=== RowanLane FULL E2E @ ${BASE} ===\n`);
   const browser = await chromium.launch({ headless: true });
   const page = await browser.newPage();
   page.setDefaultTimeout(90000);

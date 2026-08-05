@@ -1,15 +1,38 @@
 import Link from "next/link";
+import { AccountingEntriesPanel } from "@/components/AccountingEntriesPanel";
+import { resolveSearchParams } from "@/components/FilterBanner";
+import {
+  buildAccountingEntries,
+  type AccountingEntryType,
+} from "@/lib/accounting-entries";
 import { requireRoles } from "@/lib/authz";
 import { createClient } from "@/lib/supabase/server";
 import { money, statusBadge } from "@/lib/types";
+
+const ENTRY_FILTERS = new Set<AccountingEntryType>([
+  "recognize",
+  "bill",
+  "collect",
+  "accrue_ap",
+  "pay_carrier",
+]);
 
 /**
  * GAAP-oriented workspace for freight brokerage (ASC 606-style performance obligations).
  * Revenue is treated as earned when the load is delivered with POD evidence;
  * billing may lag (contract asset / unbilled earned) or AR may sit unpaid.
  */
-export default async function AccountingPage() {
+export default async function AccountingPage({
+  searchParams,
+}: {
+  searchParams?: Promise<Record<string, string | string[] | undefined>> | Record<string, string | string[] | undefined>;
+}) {
   await requireRoles(["manager", "billing"]);
+  const params = await resolveSearchParams(searchParams);
+  const entriesFilter = ENTRY_FILTERS.has(params.entries as AccountingEntryType)
+    ? (params.entries as AccountingEntryType)
+    : "all";
+
   const supabase = await createClient();
 
   const { data: shipments } = await supabase
@@ -23,20 +46,107 @@ export default async function AccountingPage() {
   const { data: charges } = await supabase
     .from("shipment_charges")
     .select("shipment_id, amount, billable_to_customer, payable_to_carrier, approval_status, charge_type");
-  const { data: pods } = await supabase.from("proof_of_delivery").select("shipment_id");
-  const { data: payments } = await supabase.from("payments").select("amount, payment_date");
+  const { data: pods } = await supabase
+    .from("proof_of_delivery")
+    .select("shipment_id, delivered_at");
+  const { data: payments } = await supabase
+    .from("payments")
+    .select("id, invoice_id, amount, payment_date, invoices(invoice_number, shipment_id, customers(name))");
   const { data: carrierBills } = await supabase
     .from("carrier_bills")
     .select(
-      "id, bill_number, status, total, amount_paid, due_date, shipment_id, carriers(name), shipments(load_number)",
+      "id, bill_number, status, total, amount_paid, issue_date, due_date, shipment_id, carriers(name), shipments(load_number)",
     );
+  const { data: carrierPayments } = await supabase
+    .from("carrier_payments")
+    .select(
+      "id, carrier_bill_id, amount, payment_date, carrier_bills(bill_number, shipment_id, shipments(load_number))",
+    );
+
+  const journalEntries = buildAccountingEntries({
+    shipments: (shipments ?? []).map((s) => ({
+      ...s,
+      customers: (Array.isArray(s.customers) ? s.customers[0] : s.customers) as {
+        name?: string;
+      } | null,
+    })),
+    charges: charges ?? [],
+    pods: pods ?? [],
+    invoices: (invoices ?? []).map((i) => ({
+      ...i,
+      customers: (Array.isArray(i.customers) ? i.customers[0] : i.customers) as {
+        name?: string;
+      } | null,
+    })),
+    payments: (payments ?? []).map((p) => {
+      const inv = (Array.isArray(p.invoices) ? p.invoices[0] : p.invoices) as {
+        invoice_number?: string;
+        shipment_id?: string | null;
+        customers?: { name?: string } | { name?: string }[] | null;
+      } | null;
+      const cust = inv?.customers
+        ? Array.isArray(inv.customers)
+          ? inv.customers[0]
+          : inv.customers
+        : null;
+      return {
+        id: p.id,
+        invoice_id: p.invoice_id,
+        amount: p.amount,
+        payment_date: p.payment_date,
+        invoices: inv
+          ? {
+              invoice_number: inv.invoice_number,
+              shipment_id: inv.shipment_id,
+              customers: cust,
+            }
+          : null,
+      };
+    }),
+    carrierBills: (carrierBills ?? []).map((b) => ({
+      ...b,
+      carriers: (Array.isArray(b.carriers) ? b.carriers[0] : b.carriers) as {
+        name?: string;
+      } | null,
+      shipments: (Array.isArray(b.shipments) ? b.shipments[0] : b.shipments) as {
+        load_number?: string;
+      } | null,
+    })),
+    carrierPayments: (carrierPayments ?? []).map((p) => {
+      const bill = (Array.isArray(p.carrier_bills)
+        ? p.carrier_bills[0]
+        : p.carrier_bills) as {
+        bill_number?: string;
+        shipment_id?: string;
+        shipments?: { load_number?: string } | { load_number?: string }[] | null;
+      } | null;
+      const ship = bill?.shipments
+        ? Array.isArray(bill.shipments)
+          ? bill.shipments[0]
+          : bill.shipments
+        : null;
+      return {
+        id: p.id,
+        carrier_bill_id: p.carrier_bill_id,
+        amount: p.amount,
+        payment_date: p.payment_date,
+        carrier_bills: bill
+          ? {
+              bill_number: bill.bill_number,
+              shipment_id: bill.shipment_id,
+              shipments: ship,
+            }
+          : null,
+      };
+    }),
+  });
 
   const billedShipmentIds = new Set(
     (invoices ?? [])
       .filter((i) => i.status !== "cancelled" && i.shipment_id)
       .map((i) => i.shipment_id as string),
   );
-  const podShipments = new Set((pods ?? []).map((p) => p.shipment_id as string));
+  const podShipments = new Set((pods ?? []).map((p) => p.shipment_id));
 
   const billableExtras = (shipmentId: string) =>
     (charges ?? [])
@@ -118,8 +228,12 @@ export default async function AccountingPage() {
       <div>
         <h1 className="text-2xl font-bold">Accounting</h1>
         <p className="text-sm opacity-70">
-          Revenue earned at delivery with POD, open AR, and cash collected — in one workspace.
+          Revenue earned at delivery with POD, open AR, cash collected, and the journal entries
+          those events imply — in one workspace.
         </p>
+        <Link href="#accounting-entries" className="link link-primary text-sm">
+          Jump to accounting entries
+        </Link>
       </div>
 
       <div className="card bg-base-100 shadow-sm">
@@ -357,6 +471,8 @@ export default async function AccountingPage() {
           </Link>
         </div>
       </div>
+
+      <AccountingEntriesPanel entries={journalEntries} activeFilter={entriesFilter} />
 
       <div className="card bg-base-100 shadow-sm">
         <div className="card-body text-sm">

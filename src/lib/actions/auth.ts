@@ -21,6 +21,16 @@ function isMissingDemoUserError(message: string): boolean {
   );
 }
 
+function isEmailRateLimitError(message: string): boolean {
+  const m = message.toLowerCase();
+  return m.includes("rate limit") || m.includes("over_email_send_rate_limit");
+}
+
+const DEMO_SIGNIN_HELP =
+  " Demo accounts must already exist in Supabase Auth (password FreightDemo2026!). " +
+  "Do not rely on auto sign-up — it sends confirmation emails and hits the free-tier rate limit. " +
+  "In Auth → Providers → Email, turn off Confirm email, then create the five @rowanlane.example users.";
+
 export async function getCurrentProfile(): Promise<Profile | null> {
   const supabase = await createClient();
   const {
@@ -49,7 +59,8 @@ async function signInDemoAccount(role: UserRole) {
   const demo = demoUserForRole(role);
   const supabase = await createClient();
 
-  // Prefer a single sign-in for seeded demo accounts (avoid slow sign-up path).
+  // Sign-in only — never signUp for demos. Client signUp triggers Supabase
+  // confirmation emails and quickly hits the free-tier email rate limit.
   const { error: signInError } = await withTimeout(
     supabase.auth.signInWithPassword({
       email: demo.email,
@@ -61,46 +72,25 @@ async function signInDemoAccount(role: UserRole) {
 
   if (!signInError) return;
 
-  if (!isMissingDemoUserError(signInError.message)) {
+  if (isEmailRateLimitError(signInError.message)) {
     throw new Error(
-      signInError.message +
-        " Check Supabase connectivity and that demo users exist in Auth.",
+      "Email rate limit exceeded on this Supabase project. Wait about an hour, " +
+        "or create/confirm demo users in the Auth dashboard without sending more emails." +
+        DEMO_SIGNIN_HELP,
     );
   }
 
-  // One-time provision only when the demo user truly does not exist yet.
-  const { error: signUpError } = await withTimeout(
-    supabase.auth.signUp({
-      email: demo.email,
-      password: DEMO_PASSWORD,
-      options: {
-        data: {
-          full_name: demo.full_name,
-          role: demo.role,
-          customer_id: demo.customer_id ?? "",
-          carrier_id: demo.carrier_id ?? "",
-        },
-      },
-    }),
-    AUTH_FETCH_TIMEOUT_MS,
-    "demo signUp",
-  );
-  if (signUpError) throw new Error(signUpError.message);
-
-  const { error: second } = await withTimeout(
-    supabase.auth.signInWithPassword({
-      email: demo.email,
-      password: DEMO_PASSWORD,
-    }),
-    AUTH_FETCH_TIMEOUT_MS,
-    "demo signIn after signUp",
-  );
-  if (second) {
+  if (isMissingDemoUserError(signInError.message)) {
     throw new Error(
-      second.message +
-        " Turn off Confirm email in Supabase Auth → Providers → Email for demo accounts.",
+      `Demo user ${demo.email} is missing or the password does not match.` +
+        DEMO_SIGNIN_HELP,
     );
   }
+
+  throw new Error(
+    signInError.message +
+      " Check Supabase connectivity and that demo users exist in Auth.",
+  );
 }
 
 export async function signUp(formData: FormData) {

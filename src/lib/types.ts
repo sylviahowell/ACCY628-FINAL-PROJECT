@@ -43,7 +43,7 @@ export const DEMO_USERS: {
   description: string;
 }[] = [
   {
-    email: "manager@freightflow.example",
+    email: "manager@rowanlane.example",
     full_name: "Morgan Manager",
     role: "manager",
     portal: "Executive Portal",
@@ -51,7 +51,7 @@ export const DEMO_USERS: {
     description: "Company-wide margin, AR, approvals, and controls",
   },
   {
-    email: "broker@freightflow.example",
+    email: "broker@rowanlane.example",
     full_name: "Blake Broker",
     role: "broker",
     portal: "Broker Ops Portal",
@@ -59,7 +59,7 @@ export const DEMO_USERS: {
     description: "Book loads, assign carriers, manage contracts",
   },
   {
-    email: "billing@freightflow.example",
+    email: "billing@rowanlane.example",
     full_name: "Bailey Billing",
     role: "billing",
     portal: "Billing & Accounting Portal",
@@ -67,7 +67,7 @@ export const DEMO_USERS: {
     description: "Invoices, payments, AR aging, and disputes",
   },
   {
-    email: "customer@freightflow.example",
+    email: "customer@rowanlane.example",
     full_name: "Casey Customer",
     role: "customer",
     portal: "Shipper Portal",
@@ -76,7 +76,7 @@ export const DEMO_USERS: {
     description: "Track your freight, invoices, and open disputes",
   },
   {
-    email: "carrier@freightflow.example",
+    email: "carrier@rowanlane.example",
     full_name: "Chris Carrier",
     role: "carrier",
     portal: "Carrier Portal",

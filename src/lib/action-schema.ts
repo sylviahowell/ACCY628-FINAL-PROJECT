@@ -2,14 +2,12 @@ import { z } from "zod";
 
 /** Shared Zod helpers for freight server actions. */
 
-/** UUID-shaped ids (accepts demo seed ids that are not strict RFC-4122 variants). */
-export const uuidSchema = z
-  .string()
-  .trim()
-  .regex(
-    /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i,
-    "Invalid id",
-  );
+// Shape-based check: seeded demo ids (e.g. 4444…-4444) are valid Postgres uuids
+// but fail Zod's RFC version/variant check.
+const UUID_SHAPE =
+  /^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/;
+
+export const uuidSchema = z.string().trim().regex(UUID_SHAPE, "Invalid id");
 
 export const optionalUuid = z
   .string()

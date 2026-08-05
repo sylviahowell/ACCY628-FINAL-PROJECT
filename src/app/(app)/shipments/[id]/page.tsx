@@ -21,20 +21,10 @@ import {
 } from "@/lib/portal-views";
 import { canManageBilling } from "@/lib/roles";
 import { insuranceRiskStatus } from "@/lib/risk-credit";
+import { isControlOverrideNote } from "@/lib/control-activity";
 import { computeShipmentHealth } from "@/lib/shipment-health";
 import { createClient } from "@/lib/supabase/server";
 import { isOperations, money, statusBadge, type ShipmentStatus } from "@/lib/types";
-
-function isControlOverrideNote(note: string | null | undefined): boolean {
-  if (!note) return false;
-  const n = note.toLowerCase();
-  return (
-    n.includes("override") ||
-    n.includes("credit override") ||
-    n.includes("discount") ||
-    n.includes("outside the contract")
-  );
-}
 
 export default async function ShipmentDetailPage({
   params,

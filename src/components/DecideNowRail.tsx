@@ -60,6 +60,7 @@ export function DecideNowRail({ items }: { items: DecideNowItem[] }) {
                 </div>
                 <Link
                   href={item.href}
+                  aria-label={`${item.cta ?? "Review"} — ${item.title} (${item.metric})`}
                   className={`btn btn-sm shrink-0 ${toneBtnClass(item.tone)}`}
                 >
                   {item.cta ?? "Review"}

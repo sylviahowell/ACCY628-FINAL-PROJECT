@@ -1,11 +1,17 @@
 import Link from "next/link";
 import { redirect } from "next/navigation";
 import { requirePathAccess } from "@/lib/authz";
+import {
+  isControlOverrideNote,
+  parseControlKindParam,
+  type ControlActivityKindFilter,
+} from "@/lib/control-activity";
 import { sanitizeDemoText } from "@/lib/display-text";
+import { resolveSearchParams } from "@/components/FilterBanner";
 import { money } from "@/lib/types";
 import { createClient } from "@/lib/supabase/server";
 
-type ActivityKind = "override" | "status" | "approval" | "collection";
+type ActivityKind = "override" | "approval" | "collection";
 
 type ActivityRow = {
   id: string;
@@ -16,6 +22,13 @@ type ActivityRow = {
   href: string | null;
   hrefLabel: string | null;
 };
+
+const KIND_TABS: { id: ControlActivityKindFilter; label: string }[] = [
+  { id: "override", label: "Overrides" },
+  { id: "approval", label: "Approvals" },
+  { id: "collection", label: "Collections" },
+  { id: "all", label: "All" },
+];
 
 function kindBadge(kind: ActivityKind) {
   switch (kind) {
@@ -39,23 +52,27 @@ function kindLabel(kind: ActivityKind) {
     case "collection":
       return "Collection";
     default:
-      return "Status";
+      return "Activity";
   }
 }
 
-function isOverrideNote(note: string | null | undefined) {
-  if (!note) return false;
-  const n = note.toLowerCase();
-  return n.includes("override") || n.includes("credit override") || n.includes("discount");
-}
-
 /**
- * Manager-only Control activity — recent status overrides, approval decisions,
- * and collection notes with links into shipments / invoices / approvals.
+ * Manager-only Control activity — override-first audit trail of credit/discount
+ * overrides, decided approvals, and collection notes (not routine status history).
  */
-export default async function ControlsPage() {
+export default async function ControlsPage({
+  searchParams,
+}: {
+  searchParams?:
+    | Promise<Record<string, string | string[] | undefined>>
+    | Record<string, string | string[] | undefined>;
+}) {
   const profile = await requirePathAccess("/controls");
   if (profile.role !== "manager") redirect("/dashboard");
+
+  const params = await resolveSearchParams(searchParams);
+  // Bare /controls (left nav) auto-falls back to All when no overrides exist yet.
+  const requestedKind = params.kind ? parseControlKindParam(params.kind) : null;
 
   const supabase = await createClient();
 
@@ -63,28 +80,38 @@ export default async function ControlsPage() {
     { data: statusRows },
     { data: approvals },
     { data: notes },
+    { count: pendingApprovalCount },
   ] = await Promise.all([
     supabase
       .from("shipment_status_updates")
       .select("id, shipment_id, from_status, to_status, note, changed_by, created_at")
       .order("created_at", { ascending: false })
-      .limit(40),
+      .limit(80),
     supabase
       .from("approval_requests")
       .select(
         "id, request_type, amount, reason, status, entity_type, entity_id, requested_by, reviewed_by, reviewed_at, created_at",
       )
-      .order("created_at", { ascending: false })
+      .in("status", ["approved", "rejected"])
+      .order("reviewed_at", { ascending: false })
       .limit(25),
     supabase
       .from("collection_notes")
       .select("id, invoice_id, note, created_by, created_at")
       .order("created_at", { ascending: false })
       .limit(25),
+    supabase
+      .from("approval_requests")
+      .select("id", { count: "exact", head: true })
+      .eq("status", "pending"),
   ]);
 
+  const overrideStatusRows = (statusRows ?? []).filter((r) =>
+    isControlOverrideNote(r.note),
+  );
+
   const shipmentIds = [
-    ...new Set((statusRows ?? []).map((r) => r.shipment_id).filter(Boolean) as string[]),
+    ...new Set(overrideStatusRows.map((r) => r.shipment_id).filter(Boolean) as string[]),
   ];
 
   const chargeIds = [
@@ -124,7 +151,7 @@ export default async function ControlsPage() {
   const profileIds = [
     ...new Set(
       [
-        ...(statusRows ?? []).map((r) => r.changed_by),
+        ...overrideStatusRows.map((r) => r.changed_by),
         ...(approvals ?? []).flatMap((a) => [a.requested_by, a.reviewed_by]),
         ...(notes ?? []).map((n) => n.created_by),
       ].filter(Boolean) as string[],
@@ -147,26 +174,21 @@ export default async function ControlsPage() {
   const invById = new Map((invoices ?? []).map((i) => [i.id, i.invoice_number]));
   const nameById = new Map((people ?? []).map((p) => [p.id, p.full_name]));
 
-  const activities: ActivityRow[] = [];
-
-  for (const row of statusRows ?? []) {
+  const overrideActivities: ActivityRow[] = overrideStatusRows.slice(0, 30).map((row) => {
     const load = loadById.get(row.shipment_id);
     const note = sanitizeDemoText(row.note);
-    const override = isOverrideNote(row.note);
-    activities.push({
+    return {
       id: `status-${row.id}`,
-      kind: override ? "override" : "status",
+      kind: "override" as const,
       at: row.created_at,
       actor: row.changed_by ? nameById.get(row.changed_by) ?? "Staff" : "Staff",
-      summary: override
-        ? note || "Control override logged"
-        : `${row.from_status ?? "—"} → ${row.to_status}${note ? ` · ${note}` : ""}`,
+      summary: note || "Control override logged",
       href: `/shipments/${row.shipment_id}`,
       hrefLabel: load ?? "Shipment",
-    });
-  }
+    };
+  });
 
-  for (const a of approvals ?? []) {
+  const approvalActivities: ActivityRow[] = (approvals ?? []).map((a) => {
     let shipmentId: string | null = null;
     if (a.entity_type === "shipment") shipmentId = a.entity_id;
     else if (a.entity_type === "shipment_charge") {
@@ -174,62 +196,98 @@ export default async function ControlsPage() {
     }
     const load = shipmentId ? loadById.get(shipmentId) : null;
     const reviewer = a.reviewed_by ? nameById.get(a.reviewed_by) : null;
-    const requester = a.requested_by ? nameById.get(a.requested_by) : "Staff";
-    const decided = a.status !== "pending";
-    activities.push({
+    return {
       id: `approval-${a.id}`,
-      kind: "approval",
+      kind: "approval" as const,
       at: a.reviewed_at ?? a.created_at ?? new Date().toISOString(),
-      actor: decided ? reviewer ?? "Manager" : requester ?? "Staff",
-      summary: decided
-        ? `${a.request_type} ${a.status}${a.amount != null ? ` · ${money(a.amount)}` : ""}${
-            a.reason ? ` — ${sanitizeDemoText(a.reason)?.slice(0, 120)}` : ""
-          }`
-        : `Pending ${a.request_type}${a.amount != null ? ` · ${money(a.amount)}` : ""}`,
-      href: decided ? (shipmentId ? `/shipments/${shipmentId}` : "/approvals") : "/approvals",
-      hrefLabel: load ?? (decided ? "Approvals" : "Open Approvals"),
-    });
-  }
+      actor: reviewer ?? "Manager",
+      summary: `${a.request_type} ${a.status}${a.amount != null ? ` · ${money(a.amount)}` : ""}${
+        a.reason ? ` — ${sanitizeDemoText(a.reason)?.slice(0, 120)}` : ""
+      }`,
+      href: shipmentId ? `/shipments/${shipmentId}` : "/approvals",
+      hrefLabel: load ?? "Approvals",
+    };
+  });
 
-  for (const n of notes ?? []) {
+  const collectionActivities: ActivityRow[] = (notes ?? []).map((n) => {
     const invNum = invById.get(n.invoice_id);
-    activities.push({
+    return {
       id: `note-${n.id}`,
-      kind: "collection",
+      kind: "collection" as const,
       at: n.created_at,
       actor: n.created_by ? nameById.get(n.created_by) ?? "Staff" : "Staff",
       summary: sanitizeDemoText(n.note) || "Collection note",
-      href: "/ar",
+      href: invNum ? `/ar?focus=${encodeURIComponent(invNum)}` : "/ar",
       hrefLabel: invNum ?? "AR",
-    });
-  }
+    };
+  });
 
-  activities.sort((a, b) => new Date(b.at).getTime() - new Date(a.at).getTime());
-  const recent = activities.slice(0, 50);
-  const overrideCount = recent.filter((a) => a.kind === "override").length;
-  const pendingApprovals = (approvals ?? []).filter((a) => a.status === "pending").length;
+  const byKind: Record<ActivityKind, ActivityRow[]> = {
+    override: overrideActivities,
+    approval: approvalActivities,
+    collection: collectionActivities,
+  };
+
+  const fellBackToAll = requestedKind === null && overrideActivities.length === 0;
+  const kindFilter: ControlActivityKindFilter =
+    requestedKind ?? (fellBackToAll ? "all" : "override");
+
+  const pool =
+    kindFilter === "all"
+      ? [...overrideActivities, ...approvalActivities, ...collectionActivities]
+      : byKind[kindFilter];
+
+  const recent = [...pool]
+    .sort((a, b) => new Date(b.at).getTime() - new Date(a.at).getTime())
+    .slice(0, 50);
+
+  const pendingApprovals = pendingApprovalCount ?? 0;
+  const overrideCount = overrideActivities.length;
+  const decidedApprovalCount = approvalActivities.length;
+
+  const emptyCopy: Record<ControlActivityKindFilter, string> = {
+    override: "No control overrides logged yet (credit, discount, or contract-window).",
+    approval: "No decided approvals in the recent window.",
+    collection: "No collection notes yet.",
+    all: "No control-relevant activity yet.",
+  };
 
   return (
     <div className="mx-auto max-w-4xl space-y-6">
-      <header>
-        <h1 className="text-2xl font-bold">Control activity</h1>
-        <p className="mt-1 text-sm opacity-70">
-          Recent status events, approval decisions, credit overrides, and collection notes.
-          Compensating visibility when managers also perform ops and billing.
-        </p>
+      <header className="space-y-3">
+        <div>
+          <h1 className="text-2xl font-bold">Control activity</h1>
+          <p className="mt-1 text-sm opacity-70">
+            Compensating audit trail: logged overrides, decided approvals, and collection notes.
+            Routine shipment status lives on each load timeline.
+          </p>
+        </div>
+        <div className="flex flex-wrap gap-x-4 gap-y-1 text-sm">
+          <Link href="/settings" className="link link-hover opacity-70">
+            Settings policies
+          </Link>
+          <Link href="/risk" className="link link-hover opacity-70">
+            Risk &amp; Credit
+          </Link>
+          <Link href="/approvals" className="link link-hover opacity-70">
+            Approvals inbox
+          </Link>
+        </div>
       </header>
 
       <div className="grid gap-3 sm:grid-cols-3">
         <div className="stats bg-base-100 shadow-sm">
           <div className="stat py-3">
-            <div className="stat-title">Entries shown</div>
-            <div className="stat-value text-2xl">{recent.length}</div>
+            <div className="stat-title">Overrides</div>
+            <div className="stat-value text-2xl">{overrideCount}</div>
+            <div className="stat-desc">In recent control log</div>
           </div>
         </div>
         <div className="stats bg-base-100 shadow-sm">
           <div className="stat py-3">
-            <div className="stat-title">Overrides in view</div>
-            <div className="stat-value text-2xl">{overrideCount}</div>
+            <div className="stat-title">Decided approvals</div>
+            <div className="stat-value text-2xl">{decidedApprovalCount}</div>
+            <div className="stat-desc">Approved or rejected</div>
           </div>
         </div>
         <div className="stats bg-base-100 shadow-sm">
@@ -245,10 +303,44 @@ export default async function ControlsPage() {
         </div>
       </div>
 
+      {fellBackToAll ? (
+        <p className="rounded-box border border-info/30 bg-info/10 px-4 py-2.5 text-sm">
+          No overrides logged yet, so all control activity is shown. Overrides appear here after a
+          manager books above a credit limit or approves a broker discount.
+        </p>
+      ) : null}
+
+      <div className="flex flex-wrap gap-2" role="tablist" aria-label="Control activity kind">
+        {KIND_TABS.map((tab) => {
+          const active = kindFilter === tab.id;
+          const href = `/controls?kind=${tab.id}`;
+          const count =
+            tab.id === "all"
+              ? overrideCount + decidedApprovalCount + collectionActivities.length
+              : tab.id === "override"
+                ? overrideCount
+                : tab.id === "approval"
+                  ? decidedApprovalCount
+                  : collectionActivities.length;
+          return (
+            <Link
+              key={tab.id}
+              href={href}
+              role="tab"
+              aria-selected={active}
+              className={`btn btn-sm ${active ? "btn-primary" : "btn-ghost"}`}
+            >
+              {tab.label}
+              <span className={`badge badge-xs ${active ? "badge-primary" : ""}`}>{count}</span>
+            </Link>
+          );
+        })}
+      </div>
+
       <div className="card bg-base-100 shadow-sm">
         <div className="card-body p-0">
           {recent.length === 0 ? (
-            <p className="p-6 text-sm opacity-70">No control activity logged yet.</p>
+            <p className="p-6 text-sm opacity-70">{emptyCopy[kindFilter]}</p>
           ) : (
             <div className="overflow-x-auto">
               <table className="table table-sm">
@@ -294,7 +386,7 @@ export default async function ControlsPage() {
 
       <p className="text-xs opacity-60">
         Policies that produce these events are listed under Settings → System control policies.
-        See also Risk & Credit and Approvals for live monitoring queues.
+        Pending approvals stay in the Approvals inbox; this page is for review after the fact.
       </p>
     </div>
   );

@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { Suspense, useEffect, useMemo, useState } from "react";
+import { Suspense, useMemo, useState } from "react";
 import { useSearchParams } from "next/navigation";
 import { FocusScroll } from "@/components/FocusScroll";
 import { statusBadge } from "@/lib/types";
@@ -88,14 +88,14 @@ function ShipmentsTriageInner({
   showDocsReady: boolean;
 }) {
   const params = useSearchParams();
-  const [filter, setFilter] = useState<ShipStatusFilter>(() =>
-    initialStatus(params.get("status"), params.get("filter")),
-  );
+  const urlFilter = initialStatus(params.get("status"), params.get("filter"));
+  const [filter, setFilter] = useState<ShipStatusFilter>(urlFilter);
+  const [prevUrlFilter, setPrevUrlFilter] = useState(urlFilter);
+  if (urlFilter !== prevUrlFilter) {
+    setPrevUrlFilter(urlFilter);
+    setFilter(urlFilter);
+  }
   const focus = params.get("focus");
-
-  useEffect(() => {
-    setFilter(initialStatus(params.get("status"), params.get("filter")));
-  }, [params]);
 
   const delayed = rows.filter((r) => r.isDelayed).length;
   const unassigned = rows.filter((r) => r.needsCoverage).length;

@@ -1,9 +1,15 @@
+import Link from "next/link";
 import { redirect } from "next/navigation";
 import { Suspense } from "react";
 import { EmptyState } from "@/components/EmptyState";
+import { FilterBanner, resolveSearchParams } from "@/components/FilterBanner";
 import { FocusScroll } from "@/components/FocusScroll";
 import { getCurrentProfile } from "@/lib/actions/auth";
 import { generateInvoice, openDispute } from "@/lib/actions/freight";
+import {
+  filterInvoices,
+  invoiceFilterLabel,
+} from "@/lib/list-filters";
 import { createClient } from "@/lib/supabase/server";
 import { money, statusBadge } from "@/lib/types";
 import { canManageBilling } from "@/lib/roles";
@@ -12,10 +18,20 @@ import {
   parseNetDays,
 } from "@/lib/contract-terms";
 
-export default async function InvoicesPage() {
+export default async function InvoicesPage({
+  searchParams,
+}: {
+  searchParams?: Promise<Record<string, string | string[] | undefined>> | Record<string, string | string[] | undefined>;
+}) {
   const profile = await getCurrentProfile();
   if (!profile) redirect("/login");
   if (profile.role === "carrier" || profile.role === "broker") redirect("/dashboard");
+
+  const params = await resolveSearchParams(searchParams);
+  const filter = params.filter;
+  const filterLabel = invoiceFilterLabel(filter);
+  const today = new Date().toISOString().slice(0, 10);
+  const readyOnly = filter === "ready-to-bill";
 
   const supabase = await createClient();
   let invoiceQuery = supabase
@@ -26,6 +42,9 @@ export default async function InvoicesPage() {
     invoiceQuery = invoiceQuery.eq("customer_id", profile.customer_id);
   }
   const { data: invoices } = await invoiceQuery;
+  const visibleInvoices = readyOnly
+    ? []
+    : filterInvoices(invoices ?? [], filter, today);
 
   const billedIds = new Set(
     (invoices ?? [])
@@ -90,7 +109,9 @@ export default async function InvoicesPage() {
         </p>
       </div>
 
-      {canManageBilling(profile.role) && readyToBill.length > 0 ? (
+      {filterLabel ? <FilterBanner label={filterLabel} clearHref="/invoices" /> : null}
+
+      {canManageBilling(profile.role) && readyToBill.length > 0 && (!filter || readyOnly) ? (
         <div className="card bg-base-100 shadow-sm">
           <div className="card-body gap-3">
             <h2 className="card-title text-base">Ready to bill</h2>
@@ -149,7 +170,7 @@ export default async function InvoicesPage() {
       ) : null}
 
       <div className="space-y-4">
-        {(invoices ?? []).map((inv) => {
+        {visibleInvoices.map((inv) => {
           const balance = Number(inv.total) - Number(inv.amount_paid);
           return (
             <div key={inv.id} id={`focus-${inv.invoice_number}`} data-focus={inv.invoice_number} className="card bg-base-100 shadow-sm transition">
@@ -181,13 +202,33 @@ export default async function InvoicesPage() {
             </div>
           );
         })}
-        {(invoices ?? []).length === 0 ? (
+        {visibleInvoices.length === 0 && !readyOnly ? (
           <EmptyState
-            title="No invoices yet"
+            title={filterLabel ? "No matching invoices" : "No invoices yet"}
             description={
-              canManageBilling(profile.role)
-                ? "Generate an invoice from a delivered load with POD, or open Ready to bill above."
-                : "Invoices for your account will appear here once billing posts them."
+              filterLabel
+                ? "Nothing matches this filter right now."
+                : canManageBilling(profile.role)
+                  ? "Generate an invoice from a delivered load with POD, or open Ready to bill above."
+                  : "Invoices for your account will appear here once billing posts them."
+            }
+            action={
+              filterLabel ? (
+                <Link href="/invoices" className="btn btn-outline btn-sm">
+                  Show all invoices
+                </Link>
+              ) : undefined
+            }
+          />
+        ) : null}
+        {readyOnly && readyToBill.length === 0 ? (
+          <EmptyState
+            title="No loads ready to bill"
+            description="Delivered loads with POD will appear here when they still need an invoice."
+            action={
+              <Link href="/invoices" className="btn btn-outline btn-sm">
+                Show all invoices
+              </Link>
             }
           />
         ) : null}

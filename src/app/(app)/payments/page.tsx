@@ -1,5 +1,7 @@
+import Link from "next/link";
 import { redirect } from "next/navigation";
 import { EmptyState } from "@/components/EmptyState";
+import { FilterBanner, resolveSearchParams } from "@/components/FilterBanner";
 import { getCurrentProfile } from "@/lib/actions/auth";
 import { recordPayment } from "@/lib/actions/freight";
 import { createClient } from "@/lib/supabase/server";
@@ -22,12 +24,21 @@ function paymentMethodLabel(method: string | null | undefined) {
   }
 }
 
-export default async function PaymentsPage() {
+export default async function PaymentsPage({
+  searchParams,
+}: {
+  searchParams?: Promise<Record<string, string | string[] | undefined>> | Record<string, string | string[] | undefined>;
+}) {
   const profile = await getCurrentProfile();
   if (!profile) redirect("/login");
   if (profile.role === "carrier" || profile.role === "broker" || profile.role === "customer") {
     redirect("/dashboard");
   }
+
+  const params = await resolveSearchParams(searchParams);
+  const filter = params.filter;
+  const today = new Date().toISOString().slice(0, 10);
+  const monthPrefix = today.slice(0, 7);
 
   const supabase = await createClient();
   const { data: payments } = await supabase
@@ -39,7 +50,19 @@ export default async function PaymentsPage() {
     .select("id, invoice_number, total, amount_paid, status, customers(name)")
     .in("status", ["pending", "sent", "partial", "overdue"]);
 
-  const rows = payments ?? [];
+  const allRows = payments ?? [];
+  const rows =
+    filter === "today"
+      ? allRows.filter((p) => p.payment_date === today)
+      : filter === "month"
+        ? allRows.filter((p) => (p.payment_date ?? "").startsWith(monthPrefix))
+        : allRows;
+  const filterLabel =
+    filter === "today"
+      ? "payments received today"
+      : filter === "month"
+        ? "payments received this month"
+        : null;
 
   return (
     <div className="space-y-6">
@@ -49,6 +72,8 @@ export default async function PaymentsPage() {
           Record customer collections. Invoice balances update automatically.
         </p>
       </div>
+
+      {filterLabel ? <FilterBanner label={filterLabel} clearHref="/payments" /> : null}
 
       {canManageBilling(profile.role) ? (
         <div className="card bg-base-100 shadow-sm">
@@ -80,8 +105,19 @@ export default async function PaymentsPage() {
 
       {rows.length === 0 ? (
         <EmptyState
-          title="No payments recorded"
-          description="When you collect against an open invoice, the payment appears here and the invoice balance updates."
+          title={filterLabel ? "No matching payments" : "No payments recorded"}
+          description={
+            filterLabel
+              ? "Nothing matches this filter right now."
+              : "When you collect against an open invoice, the payment appears here and the invoice balance updates."
+          }
+          action={
+            filterLabel ? (
+              <Link href="/payments" className="btn btn-outline btn-sm">
+                Show all payments
+              </Link>
+            ) : undefined
+          }
         />
       ) : (
         <div className="overflow-x-auto rounded-box bg-base-100 shadow-sm">

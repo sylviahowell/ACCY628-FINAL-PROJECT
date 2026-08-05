@@ -1,5 +1,7 @@
+import Link from "next/link";
 import { Suspense } from "react";
 import { CollectionsWorklist } from "@/components/CollectionsWorklist";
+import { FilterBanner, resolveSearchParams } from "@/components/FilterBanner";
 import { FocusScroll } from "@/components/FocusScroll";
 import { StatusPie } from "@/components/Charts";
 import { requirePathAccess } from "@/lib/authz";
@@ -9,11 +11,23 @@ import {
   computeAging,
 } from "@/lib/collections";
 import { sanitizeDemoText } from "@/lib/display-text";
+import {
+  agingBucketForInvoice,
+  arFilterLabel,
+} from "@/lib/list-filters";
 import { createClient } from "@/lib/supabase/server";
 import { money } from "@/lib/types";
 
-export default async function AccountsReceivablePage() {
+export default async function AccountsReceivablePage({
+  searchParams,
+}: {
+  searchParams?: Promise<Record<string, string | string[] | undefined>> | Record<string, string | string[] | undefined>;
+}) {
   await requirePathAccess("/ar");
+  const params = await resolveSearchParams(searchParams);
+  const filter = params.filter;
+  const filterLabel = arFilterLabel(filter);
+
   const supabase = await createClient();
   const today = new Date().toISOString().slice(0, 10);
 
@@ -56,6 +70,32 @@ export default async function AccountsReceivablePage() {
     today,
   });
 
+  const filteredWorklist = (() => {
+    switch (filter) {
+      case "current":
+        return worklist.filter((i) => agingBucketForInvoice(i.dueDate, today) === "current");
+      case "past-due":
+        return worklist.filter((i) => i.daysOutstanding > 0);
+      case "cash-at-risk":
+        return worklist.filter((i) => i.daysOutstanding > 0 || i.disputeStatus === "open");
+      case "d1_30":
+        return worklist.filter((i) => agingBucketForInvoice(i.dueDate, today) === "d1_30");
+      case "d31_60":
+        return worklist.filter((i) => agingBucketForInvoice(i.dueDate, today) === "d31_60");
+      case "d61_90":
+        return worklist.filter((i) => agingBucketForInvoice(i.dueDate, today) === "d61_90");
+      case "d90_plus":
+        return worklist.filter((i) => agingBucketForInvoice(i.dueDate, today) === "d90_plus");
+      default:
+        return worklist;
+    }
+  })().sort((a, b) => b.daysOutstanding - a.daysOutstanding || b.balance - a.balance);
+
+  const tileClass = (active: boolean) =>
+    `stats block w-full bg-base-100 shadow-sm transition hover:shadow-md ${
+      active ? "ring-2 ring-primary" : ""
+    }`;
+
   return (
     <div className="space-y-6">
       <Suspense fallback={null}>
@@ -68,31 +108,33 @@ export default async function AccountsReceivablePage() {
         </p>
       </div>
 
+      {filterLabel ? <FilterBanner label={filterLabel} clearHref="/ar" /> : null}
+
       <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-        <div className="stats bg-base-100 shadow-sm">
+        <Link href="/ar" className={tileClass(!filter)}>
           <div className="stat">
             <div className="stat-title">Total AR</div>
             <div className="stat-value text-xl">{money(totalAr)}</div>
           </div>
-        </div>
-        <div className="stats bg-base-100 shadow-sm">
+        </Link>
+        <Link href="/ar?filter=current" className={tileClass(filter === "current")}>
           <div className="stat">
             <div className="stat-title">Current</div>
             <div className="stat-value text-xl">{money(aging.current)}</div>
           </div>
-        </div>
-        <div className="stats bg-base-100 shadow-sm">
+        </Link>
+        <Link href="/ar?filter=past-due" className={tileClass(filter === "past-due")}>
           <div className="stat">
             <div className="stat-title">Past due</div>
             <div className="stat-value text-xl">{money(pastDue)}</div>
           </div>
-        </div>
-        <div className="stats bg-base-100 shadow-sm">
+        </Link>
+        <Link href="/ar?filter=d90_plus" className={tileClass(filter === "d90_plus")}>
           <div className="stat">
             <div className="stat-title">90+ days</div>
             <div className="stat-value text-xl text-error">{money(aging.d90_plus)}</div>
           </div>
-        </div>
+        </Link>
       </div>
 
       <div className="card bg-base-100 shadow-sm">
@@ -102,7 +144,7 @@ export default async function AccountsReceivablePage() {
         </div>
       </div>
 
-      <CollectionsWorklist items={worklist} />
+      <CollectionsWorklist items={filteredWorklist} />
     </div>
   );
 }

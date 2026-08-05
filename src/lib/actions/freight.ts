@@ -99,9 +99,6 @@ function toastErrorPath(path: string, message: string) {
   return `${path}${join}toastError=${encodeURIComponent(message)}`;
 }
 
-/** Mark active contracts past end_date as expired (called at booking touchpoints). */
-export { expirePastEndContracts } from "@/lib/actions/contracts-lifecycle";
-
 async function insertDepositInvoice(opts: {
   supabase: Awaited<ReturnType<typeof createClient>>;
   shipmentId: string;

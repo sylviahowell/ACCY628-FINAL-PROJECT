@@ -13,8 +13,10 @@ export type InvoiceCardMeta = {
   card: ReactNode;
 };
 
-function initialFilter(param: string | null): InvoiceFilter {
-  if (param === "ready" || param === "overdue" || param === "open") return param;
+function initialFilter(status: string | null, filter: string | null): InvoiceFilter {
+  if (status === "ready" || status === "overdue" || status === "open") return status;
+  if (filter === "ready-to-bill") return "ready";
+  if (filter === "overdue" || filter === "open") return filter;
   return "all";
 }
 
@@ -83,10 +85,12 @@ function InvoicesTriageInner({
   emptyAll: ReactNode;
 }) {
   const params = useSearchParams();
-  const [filter, setFilter] = useState<InvoiceFilter>(() => initialFilter(params.get("status")));
+  const [filter, setFilter] = useState<InvoiceFilter>(() =>
+    initialFilter(params.get("status"), params.get("filter")),
+  );
 
   useEffect(() => {
-    setFilter(initialFilter(params.get("status")));
+    setFilter(initialFilter(params.get("status"), params.get("filter")));
   }, [params]);
 
   return (

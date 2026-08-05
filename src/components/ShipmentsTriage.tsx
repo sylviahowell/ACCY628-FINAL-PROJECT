@@ -23,10 +23,12 @@ export type ShipmentListRow = {
 
 export type ShipStatusFilter = "all" | "delayed" | "unassigned" | "ready";
 
-function initialStatus(param: string | null): ShipStatusFilter {
-  if (param === "delayed" || param === "unassigned" || param === "ready") {
-    return param;
+function initialStatus(status: string | null, filter: string | null): ShipStatusFilter {
+  if (status === "delayed" || status === "unassigned" || status === "ready") {
+    return status;
   }
+  if (filter === "delayed" || filter === "unassigned") return filter;
+  if (filter === "ready-to-bill") return "ready";
   return "all";
 }
 
@@ -86,11 +88,13 @@ function ShipmentsTriageInner({
   showDocsReady: boolean;
 }) {
   const params = useSearchParams();
-  const [filter, setFilter] = useState<ShipStatusFilter>(() => initialStatus(params.get("status")));
+  const [filter, setFilter] = useState<ShipStatusFilter>(() =>
+    initialStatus(params.get("status"), params.get("filter")),
+  );
   const focus = params.get("focus");
 
   useEffect(() => {
-    setFilter(initialStatus(params.get("status")));
+    setFilter(initialStatus(params.get("status"), params.get("filter")));
   }, [params]);
 
   const delayed = rows.filter((r) => r.isDelayed).length;

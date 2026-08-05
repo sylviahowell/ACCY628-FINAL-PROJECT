@@ -1,23 +1,43 @@
+import Link from "next/link";
 import { redirect } from "next/navigation";
 import { EmptyState } from "@/components/EmptyState";
+import { FilterBanner, resolveSearchParams } from "@/components/FilterBanner";
 import { InvoicesTriage, type InvoiceCardMeta } from "@/components/InvoicesTriage";
 import { getCurrentProfile } from "@/lib/actions/auth";
 import { generateInvoice, openDispute } from "@/lib/actions/freight";
+import { filterInvoices, invoiceFilterLabel } from "@/lib/list-filters";
 import { createClient } from "@/lib/supabase/server";
 import { money, statusBadge } from "@/lib/types";
 import { canManageBilling } from "@/lib/roles";
-import {
-  fuelSurchargeAmount,
-  parseNetDays,
-} from "@/lib/contract-terms";
+import { fuelSurchargeAmount, parseNetDays } from "@/lib/contract-terms";
 
-export default async function InvoicesPage() {
+/** Map manager-nav `?status=` shortcuts onto the shared `?filter=` vocabulary. */
+function resolveInvoiceFilter(params: Record<string, string | undefined>) {
+  if (params.filter) return params.filter;
+  if (params.status === "ready") return "ready-to-bill";
+  if (params.status === "overdue") return "overdue";
+  if (params.status === "open") return "open";
+  return undefined;
+}
+
+export default async function InvoicesPage({
+  searchParams,
+}: {
+  searchParams?:
+    | Promise<Record<string, string | string[] | undefined>>
+    | Record<string, string | string[] | undefined>;
+}) {
   const profile = await getCurrentProfile();
   if (!profile) redirect("/login");
   if (profile.role === "carrier" || profile.role === "broker") redirect("/dashboard");
 
-  const supabase = await createClient();
+  const params = await resolveSearchParams(searchParams);
+  const filter = resolveInvoiceFilter(params);
+  const filterLabel = invoiceFilterLabel(filter);
   const today = new Date().toISOString().slice(0, 10);
+  const readyOnly = filter === "ready-to-bill";
+
+  const supabase = await createClient();
 
   let invoiceQuery = supabase
     .from("invoices")
@@ -27,9 +47,11 @@ export default async function InvoicesPage() {
     invoiceQuery = invoiceQuery.eq("customer_id", profile.customer_id);
   }
   const { data: invoices } = await invoiceQuery;
+  const allInvoices = invoices ?? [];
+  const visibleInvoices = readyOnly ? [] : filterInvoices(allInvoices, filter, today);
 
   const billedIds = new Set(
-    (invoices ?? [])
+    allInvoices
       .filter((i) => i.status !== "cancelled" && i.shipment_id)
       .map((i) => i.shipment_id as string),
   );
@@ -59,9 +81,7 @@ export default async function InvoicesPage() {
         "id, load_number, status, customer_rate, contract_id, customer_id, customers(name), proof_of_delivery(id, signed_by), contracts(payment_terms, billing_terms, fuel_surcharge_pct)",
       )
       .in("status", ["delivered", "completed"]);
-    readyToBill = ((data ?? []) as unknown as ReadyRow[]).filter(
-      (s) => !billedIds.has(s.id),
-    );
+    readyToBill = ((data ?? []) as unknown as ReadyRow[]).filter((s) => !billedIds.has(s.id));
   }
 
   const customerTerms = new Map<string, string>();
@@ -78,7 +98,7 @@ export default async function InvoicesPage() {
 
   let overdueCount = 0;
   let openCount = 0;
-  const invoiceCards: InvoiceCardMeta[] = (invoices ?? []).map((inv) => {
+  const invoiceCards: InvoiceCardMeta[] = visibleInvoices.map((inv) => {
     const balance = Number(inv.total) - Number(inv.amount_paid);
     const isClosed = ["paid", "cancelled"].includes(inv.status) || balance <= 0;
     const isOpen = !isClosed;
@@ -142,6 +162,21 @@ export default async function InvoicesPage() {
       ),
     };
   });
+
+  // Chip counts should reflect the full book when not in a dashboard deep-link,
+  // and the filtered subset when one is active.
+  if (!filter || filter === "ready-to-bill") {
+    overdueCount = 0;
+    openCount = 0;
+    for (const inv of allInvoices) {
+      const balance = Number(inv.total) - Number(inv.amount_paid);
+      const isClosed = ["paid", "cancelled"].includes(inv.status) || balance <= 0;
+      const isOpen = !isClosed;
+      const isOverdue = isOpen && Boolean(inv.due_date && inv.due_date < today);
+      if (isOpen) openCount += 1;
+      if (isOverdue) overdueCount += 1;
+    }
+  }
 
   const showReady = canManageBilling(profile.role);
   const readyWithPod = readyToBill.filter((s) => (s.proof_of_delivery ?? []).length > 0).length;
@@ -217,6 +252,8 @@ export default async function InvoicesPage() {
         </p>
       </div>
 
+      {filterLabel ? <FilterBanner label={filterLabel} clearHref="/invoices" /> : null}
+
       <InvoicesTriage
         readyCount={showReady ? readyWithPod : 0}
         overdueCount={overdueCount}
@@ -226,15 +263,36 @@ export default async function InvoicesPage() {
         invoices={invoiceCards}
         emptyAll={
           <EmptyState
-            title="No invoices yet"
+            title={filterLabel ? "No matching invoices" : "No invoices yet"}
             description={
-              canManageBilling(profile.role)
-                ? "Generate an invoice from a delivered load with POD, or open Ready to bill above."
-                : "Invoices for your account will appear here once billing posts them."
+              filterLabel
+                ? "Nothing matches this filter right now."
+                : canManageBilling(profile.role)
+                  ? "Generate an invoice from a delivered load with POD, or open Ready to bill above."
+                  : "Invoices for your account will appear here once billing posts them."
+            }
+            action={
+              filterLabel ? (
+                <Link href="/invoices" className="btn btn-outline btn-sm">
+                  Show all invoices
+                </Link>
+              ) : undefined
             }
           />
         }
       />
+
+      {readyOnly && readyToBill.length === 0 ? (
+        <EmptyState
+          title="No loads ready to bill"
+          description="Delivered loads with POD will appear here when they still need an invoice."
+          action={
+            <Link href="/invoices" className="btn btn-outline btn-sm">
+              Show all invoices
+            </Link>
+          }
+        />
+      ) : null}
     </div>
   );
 }

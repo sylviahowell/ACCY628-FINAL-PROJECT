@@ -14,6 +14,7 @@ import {
   MoreHorizontal,
   Package,
   Settings,
+  ShieldAlert,
   Truck,
   Users,
   Wallet,
@@ -169,6 +170,7 @@ function navFor(
         primary: [
           { href: "/dashboard", label: "Executive Dashboard", icon: i(<LayoutDashboard className="h-4 w-4" />) },
           { href: "/warnings", label: "Warnings", icon: i(<AlertTriangle className="h-4 w-4" />) },
+          { href: "/risk", label: "Risk & Credit", icon: i(<ShieldAlert className="h-4 w-4" />) },
           { href: "/approvals", label: "Approvals", icon: i(<CheckSquare className="h-4 w-4" />) },
           {
             href: "/shipments",

@@ -142,7 +142,7 @@ export default async function SettingsPage() {
         <SettingsCard
           icon={<Palette className="h-5 w-5" aria-hidden />}
           title="Appearance"
-          description="Choose how FreightFlow looks on this device."
+          description="Choose how RowanLane looks on this device."
         >
           <ThemeSelector />
         </SettingsCard>
@@ -185,7 +185,7 @@ export default async function SettingsPage() {
           <SettingsCard
             icon={<Building2 className="h-5 w-5" aria-hidden />}
             title="Company of record"
-            description="Shipper profile linked to this portal account. Contact FreightFlow to request changes."
+            description="Shipper profile linked to this portal account. Contact RowanLane to request changes."
           >
             {customerRecord ? (
               <dl className="divide-y divide-base-300 rounded-lg border border-base-300">
@@ -218,7 +218,7 @@ export default async function SettingsPage() {
           <SettingsCard
             icon={<Truck className="h-5 w-5" aria-hidden />}
             title="Carrier profile"
-            description="Authority and contact details on file with FreightFlow. Read-only from your carrier record."
+            description="Authority and contact details on file with RowanLane. Read-only from your carrier record."
           >
             {carrierRecord ? (
               <dl className="divide-y divide-base-300 rounded-lg border border-base-300">
@@ -252,7 +252,7 @@ export default async function SettingsPage() {
           <SettingsCard
             icon={<Building2 className="h-5 w-5" aria-hidden />}
             title="Brokerage profile"
-            description="Company identity used when presenting FreightFlow."
+            description="Company identity used when presenting RowanLane."
           >
             <CompanyProfileSettings />
           </SettingsCard>

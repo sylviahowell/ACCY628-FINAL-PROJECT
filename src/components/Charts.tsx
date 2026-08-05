@@ -132,12 +132,19 @@ export function StatusPie({
     <div className="h-64 w-full">
       <ResponsiveContainer width="100%" height="100%">
         <PieChart>
-          <Pie data={data} dataKey="value" nameKey="name" outerRadius={90} label>
+          <Pie
+            data={data}
+            dataKey="value"
+            nameKey="name"
+            outerRadius={90}
+            label={({ value }) => money(Number(value ?? 0))}
+          >
             {data.map((_, i) => (
               <Cell key={i} fill={palette[i % palette.length]} />
             ))}
           </Pie>
           <Tooltip
+            formatter={(value) => money(Number(value ?? 0))}
             contentStyle={{
               background: "var(--color-base-100)",
               borderColor: "var(--color-base-300)",

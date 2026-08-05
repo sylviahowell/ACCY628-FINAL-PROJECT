@@ -76,10 +76,10 @@ export function computeAging(
 export function agingChartData(aging: AgingBuckets) {
   return [
     { name: "Current", value: Math.round(aging.current) },
-    { name: "1-30", value: Math.round(aging.d1_30) },
-    { name: "31-60", value: Math.round(aging.d31_60) },
-    { name: "61-90", value: Math.round(aging.d61_90) },
-    { name: "90+", value: Math.round(aging.d90_plus) },
+    { name: "1–30 days", value: Math.round(aging.d1_30) },
+    { name: "31–60 days", value: Math.round(aging.d31_60) },
+    { name: "61–90 days", value: Math.round(aging.d61_90) },
+    { name: "90+ days", value: Math.round(aging.d90_plus) },
   ];
 }
 

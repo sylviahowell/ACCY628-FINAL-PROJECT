@@ -114,8 +114,8 @@ export default async function SupportPage() {
           <div className="card-body">
             <h2 className="card-title text-base">Brokerage contact</h2>
             <p className="text-sm">
-              FreightFlow Support Desk ·{" "}
-              <span className="font-mono">support@freightflow.com</span> · (312) 555-0199
+              RowanLane Support Desk ·{" "}
+              <span className="font-mono">support@rowanlane.com</span> · (312) 555-0199
             </p>
             <p className="text-xs opacity-60">
               Support hours Mon–Fri 8am–6pm CT · tickets are routed to your account team.

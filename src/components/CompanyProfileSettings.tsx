@@ -14,10 +14,10 @@ export type CompanyProfile = {
 };
 
 export const DEFAULT_COMPANY: CompanyProfile = {
-  companyName: "FreightFlow Logistics",
+  companyName: "RowanLane Logistics",
   mcNumber: "MC-884291",
   phone: "(312) 555-0140",
-  email: "ops@freightflow.example",
+  email: "ops@rowanlane.example",
   address: "200 W Madison St, Suite 2100, Chicago, IL 60606",
 };
 

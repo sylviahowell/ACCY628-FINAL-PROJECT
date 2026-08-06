@@ -95,7 +95,7 @@ export function buildHeatmap(rows: ProfitRow[], dimension: HeatDimension): HeatC
       case "customer":
         key = r.customer_id;
         label = r.customer_name;
-        href = "/customers";
+        href = `/profitability?customer=${encodeURIComponent(r.customer_id)}#customer-performance`;
         break;
       case "carrier":
         key = r.carrier_id ?? "unassigned";

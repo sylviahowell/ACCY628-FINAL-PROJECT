@@ -15,7 +15,7 @@ export function RowanLaneBrand({
       <RowanLaneMark size={46} />
 
       <div className="flex min-w-0 flex-col justify-center">
-        <p className="text-[1.4rem] font-extrabold leading-none tracking-tight text-[#0A1F3D]">
+        <p className="font-brand text-[1.45rem] font-extrabold leading-none text-[#0A1F3D]">
           RowanLane
         </p>
         <p className="mt-1 text-[11px] font-normal leading-snug text-[#9AABBD]">

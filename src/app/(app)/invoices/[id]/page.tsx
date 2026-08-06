@@ -128,7 +128,7 @@ export default async function InvoiceDetailPage({
         <div className="card-body gap-6">
           <div className="flex flex-wrap justify-between gap-4 border-b border-base-300 pb-4">
             <div>
-              <p className="text-xl font-bold tracking-tight">RowanLane</p>
+              <p className="font-brand text-xl font-bold">RowanLane</p>
               <p className="text-sm opacity-70">Freight brokerage invoice</p>
             </div>
             <div className="text-right text-sm">

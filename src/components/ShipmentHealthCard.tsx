@@ -4,7 +4,7 @@ import { categoryBadgeClass } from "@/lib/shipment-health";
 
 export function CustomerFriendlyStatusCard({ health }: { health: FriendlyHealth }) {
   return (
-    <div className="card bg-base-100 shadow-sm">
+    <div className="card border border-base-300 bg-base-100 shadow-sm">
       <div className="card-body gap-2">
         <div className="flex flex-wrap items-center justify-between gap-2">
           <h2 className="card-title text-base">Shipment status</h2>
@@ -28,7 +28,7 @@ export function ShipmentHealthCard({
   audience?: "internal" | "carrier";
 }) {
   return (
-    <div className="card bg-base-100 shadow-sm">
+    <div className="card border border-base-300 bg-base-100 shadow-sm">
       <div className="card-body gap-2">
         <div className="flex flex-wrap items-center justify-between gap-2">
           <h2 className="card-title text-base">

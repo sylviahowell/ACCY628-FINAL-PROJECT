@@ -131,7 +131,10 @@ function ApprovalsBody({
               </div>
               <p className="mt-1 text-sm opacity-70">{sanitizeDemoText(a.reason)}</p>
               {a.shipmentHref ? (
-                <Link href={a.shipmentHref} className="link link-primary mt-1 inline-block text-xs">
+                <Link
+                  href={a.shipmentHref}
+                  className="btn btn-outline btn-primary btn-sm mt-2"
+                >
                   Open load
                 </Link>
               ) : null}

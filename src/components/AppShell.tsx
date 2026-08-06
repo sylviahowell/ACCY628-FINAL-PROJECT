@@ -1,4 +1,5 @@
 import { Suspense, type ReactNode } from "react";
+import Link from "next/link";
 import {
   AlertTriangle,
   Banknote,
@@ -225,17 +226,17 @@ function navFor(
             icon: i(<LineChart className="h-4 w-4" />),
             children: [
               {
-                href: "/profitability?band=unprofitable&dim=shipment&focus=margin-leaderboard",
+                href: "/profitability#customer-performance",
                 label: "Loss loads",
                 count: pr.losses,
               },
               {
-                href: "/profitability?band=low&dim=shipment&focus=margin-leaderboard",
+                href: "/profitability#customer-performance",
                 label: "Low margin",
                 count: pr.lowMargin,
               },
               {
-                href: "/profitability?focus=margin-leaderboard",
+                href: "/profitability#customer-performance",
                 label: "Overview",
               },
             ],
@@ -417,15 +418,19 @@ export function AppShell({
             </label>
           </div>
           <div className="flex min-w-0 flex-1 basis-[min(100%,18rem)] items-center gap-3 sm:gap-4">
-            <div className="flex shrink-0 items-center gap-2.5">
+            <Link
+              href="/dashboard"
+              className="flex shrink-0 items-center gap-2.5 rounded-box outline-offset-2 hover:opacity-90 focus-visible:outline focus-visible:outline-2 focus-visible:outline-primary"
+              aria-label="Go to dashboard"
+            >
               <RowanLaneMark size={42} />
               <div className="min-w-0">
-                <p className="text-xl font-bold tracking-tight text-primary">RowanLane</p>
+                <p className="font-brand text-xl font-bold text-primary">RowanLane</p>
                 <p className="hidden text-xs font-medium tracking-wide text-base-content/50 sm:block">
                   Contract to cash
                 </p>
               </div>
-            </div>
+            </Link>
             <GlobalSearch placeholder={searchPlaceholderForRole(profile.role)} />
           </div>
           <div className="flex min-w-0 shrink-0 grow basis-auto items-center justify-end gap-2 sm:gap-3">
@@ -462,17 +467,21 @@ export function AppShell({
         </main>
       </div>
 
-      <div className="drawer-side z-40">
+      <div className="drawer-side z-40 lg:h-screen">
         <label htmlFor="app-drawer" className="drawer-overlay" aria-label="Close menu" />
-        <aside className="flex min-h-full w-72 flex-col border-r border-base-300 bg-base-100 text-base-content">
-          <div className="app-sidebar-brand border-b border-base-300 p-5">
-            <div className="flex items-center gap-3">
+        <aside className="flex max-h-screen w-72 flex-col border-r border-base-300 bg-base-100 text-base-content max-lg:min-h-full lg:sticky lg:top-0 lg:h-screen">
+          <div className="app-sidebar-brand shrink-0 border-b border-base-300 p-5">
+            <Link
+              href="/dashboard"
+              className="flex items-center gap-3 rounded-box outline-offset-2 hover:opacity-90 focus-visible:outline focus-visible:outline-2 focus-visible:outline-primary"
+              aria-label="Go to dashboard"
+            >
               <RowanLaneMark size={46} />
               <div className="min-w-0">
-                <p className="text-xl font-bold tracking-tight text-primary">RowanLane</p>
+                <p className="font-brand text-xl font-bold text-primary">RowanLane</p>
                 <p className="text-sm font-medium text-base-content/80">{roleDisplay}</p>
               </div>
-            </div>
+            </Link>
             <p className="mt-2 text-xs leading-snug text-base-content/55">
               {ROLE_PORTAL_BLURB[profile.role]}
             </p>
@@ -482,9 +491,11 @@ export function AppShell({
               </p>
             ) : null}
           </div>
-          <Suspense fallback={<AppShellNavFallback profile={profile} />}>
-            <AppShellNav profile={profile} />
-          </Suspense>
+          <div className="flex min-h-0 flex-1 flex-col overflow-y-auto overscroll-contain">
+            <Suspense fallback={<AppShellNavFallback profile={profile} />}>
+              <AppShellNav profile={profile} />
+            </Suspense>
+          </div>
         </aside>
       </div>
     </div>

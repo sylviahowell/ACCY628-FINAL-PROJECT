@@ -1,5 +1,5 @@
 import { daysPastDue } from "@/lib/collections";
-import { money } from "@/lib/types";
+import { money, formatStatusLabel } from "@/lib/types";
 
 export type DecideNowTone = "warning" | "error" | "info";
 
@@ -152,7 +152,7 @@ export function buildDecideNowCandidates(input: {
       detail: input.sanitize(
         `${input.approvals.length} waiting · oldest ${ageLabel(ageDays)}${
           focusLoad ? ` · ${focusLoad}` : ""
-        } · ${oldest.request_type}`,
+        } · ${formatStatusLabel(oldest.request_type)}`,
       ),
       href,
       tone: ageDays >= 3 ? "error" : "warning",

@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { useMemo, useState } from "react";
 import type { CollectionWorkItem } from "@/lib/collections";
-import { money } from "@/lib/types";
+import { money, formatStatusLabel } from "@/lib/types";
 import { addCollectionNote, writeOffInvoice } from "@/lib/actions/freight";
 
 type Filter = "all" | "overdue" | "disputed" | "high";
@@ -31,7 +31,7 @@ export function CollectionsWorklist({ items }: { items: CollectionWorkItem[] }) 
   }, [items, filter]);
 
   return (
-    <div className="card bg-base-100 shadow-sm">
+    <div className="card border border-base-300 bg-base-100 shadow-sm">
       <div className="card-body gap-3">
         <div className="flex flex-wrap items-end justify-between gap-3">
           <div>
@@ -91,7 +91,9 @@ export function CollectionsWorklist({ items }: { items: CollectionWorkItem[] }) 
                       <td className="font-medium">{item.customerName}</td>
                       <td>
                         <span className="font-medium">{item.invoiceNumber}</span>
-                        <div className="text-xs opacity-60">{item.status}</div>
+                        <div className="text-xs opacity-60">
+                          {formatStatusLabel(item.status)}
+                        </div>
                       </td>
                       <td>{money(item.balance)}</td>
                       <td

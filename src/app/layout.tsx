@@ -1,11 +1,18 @@
 import type { Metadata } from "next";
-import { Source_Sans_3 } from "next/font/google";
+import { Fraunces, Source_Sans_3 } from "next/font/google";
 import { AppearanceBoot } from "@/components/AppearanceBoot";
 import "./globals.css";
 
 const sans = Source_Sans_3({
   variable: "--font-source-sans",
   subsets: ["latin"],
+});
+
+/** Brand wordmark — distinct from UI body copy */
+const brand = Fraunces({
+  variable: "--font-brand",
+  subsets: ["latin"],
+  weight: ["600", "700", "800"],
 });
 
 export const metadata: Metadata = {
@@ -21,7 +28,7 @@ export default function RootLayout({
     <html
       lang="en"
       data-theme="corporate"
-      className={`${sans.variable} h-full`}
+      className={`${sans.variable} ${brand.variable} h-full`}
       suppressHydrationWarning
     >
       <body className="min-h-full bg-base-200 text-base-content antialiased">

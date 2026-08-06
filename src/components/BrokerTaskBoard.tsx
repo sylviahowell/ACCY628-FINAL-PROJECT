@@ -7,6 +7,7 @@ import {
   type BrokerFilter,
   type BrokerTask,
 } from "@/lib/broker-tasks";
+import { formatStatusLabel, statusBadge } from "@/lib/types";
 
 const FILTERS: { id: BrokerFilter; label: string }[] = [
   { id: "all", label: "All tasks" },
@@ -46,7 +47,7 @@ export function BrokerTaskBoard({
   }, [tasks, filter, profileId, today]);
 
   return (
-    <div className="card bg-base-100 shadow-sm">
+    <div className="card border border-base-300 bg-base-100 shadow-sm">
       <div className="card-body gap-3">
         <div className="flex flex-wrap items-end justify-between gap-3">
           <div>
@@ -109,7 +110,9 @@ export function BrokerTaskBoard({
                     <td className="max-w-[14rem] truncate text-xs">{t.route}</td>
                     <td className="text-xs">{t.deadline ?? "—"}</td>
                     <td>
-                      <span className="badge badge-ghost badge-sm">{t.status}</span>
+                      <span className={`badge badge-sm ${statusBadge(t.status)}`}>
+                        {formatStatusLabel(t.status)}
+                      </span>
                     </td>
                     <td className="text-sm">{t.action}</td>
                   </tr>

@@ -12,6 +12,7 @@ import {
 } from "react-leaflet";
 import "leaflet/dist/leaflet.css";
 import { coordKey, lookupCoords, type LatLng } from "@/lib/geo";
+import { formatStatusLabel } from "@/lib/types";
 import {
   interpolateAlongPath,
   lookupRoutePath,
@@ -374,7 +375,7 @@ export function ShipmentMap({
                   </span>
                   <span className="text-xs opacity-70">
                     Promised {s.promised_delivery_date} · {daysLate} day
-                    {daysLate === 1 ? "" : "s"} late · {s.status.replaceAll("_", " ")}
+                    {daysLate === 1 ? "" : "s"} late · {formatStatusLabel(s.status)}
                   </span>
                 </li>
               ))}
@@ -612,7 +613,7 @@ function HubPopup({ hub }: { hub: CityHub }) {
             </Link>
             <span className="opacity-70">
               {" "}
-              · {s.status.replaceAll("_", " ")}
+              · {formatStatusLabel(s.status)}
               {delayed ? " · delayed" : ""} · {s.customer_name}
             </span>
           </li>
@@ -646,7 +647,7 @@ function ShipmentPopup({
           {s.origin_city}, {s.origin_state} → {s.dest_city}, {s.dest_state}
         </li>
         <li>
-          Status: {s.status.replaceAll("_", " ")}
+          Status: {formatStatusLabel(s.status)}
           {delayed ? " · delayed (past promised delivery)" : ""}
         </li>
         {progressPct != null ? <li>Schedule progress: ~{progressPct}%</li> : null}

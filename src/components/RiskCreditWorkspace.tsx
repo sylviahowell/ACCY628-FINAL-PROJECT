@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import {
   type CarrierRiskRow,
   type CreditStatus,
@@ -36,9 +36,11 @@ const CARRIER_RISK_ORDER: Record<InsuranceRiskStatus, number> = {
 export function RiskCreditWorkspace({
   customers,
   carriers,
+  focusId = null,
 }: {
   customers: CustomerCreditRow[];
   carriers: CarrierRiskRow[];
+  focusId?: string | null;
 }) {
   const [creditFilter, setCreditFilter] = useState<CreditFilter>("all");
   const [carrierFilter, setCarrierFilter] = useState<CarrierFilter>("all");
@@ -46,6 +48,23 @@ export function RiskCreditWorkspace({
   const [carrierSort, setCarrierSort] = useState<CarrierSort>("risk");
   const [creditQuery, setCreditQuery] = useState("");
   const [carrierQuery, setCarrierQuery] = useState("");
+
+  useEffect(() => {
+    if (!focusId) return;
+    const customer = customers.find((c) => c.id === focusId);
+    if (customer) {
+      setCreditFilter(
+        customer.onCreditHold ? "hold" : customer.status === "ok" ? "all" : customer.status,
+      );
+      setCreditQuery("");
+      return;
+    }
+    const carrier = carriers.find((c) => c.id === focusId);
+    if (carrier) {
+      setCarrierFilter(carrier.status === "current" ? "all" : carrier.status);
+      setCarrierQuery("");
+    }
+  }, [focusId, customers, carriers]);
 
   const creditCounts = useMemo(() => {
     const counts = {
@@ -84,6 +103,10 @@ export function RiskCreditWorkspace({
           ? customers.filter((c) => c.onCreditHold)
           : customers.filter((c) => c.status === creditFilter);
     if (q) rows = rows.filter((c) => c.name.toLowerCase().includes(q));
+    if (focusId && !rows.some((c) => c.id === focusId)) {
+      const focused = customers.find((c) => c.id === focusId);
+      if (focused) rows = [focused, ...rows];
+    }
     return [...rows].sort((a, b) => {
       if (creditSort === "name") return a.name.localeCompare(b.name);
       if (creditSort === "openAr") return b.openAr - a.openAr;
@@ -94,7 +117,7 @@ export function RiskCreditWorkspace({
       if (risk !== 0) return risk;
       return b.openAr - a.openAr;
     });
-  }, [customers, creditFilter, creditQuery, creditSort]);
+  }, [customers, creditFilter, creditQuery, creditSort, focusId]);
 
   const visibleCarriers = useMemo(() => {
     const q = carrierQuery.trim().toLowerCase();
@@ -103,6 +126,10 @@ export function RiskCreditWorkspace({
         ? carriers
         : carriers.filter((c) => c.status === carrierFilter);
     if (q) rows = rows.filter((c) => c.name.toLowerCase().includes(q));
+    if (focusId && !rows.some((c) => c.id === focusId)) {
+      const focused = carriers.find((c) => c.id === focusId);
+      if (focused) rows = [focused, ...rows];
+    }
     return [...rows].sort((a, b) => {
       if (carrierSort === "name") return a.name.localeCompare(b.name);
       if (carrierSort === "activeLoads") return b.activeLoads - a.activeLoads;
@@ -115,7 +142,7 @@ export function RiskCreditWorkspace({
       if (risk !== 0) return risk;
       return (a.daysUntilExpiry ?? 9999) - (b.daysUntilExpiry ?? 9999);
     });
-  }, [carriers, carrierFilter, carrierQuery, carrierSort]);
+  }, [carriers, carrierFilter, carrierQuery, carrierSort, focusId]);
 
   return (
     <div className="space-y-8">
@@ -214,7 +241,12 @@ export function RiskCreditWorkspace({
                 </tr>
               ) : (
                 visibleCustomers.map((c) => (
-                  <tr key={c.id} className="hover">
+                  <tr
+                    key={c.id}
+                    id={`focus-${c.id}`}
+                    data-focus={c.id}
+                    className="hover"
+                  >
                     <td className="font-medium">
                       <span className="inline-flex flex-wrap items-center gap-1.5">
                         {c.name}
@@ -329,7 +361,12 @@ export function RiskCreditWorkspace({
                 </tr>
               ) : (
                 visibleCarriers.map((c) => (
-                  <tr key={c.id} className="hover">
+                  <tr
+                    key={c.id}
+                    id={`focus-${c.id}`}
+                    data-focus={c.id}
+                    className="hover"
+                  >
                     <td className="font-medium">{c.name}</td>
                     <td>{c.insuranceExpiration ?? "—"}</td>
                     <td>

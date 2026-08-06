@@ -13,10 +13,7 @@ import {
   Truck,
   Wallet,
 } from "lucide-react";
-import {
-  KpiRibbon,
-  MorningBriefCard,
-} from "@/components/ExecutivePanels";
+import { MorningBriefCard } from "@/components/ExecutivePanels";
 import { BillingInsightsPanel, UnbilledQueuePanel } from "@/components/BillingPanels";
 import { BrokerTaskBoard } from "@/components/BrokerTaskBoard";
 import { CarrierTaskList } from "@/components/CarrierTaskList";
@@ -31,9 +28,8 @@ import { ProfitabilityHeatmap } from "@/components/ProfitabilityHeatmap";
 import { ShipmentMapLazy } from "@/components/ShipmentMapLazy";
 import { DecideNowRail } from "@/components/DecideNowRail";
 import { EmptyState } from "@/components/EmptyState";
-import { HorizontalBars, MonthlyBars, StatusPie } from "@/components/Charts";
+import { StatusPie } from "@/components/Charts";
 import { requirePathAccess } from "@/lib/authz";
-import { bucketByMonth } from "@/lib/analytics";
 import { buildBrokerTasks, brokerTaskStats } from "@/lib/broker-tasks";
 import { buildCarrierScorecards } from "@/lib/carrier-scorecard";
 import {
@@ -57,7 +53,7 @@ import {
 } from "@/lib/payables";
 import { toHeatRows } from "@/lib/heatmap";
 import { buildExecutiveKpis, inRange, monthBounds } from "@/lib/kpi";
-import { buildMorningBrief } from "@/lib/morning-brief";
+import { morningBriefGreeting } from "@/lib/morning-brief";
 import { isActiveFinalInvoice } from "@/lib/invoice-helpers";
 import {
   buildCarrierTasks,
@@ -215,16 +211,6 @@ export default async function DashboardPage() {
       .filter(Boolean),
   );
 
-  const revenue = profitList.reduce(
-    (s, p) =>
-      s +
-      Number(p.customer_rate) +
-      Number(p.billable_accessorials) -
-      Number(p.discount_amount || 0),
-    0,
-  );
-  const grossProfit = profitList.reduce((s, p) => s + Number(p.margin), 0);
-  const marginPct = revenue > 0 ? (grossProfit / revenue) * 100 : 0;
   const ar = invList.reduce(
     (s, i) => s + Math.max(0, Number(i.total) - Number(i.amount_paid)),
     0,
@@ -233,46 +219,6 @@ export default async function DashboardPage() {
     const bal = Number(i.total) - Number(i.amount_paid);
     return bal > 0 && i.due_date < today && !["paid", "cancelled"].includes(i.status);
   });
-
-  // Real monthly series: invoice issue dates for revenue; shipment activity dates for margin
-  const monthlyRev = bucketByMonth(
-    invList
-      .filter((i) => i.status !== "cancelled")
-      .map((i) => ({ date: i.issue_date, amount: Number(i.total) })),
-    6,
-  );
-  const monthlyProfit = bucketByMonth(
-    shipList.map((s) => {
-      const p = profitByShipment.get(s.id);
-      const amount = p
-        ? Number(p.margin)
-        : Number(s.customer_rate) - Number(s.carrier_cost);
-      return {
-        date: s.delivery_date || s.pickup_date || s.created_at,
-        amount,
-      };
-    }),
-    6,
-  );
-
-  const topCustomers = Object.entries(
-    profitList.reduce<Record<string, number>>((acc, p) => {
-      acc[p.customer_id] = (acc[p.customer_id] || 0) + Number(p.margin);
-      return acc;
-    }, {}),
-  )
-    .map(([id, value]) => ({ name: customerName.get(id) ?? "Customer", value }))
-    .sort((a, b) => b.value - a.value)
-    .slice(0, 5);
-
-  const leastProfitable = [...profitList]
-    .map((p) => ({
-      load: p.load_number,
-      customer: customerName.get(p.customer_id) ?? "—",
-      margin: Number(p.margin),
-    }))
-    .sort((a, b) => a.margin - b.margin)
-    .slice(0, 5);
 
   // ——— EXECUTIVE ———
   if (profile.role === "manager") {
@@ -291,9 +237,6 @@ export default async function DashboardPage() {
     const weekAgo = new Date();
     weekAgo.setUTCDate(weekAgo.getUTCDate() - 7);
     const weekAgoStr = weekAgo.toISOString().slice(0, 10);
-    const yesterday = new Date();
-    yesterday.setUTCDate(yesterday.getUTCDate() - 1);
-    const yesterdayStr = yesterday.toISOString().slice(0, 10);
 
     const revInMonth = (start: Date, end: Date) =>
       invList
@@ -356,49 +299,6 @@ export default async function DashboardPage() {
       arLastMonthEnd,
       cashThisMonth,
       cashLastMonth,
-    });
-
-    const yDeliveredSafe = shipList.filter((s) => s.delivery_date === yesterdayStr);
-    const yRev = yDeliveredSafe.reduce((sum, s) => {
-      const p = profitByShipment.get(s.id);
-      return (
-        sum +
-        (p
-          ? Number(p.customer_rate) +
-            Number(p.billable_accessorials) -
-            Number(p.discount_amount || 0)
-          : Number(s.customer_rate))
-      );
-    }, 0);
-    const yProfit = yDeliveredSafe.reduce((sum, s) => {
-      const p = profitByShipment.get(s.id);
-      return sum + (p ? Number(p.margin) : Number(s.customer_rate) - Number(s.carrier_cost));
-    }, 0);
-    const yPay = (payments ?? [])
-      .filter((p) => p.payment_date === yesterdayStr)
-      .reduce((s, p) => s + Number(p.amount), 0);
-
-    const insuranceExpiring = (carriers ?? []).filter((c) => {
-      if (!c.insurance_expiration) return false;
-      const days = Math.floor(
-        (new Date(c.insurance_expiration + "T00:00:00Z").getTime() -
-          new Date(today + "T00:00:00Z").getTime()) /
-          (1000 * 60 * 60 * 24),
-      );
-      return days >= 0 && days <= 30;
-    }).length;
-
-    const brief = buildMorningBrief({
-      fullName: profile.full_name,
-      yesterdayDelivered: yDeliveredSafe.length,
-      yesterdayRevenue: yRev,
-      yesterdayProfit: yProfit,
-      yesterdayPayments: yPay,
-      pickupsToday: shipList.filter((s) => s.pickup_date === today).length,
-      deliveriesToday: shipList.filter(
-        (s) => s.delivery_date === today || s.promised_delivery_date === today,
-      ).length,
-      invoicesDueToday: invList.filter((i) => i.due_date === today).length,
     });
 
     const podSet = new Set(podList.map((p) => p.shipment_id));
@@ -514,30 +414,54 @@ export default async function DashboardPage() {
       });
       invoicesByCustomer.set(inv.customer_id as string, list);
     }
-    const customersOverCredit = (customers ?? []).filter((c) => {
-      const openAr = openArFromInvoices(invoicesByCustomer.get(c.id) ?? []);
-      return creditStatus(openAr, Number(c.credit_limit ?? 0)) === "over";
-    }).length;
     const insuranceExpired = (carriers ?? []).filter(
       (c) => insuranceRiskStatus(c.insurance_expiration ?? null, today).status === "expired",
-    ).length;
-    const riskIssueCount = customersOverCredit + insuranceExpired + insuranceExpiring;
+    );
+    const insuranceExpiringList = (carriers ?? []).filter((c) => {
+      const status = insuranceRiskStatus(c.insurance_expiration ?? null, today).status;
+      return status === "expiring";
+    });
+    const overCreditCustomers = (customers ?? []).filter((c) => {
+      const openAr = openArFromInvoices(invoicesByCustomer.get(c.id) ?? []);
+      return creditStatus(openAr, Number(c.credit_limit ?? 0)) === "over";
+    });
+    const customersOverCredit = overCreditCustomers.length;
+    const riskIssueCount =
+      customersOverCredit + insuranceExpired.length + insuranceExpiringList.length;
     const riskDetailParts: string[] = [];
     if (customersOverCredit > 0) {
       riskDetailParts.push(
         `${customersOverCredit} customer${customersOverCredit === 1 ? "" : "s"} over credit`,
       );
     }
-    if (insuranceExpired > 0) {
+    if (insuranceExpired.length > 0) {
       riskDetailParts.push(
-        `${insuranceExpired} carrier${insuranceExpired === 1 ? "" : "s"} insurance expired`,
+        `${insuranceExpired.length} carrier${insuranceExpired.length === 1 ? "" : "s"} insurance expired`,
       );
     }
-    if (insuranceExpiring > 0) {
+    if (insuranceExpiringList.length > 0) {
       riskDetailParts.push(
-        `${insuranceExpiring} carrier${insuranceExpiring === 1 ? "" : "s"} insurance expiring ≤30d`,
+        `${insuranceExpiringList.length} carrier${insuranceExpiringList.length === 1 ? "" : "s"} insurance expiring ≤30d`,
       );
     }
+    const riskFocusId =
+      insuranceExpired[0]?.id ??
+      overCreditCustomers[0]?.id ??
+      insuranceExpiringList[0]?.id ??
+      null;
+
+    const invoiceNumberById = new Map(
+      invList.map((i) => [i.id as string, i.invoice_number as string]),
+    );
+    const openDisputes = disputeList
+      .filter((d) => d.status === "open")
+      .map((d) => ({
+        id: d.id as string,
+        amount_disputed: Number(d.amount_disputed),
+        invoice_number: d.invoice_id
+          ? (invoiceNumberById.get(d.invoice_id as string) ?? null)
+          : null,
+      }));
 
     const resolveLoadNumber = (entityType: string, entityId: string) => {
       if (entityType === "shipment") {
@@ -556,6 +480,7 @@ export default async function DashboardPage() {
       buildDecideNowCandidates({
         today,
         coverageCount: pendingCoverageCount,
+        coverageFocusId: pendingCoverage[0]?.id ?? null,
         approvals: (approvals ?? []).map((a) => ({
           id: a.id,
           amount: Number(a.amount),
@@ -579,18 +504,26 @@ export default async function DashboardPage() {
           status: s.status,
         })),
         pastDueInvoices: pastDue.map((i) => ({
+          id: i.id,
+          invoice_number: i.invoice_number,
           total: Number(i.total),
           amount_paid: Number(i.amount_paid),
           due_date: i.due_date,
         })),
+        openDisputes,
         openDisputeCount,
         cashAtRisk,
         riskIssueCount,
         riskDetail: riskDetailParts.join(" · "),
         riskTone:
-          insuranceExpired > 0 || customersOverCredit > 0 ? "error" : "warning",
+          insuranceExpired.length > 0 || customersOverCredit > 0 ? "error" : "warning",
+        riskFocusId,
         supportOpenCount,
         supportHighCount,
+        supportFocusId:
+          supportOpenList.find((t) => t.priority === "high")?.id ??
+          supportOpenList[0]?.id ??
+          null,
         resolveLoadNumber,
         sanitize: sanitizeDemoText,
       }),
@@ -609,12 +542,10 @@ export default async function DashboardPage() {
           }
         />
         <MorningBriefCard
-          greeting={brief.greeting}
-          yesterday={brief.yesterday}
-          today={brief.today}
+          greeting={morningBriefGreeting(profile.full_name)}
+          kpis={kpis}
         />
         <DecideNowRail items={decideNowItems} />
-        <KpiRibbon items={kpis} />
         <div className="space-y-4">
           <div>
             <h2 className="text-lg font-bold tracking-tight">Network & profitability</h2>
@@ -625,38 +556,6 @@ export default async function DashboardPage() {
           <ProfitabilityHeatmap rows={heatRows} />
           <ShipmentMapLazy shipments={mapShipments} today={today} />
         </div>
-        <details className="rounded-box border border-base-300 bg-base-100">
-          <summary className="cursor-pointer list-none px-4 py-3 marker:content-none [&::-webkit-details-marker]:hidden">
-            <span className="flex flex-wrap items-end justify-between gap-2">
-              <span>
-                <span className="block text-lg font-bold tracking-tight">
-                  Performance trends
-                </span>
-                <span className="text-sm font-normal opacity-70">
-                  Monthly revenue and profit, top customers by margin, and weakest loads
-                </span>
-              </span>
-              <span className="text-xs opacity-60">Expand</span>
-            </span>
-          </summary>
-          <div className="grid gap-4 border-t border-base-300 p-4 lg:grid-cols-2">
-            <Panel title="Monthly revenue">
-              <MonthlyBars data={monthlyRev} name="Revenue" />
-            </Panel>
-            <Panel title="Monthly profit">
-              <MonthlyBars data={monthlyProfit} name="Profit" />
-            </Panel>
-            <Panel title="Top customers">
-              <HorizontalBars data={topCustomers} name="Margin" />
-            </Panel>
-            <Panel title="Least profitable shipments">
-              <MiniTable
-                headers={["Load", "Customer", "Margin"]}
-                rows={leastProfitable.map((r) => [r.load, r.customer, money(r.margin)])}
-              />
-            </Panel>
-          </div>
-        </details>
       </div>
     );
   }
@@ -795,11 +694,11 @@ export default async function DashboardPage() {
         ? [
             {
               id: "broker-coverage",
-              title: `${pendingCoverageCount} coverage request(s)`,
+              title: `${pendingCoverageCount} load request(s)`,
               metric: String(pendingCoverageCount),
               metricKind: "count" as const,
               metricUnit: pendingCoverageCount === 1 ? "request" : "requests",
-              detail: "Book a load from the request, then assign from scorecards",
+              detail: "Approve (credit check), then assign a carrier",
               href: "/coverage",
               tone: "warning" as const,
               cta: "Open",
@@ -831,8 +730,8 @@ export default async function DashboardPage() {
               metric: String(stats.unassigned),
               metricKind: "count" as const,
               metricUnit: stats.unassigned === 1 ? "load" : "loads",
-              detail: "Cover with a Preferred / Approved carrier from scorecards",
-              href: "/shipments?status=unassigned",
+              detail: "Assign on Assign carriers — expired insurance is blocked",
+              href: "/assign",
               tone: "warning" as const,
               cta: "Open",
               score: stats.unassigned * 60_000,
@@ -881,16 +780,22 @@ export default async function DashboardPage() {
       <div className="space-y-6">
         <Header
           title="Broker Operations"
-          subtitle="Intake shipper requests, cover loads, clear delays, keep freight moving"
+          subtitle="Approve load requests, assign carriers, clear delays"
           action={
             <div className="flex flex-wrap gap-2">
               <Link href="/risk" className="btn btn-outline btn-sm">
                 Risk &amp; Credit
               </Link>
               <Link href="/coverage" className="btn btn-outline btn-sm">
-                Coverage requests
+                Load requests
                 {pendingCoverageCount > 0 ? (
                   <span className="badge badge-warning badge-sm">{pendingCoverageCount}</span>
+                ) : null}
+              </Link>
+              <Link href="/assign" className="btn btn-outline btn-sm">
+                Assign carriers
+                {stats.unassigned > 0 ? (
+                  <span className="badge badge-warning badge-sm">{stats.unassigned}</span>
                 ) : null}
               </Link>
               <Link href="/shipments/new" className="btn btn-primary btn-sm">
@@ -900,17 +805,21 @@ export default async function DashboardPage() {
           }
         />
         <div className="rounded-box border border-base-300 bg-base-100 px-4 py-3 text-sm shadow-sm">
-          <p className="font-semibold">Coverage process</p>
+          <p className="font-semibold">Simplified ops flow</p>
           <ol className="mt-1 list-decimal space-y-0.5 pl-5 opacity-80">
-            <li>Shipper submits a coverage request (lane + dates).</li>
-            <li>You review and book an unassigned load from the request.</li>
-            <li>Assign a Preferred / Approved carrier from scorecards.</li>
+            <li>Shipper submits a load request on their active contract.</li>
+            <li>
+              You approve on Load requests (blocked on credit hold / past-due AR).
+            </li>
+            <li>
+              You assign a carrier on Assign carriers (blocked if insurance expired).
+            </li>
             <li>Shipper tracks the load on My Shipments.</li>
           </ol>
         </div>
         <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-6">
           <DashboardStatCard
-            title="Coverage requests"
+            title="Load requests"
             value={String(pendingCoverageCount)}
             icon={ClipboardList}
             warn={pendingCoverageCount > 0}
@@ -935,13 +844,13 @@ export default async function DashboardPage() {
             href="/shipments?filter=delivery-today"
           />
           <DashboardStatCard
-            title="Needs coverage"
+            title="Needs carrier"
             value={String(stats.unassigned)}
             icon={Truck}
             warn={stats.unassigned > 0}
             meter={stats.unassigned / brokerScale}
             meterLabel="Share of today's broker load"
-            href="/shipments?status=unassigned"
+            href="/assign"
           />
           <DashboardStatCard
             title="Delayed loads"
@@ -1486,6 +1395,8 @@ export default async function DashboardPage() {
     dueToday.length,
     missingPod.length,
   );
+  const myCarrier = (carriers ?? []).find((c) => c.id === profile.carrier_id);
+  const myInsurance = insuranceRiskStatus(myCarrier?.insurance_expiration ?? null, today);
 
   return (
     <div className="space-y-6">
@@ -1498,6 +1409,20 @@ export default async function DashboardPage() {
           </Link>
         }
       />
+      {myInsurance.status === "expired" || myInsurance.status === "expiring" ? (
+        <div
+          className={`alert ${myInsurance.status === "expired" ? "alert-error" : "alert-warning"}`}
+        >
+          <span>
+            {myInsurance.status === "expired"
+              ? "Your insurance is expired — you cannot be assigned new loads until you renew."
+              : "Your insurance expires within 30 days. Upload an updated certificate in Settings."}
+          </span>
+          <Link href="/settings#carrier-insurance" className="btn btn-sm">
+            Update insurance
+          </Link>
+        </div>
+      ) : null}
       <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
         <DashboardStatCard
           title="Assigned loads"

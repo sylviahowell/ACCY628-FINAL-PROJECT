@@ -1,6 +1,8 @@
 import Link from "next/link";
+import { Suspense } from "react";
 import { EmptyState } from "@/components/EmptyState";
 import { FilterBanner, resolveSearchParams } from "@/components/FilterBanner";
+import { FocusScroll } from "@/components/FocusScroll";
 import { ShipmentsTriage, type ShipmentListRow } from "@/components/ShipmentsTriage";
 import { requirePathAccess } from "@/lib/authz";
 import { filterShipments, shipmentFilterLabel } from "@/lib/list-filters";
@@ -126,6 +128,9 @@ export default async function ShipmentsPage({
 
   return (
     <div className="space-y-6">
+      <Suspense fallback={null}>
+        <FocusScroll />
+      </Suspense>
       <div className="flex flex-wrap items-end justify-between gap-3">
         <div>
           <h1 className="text-2xl font-bold">{title}</h1>

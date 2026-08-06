@@ -89,6 +89,50 @@ async function persistPodFile(shipmentId: string, file: File, supabase: Awaited<
   return `/pod-uploads/${shipmentId}/${filename}`;
 }
 
+async function persistInsuranceFile(
+  carrierId: string,
+  file: File,
+  supabase: Awaited<ReturnType<typeof createClient>>,
+) {
+  if (file.size <= 0) {
+    throw new Error("Choose an insurance certificate file to upload.");
+  }
+  if (file.size > POD_MAX_BYTES) {
+    throw new Error("Insurance file must be 8 MB or smaller.");
+  }
+  if (!POD_MIME.has(file.type)) {
+    throw new Error("Insurance certificate must be a PDF or image (JPEG, PNG, or WebP).");
+  }
+
+  const bytes = Buffer.from(await file.arrayBuffer());
+  const filename = `${Date.now()}-${safePodFileName(file.name)}`;
+  const objectPath = `${carrierId}/${filename}`;
+
+  const { error: uploadError } = await supabase.storage
+    .from("insurance")
+    .upload(objectPath, bytes, {
+      contentType: file.type,
+      upsert: false,
+    });
+
+  if (!uploadError) {
+    const { data } = supabase.storage.from("insurance").getPublicUrl(objectPath);
+    if (data.publicUrl) return data.publicUrl;
+  }
+
+  if (process.env.VERCEL) {
+    const detail = uploadError?.message ? ` (${uploadError.message})` : "";
+    throw new Error(
+      `Insurance cloud upload failed${detail}. Apply supabase/migrations/20260806140000_carrier_insurance_upload.sql in Supabase before uploading on the live site.`,
+    );
+  }
+
+  const dir = path.join(process.cwd(), "public", "insurance-uploads", carrierId);
+  await mkdir(dir, { recursive: true });
+  await writeFile(path.join(dir, filename), bytes);
+  return `/insurance-uploads/${carrierId}/${filename}`;
+}
+
 /** Hard-block assigning a carrier whose insurance certificate is expired. */
 async function assertCarrierInsuranceCurrent(carrierId: string) {
   const supabase = await createClient();
@@ -544,7 +588,13 @@ export async function assignCarrier(formData: FormData) {
   }
 
   const shipmentId = String(formData.get("shipment_id") || "");
-  const returnPath = shipmentId ? `/shipments/${shipmentId}` : "/shipments";
+  const returnToRaw = String(formData.get("return_to") || "").trim();
+  const returnPath =
+    returnToRaw.startsWith("/") && !returnToRaw.startsWith("//")
+      ? returnToRaw
+      : shipmentId
+        ? `/shipments/${shipmentId}`
+        : "/shipments";
   const carrierId = String(formData.get("carrier_id") || "") || null;
   const carrierCostRaw = String(formData.get("carrier_cost") || "").trim();
   const supabase = await createClient();
@@ -626,7 +676,17 @@ export async function assignCarrier(formData: FormData) {
 
   revalidatePath(`/shipments/${shipmentId}`);
   revalidatePath("/shipments");
+  revalidatePath("/assign");
   revalidatePath("/dashboard");
+
+  if (returnToRaw.startsWith("/") && !returnToRaw.startsWith("//")) {
+    redirect(
+      toastPath(
+        returnPath,
+        carrierId ? "Carrier assigned" : "Carrier unassigned",
+      ),
+    );
+  }
 }
 
 export async function updateShipmentStatus(
@@ -900,6 +960,87 @@ export async function uploadPod(formData: FormData) {
       input.replace ? "Proof of delivery replaced" : "Proof of delivery saved",
     ),
   );
+}
+
+export async function updateCarrierInsurance(formData: FormData) {
+  const profile = await getCurrentProfile();
+  if (!profile || profile.role !== "carrier" || !profile.carrier_id) {
+    throw new Error("Only carriers can update their own insurance.");
+  }
+
+  const input = parseForm(
+    z.object({
+      insurance_expiration: z
+        .string()
+        .trim()
+        .regex(/^\d{4}-\d{2}-\d{2}$/, "Enter a valid expiration date."),
+    }),
+    {
+      insurance_expiration: formString(formData, "insurance_expiration"),
+    },
+  );
+
+  const rawFile = formData.get("insurance_file");
+  const hasFile = rawFile instanceof File && rawFile.size > 0;
+
+  const supabase = await createClient();
+  const { data: existing, error: existingErr } = await supabase
+    .from("carriers")
+    .select("id, insurance_expiration, insurance_certificate_url")
+    .eq("id", profile.carrier_id)
+    .maybeSingle();
+  if (existingErr) throw new Error(existingErr.message);
+  if (!existing) throw new Error("Carrier record not found.");
+
+  if (!hasFile && !existing.insurance_certificate_url) {
+    redirect(
+      toastErrorPath(
+        "/settings#carrier-insurance",
+        "Upload an insurance certificate (PDF or image) with the new expiration date.",
+      ),
+    );
+  }
+
+  let certificateUrl: string | null = null;
+  if (hasFile && rawFile instanceof File) {
+    try {
+      certificateUrl = await persistInsuranceFile(profile.carrier_id, rawFile, supabase);
+    } catch (err) {
+      const message = err instanceof Error ? err.message : "Insurance upload failed.";
+      redirect(toastErrorPath("/settings#carrier-insurance", message));
+    }
+  }
+
+  const { error } = await supabase.rpc("update_own_carrier_insurance", {
+    p_expiration: input.insurance_expiration,
+    p_certificate_url: certificateUrl,
+  });
+  if (error) {
+    redirect(
+      toastErrorPath(
+        "/settings#carrier-insurance",
+        error.message || "Could not update insurance.",
+      ),
+    );
+  }
+
+  await supabase.from("status_events").insert({
+    entity_type: "carrier",
+    entity_id: profile.carrier_id,
+    from_status: existing.insurance_expiration ?? null,
+    to_status: input.insurance_expiration,
+    changed_by: profile.id,
+    note: certificateUrl
+      ? "Carrier updated insurance expiration and uploaded a new certificate"
+      : "Carrier updated insurance expiration",
+  });
+
+  revalidatePath("/settings");
+  revalidatePath("/carriers");
+  revalidatePath("/risk");
+  revalidatePath("/warnings");
+  revalidatePath("/dashboard");
+  redirect(toastPath("/settings#carrier-insurance", "Insurance updated"));
 }
 
 export async function requestAccessorial(formData: FormData) {

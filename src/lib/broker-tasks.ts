@@ -140,7 +140,7 @@ export function buildBrokerTasks(input: {
         action: "Assign a covered carrier from scorecards",
         category: "unassigned",
         createdBy: s.created_by,
-        href: `/shipments/${s.id}`,
+        href: `/assign?focus=${s.id}`,
       });
     }
 

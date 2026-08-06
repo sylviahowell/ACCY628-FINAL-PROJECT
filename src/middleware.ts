@@ -12,6 +12,6 @@ export const config = {
      * Without .pdf here, /pod-samples/*.pdf is treated as an app route and
      * role-guarded away from the actual file.
      */
-    "/((?!_next/static|_next/image|favicon.ico|pod-samples/|pod-uploads/|brand/|.*\\.(?:svg|png|jpg|jpeg|gif|webp|pdf|ico)$).*)",
+    "/((?!_next/static|_next/image|favicon.ico|pod-samples/|pod-uploads/|insurance-uploads/|brand/|.*\\.(?:svg|png|jpg|jpeg|gif|webp|pdf|ico)$).*)",
   ],
 };

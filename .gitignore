@@ -51,3 +51,7 @@ next-env.d.ts
 /public/pod-uploads/**
 !/public/pod-uploads/.gitkeep
 
+# uploaded carrier insurance certificates
+/public/insurance-uploads/**
+!/public/insurance-uploads/.gitkeep
+

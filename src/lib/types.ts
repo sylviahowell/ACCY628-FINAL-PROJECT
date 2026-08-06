@@ -132,3 +132,11 @@ export function statusBadge(status: string) {
   };
   return map[status] ?? "badge-ghost";
 }
+
+/** Human-readable status for badges and lists (e.g. in_transit → In Transit). */
+export function formatStatusLabel(status: string) {
+  if (!status) return "";
+  return status
+    .replace(/_/g, " ")
+    .replace(/\b\w/g, (c) => c.toUpperCase());
+}

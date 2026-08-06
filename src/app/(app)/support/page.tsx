@@ -154,36 +154,36 @@ export default async function SupportPage({
                 : "Ask about POD uploads, delivery docs, or account questions — your account team will reply here."}
             </p>
             <form action={createSupportTicket} className="grid gap-3 md:grid-cols-2">
-              <label className="form-control md:col-span-2">
-                <span className="label-text text-sm">Subject</span>
+              <fieldset className="fieldset md:col-span-2">
+                <legend className="fieldset-legend">Subject</legend>
                 <input
                   name="subject"
                   required
                   maxLength={200}
-                  className="input input-bordered input-sm"
+                  className="input input-bordered input-sm w-full"
                   placeholder="Short summary of your question"
                 />
-              </label>
-              <label className="form-control">
-                <span className="label-text text-sm">Category</span>
-                <select name="category" className="select select-bordered select-sm" defaultValue="other">
+              </fieldset>
+              <fieldset className="fieldset">
+                <legend className="fieldset-legend">Category</legend>
+                <select name="category" className="select select-bordered select-sm w-full" defaultValue="other">
                   <option value="shipment">Shipment</option>
                   <option value="billing">Billing question</option>
                   <option value="account">Account / portal</option>
                   <option value="other">Other</option>
                 </select>
-              </label>
-              <label className="form-control">
-                <span className="label-text text-sm">Priority</span>
-                <select name="priority" className="select select-bordered select-sm" defaultValue="normal">
+              </fieldset>
+              <fieldset className="fieldset">
+                <legend className="fieldset-legend">Priority</legend>
+                <select name="priority" className="select select-bordered select-sm w-full" defaultValue="normal">
                   <option value="low">Low</option>
                   <option value="normal">Normal</option>
                   <option value="high">High</option>
                 </select>
-              </label>
-              <label className="form-control">
-                <span className="label-text text-sm">Related load (optional)</span>
-                <select name="shipment_id" className="select select-bordered select-sm" defaultValue="">
+              </fieldset>
+              <fieldset className="fieldset">
+                <legend className="fieldset-legend">Related load (optional)</legend>
+                <select name="shipment_id" className="select select-bordered select-sm w-full" defaultValue="">
                   <option value="">None</option>
                   {linkShipments.map((s) => (
                     <option key={s.id} value={s.id}>
@@ -191,11 +191,11 @@ export default async function SupportPage({
                     </option>
                   ))}
                 </select>
-              </label>
+              </fieldset>
               {profile.role === "customer" ? (
-                <label className="form-control">
-                  <span className="label-text text-sm">Related invoice (optional)</span>
-                  <select name="invoice_id" className="select select-bordered select-sm" defaultValue="">
+                <fieldset className="fieldset">
+                  <legend className="fieldset-legend">Related invoice (optional)</legend>
+                  <select name="invoice_id" className="select select-bordered select-sm w-full" defaultValue="">
                     <option value="">None</option>
                     {linkInvoices.map((i) => (
                       <option key={i.id} value={i.id}>
@@ -203,21 +203,21 @@ export default async function SupportPage({
                       </option>
                     ))}
                   </select>
-                </label>
+                </fieldset>
               ) : (
                 <div className="hidden md:block" />
               )}
-              <label className="form-control md:col-span-2">
-                <span className="label-text text-sm">Message</span>
+              <fieldset className="fieldset md:col-span-2">
+                <legend className="fieldset-legend">Message</legend>
                 <textarea
                   name="body"
                   required
                   maxLength={4000}
                   rows={4}
-                  className="textarea textarea-bordered text-sm"
+                  className="textarea textarea-bordered w-full text-sm"
                   placeholder="Describe what you need help with"
                 />
-              </label>
+              </fieldset>
               <button type="submit" className="btn btn-primary btn-sm w-fit">
                 Submit ticket
               </button>

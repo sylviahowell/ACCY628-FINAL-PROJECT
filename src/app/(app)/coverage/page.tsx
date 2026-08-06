@@ -140,9 +140,15 @@ export default async function CoveragePage() {
       ) : null}
 
       {isCustomer ? (
-        <details className="collapse collapse-arrow rounded-box border border-base-300 bg-base-100" open>
-          <summary className="collapse-title font-medium">New load request</summary>
-          <div className="collapse-content">
+        <details className="group rounded-box border border-base-300 bg-base-100" open>
+          <summary className="cursor-pointer list-none px-4 py-3 font-medium marker:content-none">
+            <span className="flex items-center justify-between gap-3">
+              New load request
+              <span className="text-xs font-normal opacity-50 group-open:hidden">Show</span>
+              <span className="hidden text-xs font-normal opacity-50 group-open:inline">Hide</span>
+            </span>
+          </summary>
+          <div className="border-t border-base-200 px-4 pb-5 pt-5">
             <CoverageRequestForm contracts={shipperContracts} />
           </div>
         </details>

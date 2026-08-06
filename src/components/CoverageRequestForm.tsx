@@ -67,7 +67,7 @@ export function CoverageRequestForm({ contracts }: Props) {
   }
 
   return (
-    <form action={createCoverageRequest} className="grid gap-3 md:grid-cols-2 pb-2">
+    <form action={createCoverageRequest} className="grid gap-4 md:grid-cols-2">
       <input type="hidden" name="contract_id" value={contractId} />
       {quotedCustomer != null ? (
         <input type="hidden" name="quoted_customer_rate" value={quotedCustomer} />
@@ -76,10 +76,13 @@ export function CoverageRequestForm({ contracts }: Props) {
         <input type="hidden" name="quoted_carrier_cost" value={quotedCarrier} />
       ) : null}
 
-      <label className="form-control w-full md:col-span-2">
-        <span className="label-text text-sm">Active contract</span>
+      <div className="flex w-full flex-col gap-3 md:col-span-2">
+        <label htmlFor="coverage-contract" className="text-sm font-medium leading-5">
+          Active contract
+        </label>
         <select
-          className="select select-bordered"
+          id="coverage-contract"
+          className="select select-bordered h-12 w-full"
           value={contractId}
           onChange={(e) => setContractId(e.target.value)}
           required
@@ -91,11 +94,10 @@ export function CoverageRequestForm({ contracts }: Props) {
             <option key={c.id} value={c.id}>
               {c.contract_number}
               {c.title ? ` — ${c.title}` : ""}
-              {c.downpayment_pct != null ? ` · ${c.downpayment_pct}% down` : ""}
             </option>
           ))}
         </select>
-      </label>
+      </div>
 
       {selected ? (
         <div className="md:col-span-2 rounded-box border border-primary/20 bg-primary/5 p-3 text-sm">
@@ -161,15 +163,15 @@ export function CoverageRequestForm({ contracts }: Props) {
         onChange={(e) => setDeliveryDate(e.target.value)}
       />
       {needsMiles ? (
-        <label className="form-control w-full">
-          <span className="label-text text-sm">Miles (required for contract $/mi)</span>
+        <label className="flex w-full flex-col gap-1.5">
+          <span className="text-sm font-medium">Miles (required for contract $/mi)</span>
           <input
             name="miles"
             type="number"
             min={1}
             step={1}
             required
-            className="input input-bordered"
+            className="input input-bordered w-full"
             value={miles}
             onChange={(e) => setMiles(e.target.value)}
             placeholder="e.g. 520"

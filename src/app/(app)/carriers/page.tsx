@@ -1,5 +1,5 @@
 import { redirect } from "next/navigation";
-import { CarrierScorecardGrid } from "@/components/CarrierScorecards";
+import { CarrierDirectory } from "@/components/CarrierDirectory";
 import { requirePathAccess } from "@/lib/authz";
 import { createCarrier } from "@/lib/actions/freight";
 import { buildCarrierScorecards } from "@/lib/carrier-scorecard";
@@ -67,13 +67,13 @@ export default async function CarriersPage() {
       <div>
         <h1 className="text-2xl font-bold">Carriers</h1>
         <p className="text-sm opacity-70">
-          Trucking partners with performance scorecards for coverage decisions. Tiers are
-          rule-based — Suspended (expired insurance) is blocked from create/assign; Watch List
-          remains assignable with Risk & Warnings visibility.
+          Trucking partners with performance scorecards for coverage decisions. Search by name or
+          service area, filter by tier, and sort for coverage. Suspended (expired insurance) is
+          blocked from create/assign; Watch List remains assignable with Risk & Warnings visibility.
         </p>
       </div>
 
-      <CarrierScorecardGrid scorecards={scorecards} showComparison />
+      <CarrierDirectory scorecards={scorecards} />
 
       <details className="collapse collapse-arrow rounded-box border border-base-300 bg-base-100">
         <summary className="collapse-title font-medium">Add carrier</summary>

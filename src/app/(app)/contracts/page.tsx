@@ -30,6 +30,7 @@ export default async function ContractsPage({
 
   const params = await resolveSearchParams(searchParams);
   const expiringOnly = params.filter === "expiring";
+  const q = (params.q ?? "").trim();
   const isManager = profile.role === "manager";
 
   const supabase = await createClient();
@@ -42,17 +43,50 @@ export default async function ContractsPage({
     .from("coverage_requests")
     .select("id, customer_id, contract_id, status")
     .eq("status", "pending");
+  const { data: contractShipments } = await supabase
+    .from("shipments")
+    .select("contract_id, carriers(name)")
+    .not("contract_id", "is", null);
   const today = new Date().toISOString().slice(0, 10);
   const soon = new Date();
   soon.setUTCDate(soon.getUTCDate() + 30);
   const soonStr = soon.toISOString().slice(0, 10);
 
+  const carriersByContract = new Map<string, Set<string>>();
+  for (const s of contractShipments ?? []) {
+    if (!s.contract_id) continue;
+    const name = (s.carriers as { name?: string } | null)?.name;
+    if (!name) continue;
+    const set = carriersByContract.get(s.contract_id) ?? new Set<string>();
+    set.add(name);
+    carriersByContract.set(s.contract_id, set);
+  }
+
   const allContracts = contracts ?? [];
+  const needle = q.toLowerCase();
+  const searchedContracts = needle
+    ? allContracts.filter((c) => {
+        const customerName = (c.customers as { name?: string } | null)?.name ?? "";
+        const carrierNames = [...(carriersByContract.get(c.id) ?? [])].join(" ");
+        const hay = [
+          c.id,
+          c.contract_number ?? "",
+          c.title ?? "",
+          c.notes ?? "",
+          customerName,
+          carrierNames,
+          c.status ?? "",
+        ]
+          .join(" ")
+          .toLowerCase();
+        return hay.includes(needle);
+      })
+    : allContracts;
   const visibleContracts = expiringOnly
-    ? allContracts.filter(
+    ? searchedContracts.filter(
         (c) => c.status === "active" && c.end_date && c.end_date <= soonStr,
       )
-    : allContracts;
+    : searchedContracts;
 
   const pendingByCustomer = new Map<string, number>();
   const pendingByContract = new Map<string, number>();
@@ -142,9 +176,45 @@ export default async function ContractsPage({
       {expiringOnly ? (
         <FilterBanner
           label="contracts ending within 30 days (or already past end)"
-          clearHref="/contracts"
+          clearHref={q ? `/contracts?q=${encodeURIComponent(q)}` : "/contracts"}
         />
       ) : null}
+
+      {q ? (
+        <FilterBanner
+          label={`search results for “${q}” (${visibleContracts.length})`}
+          clearHref={expiringOnly ? "/contracts?filter=expiring" : "/contracts"}
+        />
+      ) : null}
+
+      <form
+        method="get"
+        action="/contracts"
+        className="flex flex-col gap-2 rounded-box border border-base-300 bg-base-100 p-3 sm:flex-row sm:items-center"
+      >
+        {expiringOnly ? <input type="hidden" name="filter" value="expiring" /> : null}
+        <input
+          type="search"
+          name="q"
+          defaultValue={q}
+          placeholder="Search by contract #, customer, or carrier…"
+          className="input input-bordered input-sm w-full flex-1"
+          aria-label="Search contracts"
+        />
+        <div className="flex flex-wrap gap-2">
+          <button type="submit" className="btn btn-primary btn-sm">
+            Search
+          </button>
+          {q ? (
+            <Link
+              href={expiringOnly ? "/contracts?filter=expiring" : "/contracts"}
+              className="btn btn-ghost btn-sm"
+            >
+              Clear
+            </Link>
+          ) : null}
+        </div>
+      </form>
 
       <details className="collapse collapse-arrow rounded-box border border-base-300 bg-base-100">
         <summary className="collapse-title font-medium">New contract</summary>
@@ -235,14 +305,22 @@ export default async function ContractsPage({
 
       {visibleContracts.length === 0 ? (
         <EmptyState
-          title={expiringOnly ? "No expiring contracts" : "No contracts yet"}
+          title={
+            q
+              ? "No contracts match your search"
+              : expiringOnly
+                ? "No expiring contracts"
+                : "No contracts yet"
+          }
           description={
-            expiringOnly
-              ? "No active contracts end within the next 30 days."
-              : "Create a shipping agreement to drive rates and payment terms on new loads."
+            q
+              ? "Try a contract number, customer name, or carrier that hauled on the contract."
+              : expiringOnly
+                ? "No active contracts end within the next 30 days."
+                : "Create a shipping agreement to drive rates and payment terms on new loads."
           }
           action={
-            expiringOnly ? (
+            q || expiringOnly ? (
               <Link href="/contracts" className="btn btn-outline btn-sm">
                 Show all contracts
               </Link>
@@ -276,6 +354,11 @@ export default async function ContractsPage({
                       <p className="text-sm opacity-70">
                         {(c.customers as { name?: string } | null)?.name} · {c.title}
                       </p>
+                      {(carriersByContract.get(c.id)?.size ?? 0) > 0 ? (
+                        <p className="text-xs opacity-60">
+                          Carriers on loads: {[...(carriersByContract.get(c.id) ?? [])].join(", ")}
+                        </p>
+                      ) : null}
                       <p className="text-xs opacity-60">
                         {c.start_date} → {c.end_date ?? "open"}
                         {pastEnd ? " · Past end date" : ""}

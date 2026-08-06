@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { Suspense, useMemo, useState } from "react";
+import { Fragment, Suspense, useMemo, useState } from "react";
 import { useSearchParams } from "next/navigation";
 import {
   bandClasses,
@@ -161,6 +161,7 @@ function HeatmapBody({
 }) {
   const [sortKey, setSortKey] = useState<SortKey>("marginPct");
   const [sortDir, setSortDir] = useState<"asc" | "desc">("asc");
+  const [expandedKey, setExpandedKey] = useState<string | null>(null);
 
   const baseCells = useMemo(() => buildHeatmap(rows, dimension), [rows, dimension]);
   const cells = useMemo(() => {
@@ -189,6 +190,10 @@ function HeatmapBody({
     return sortDir === "asc" ? " ↑" : " ↓";
   }
 
+  function toggleExpanded(key: string) {
+    setExpandedKey((current) => (current === key ? null : key));
+  }
+
   const sortSummary =
     sortKey === "marginPct" && sortDir === "asc"
       ? "worst margin first"
@@ -209,8 +214,8 @@ function HeatmapBody({
           <div>
             <h3 className="card-title text-base">Margin by {dimLabel.toLowerCase()}</h3>
             <p className="text-sm opacity-70">
-              Gross profit = customer revenue − carrier cost − approved direct costs. Color-coded by
-              margin band · sorted {sortSummary}
+              Gross profit and margin at a glance — select a {dimLabel.toLowerCase()} for revenue,
+              costs, and loads · sorted {sortSummary}
               {bandFilter ? ` · showing ${bandFilter}` : ""}.
             </p>
           </div>
@@ -244,7 +249,10 @@ function HeatmapBody({
                   key={d.id}
                   type="button"
                   className={`btn btn-xs join-item ${dimension === d.id ? "btn-primary" : "btn-ghost"}`}
-                  onClick={() => onDimension(d.id)}
+                  onClick={() => {
+                    onDimension(d.id);
+                    setExpandedKey(null);
+                  }}
                 >
                   {d.label}
                 </button>
@@ -296,42 +304,6 @@ function HeatmapBody({
                     <button
                       type="button"
                       className="font-bold"
-                      onClick={() => onHeaderClick("shipments")}
-                    >
-                      Loads{sortMark("shipments")}
-                    </button>
-                  </th>
-                  <th className="text-right">
-                    <button
-                      type="button"
-                      className="font-bold"
-                      onClick={() => onHeaderClick("revenue")}
-                    >
-                      Revenue{sortMark("revenue")}
-                    </button>
-                  </th>
-                  <th className="text-right">
-                    <button
-                      type="button"
-                      className="font-bold"
-                      onClick={() => onHeaderClick("carrierCost")}
-                    >
-                      Carrier cost{sortMark("carrierCost")}
-                    </button>
-                  </th>
-                  <th className="text-right">
-                    <button
-                      type="button"
-                      className="font-bold"
-                      onClick={() => onHeaderClick("otherDirect")}
-                    >
-                      Other direct{sortMark("otherDirect")}
-                    </button>
-                  </th>
-                  <th className="text-right">
-                    <button
-                      type="button"
-                      className="font-bold"
                       onClick={() => onHeaderClick("grossProfit")}
                     >
                       Gross profit{sortMark("grossProfit")}
@@ -350,38 +322,87 @@ function HeatmapBody({
                 </tr>
               </thead>
               <tbody>
-                {cells.map((cell: HeatCell) => (
-                  <tr key={cell.key} className={`transition ${rowBandClasses(cell.band)}`}>
-                    <td className="font-medium">
-                      <Link href={cell.href} className="link link-hover">
-                        {cell.label}
-                      </Link>
-                    </td>
-                    <td className="text-right tabular-nums">{cell.shipments}</td>
-                    <td className="text-right tabular-nums">{money(cell.revenue)}</td>
-                    <td className="text-right tabular-nums">{money(cell.carrierCost)}</td>
-                    <td className="text-right tabular-nums">{money(cell.otherDirect)}</td>
-                    <td
-                      className={`text-right tabular-nums font-medium ${
-                        cell.grossProfit < 0 ? "text-error" : ""
-                      }`}
-                    >
-                      {money(cell.grossProfit)}
-                    </td>
-                    <td
-                      className={`text-right tabular-nums font-semibold ${
-                        cell.marginPct < 0 ? "text-error" : ""
-                      }`}
-                    >
-                      {cell.marginPct.toFixed(1)}%
-                    </td>
-                    <td>
-                      <span className={`badge badge-sm ${marginPillClasses(cell.band)}`}>
-                        {cell.band}
-                      </span>
-                    </td>
-                  </tr>
-                ))}
+                {cells.map((cell: HeatCell) => {
+                  const open = expandedKey === cell.key;
+                  return (
+                    <Fragment key={cell.key}>
+                      <tr className={`transition ${rowBandClasses(cell.band)}`}>
+                        <td className="font-medium">
+                          <button
+                            type="button"
+                            className="link link-hover text-left font-medium"
+                            aria-expanded={open}
+                            onClick={() => toggleExpanded(cell.key)}
+                          >
+                            {cell.label}
+                          </button>
+                        </td>
+                        <td
+                          className={`text-right tabular-nums font-medium ${
+                            cell.grossProfit < 0 ? "text-error" : ""
+                          }`}
+                        >
+                          {money(cell.grossProfit)}
+                        </td>
+                        <td
+                          className={`text-right tabular-nums font-semibold ${
+                            cell.marginPct < 0 ? "text-error" : ""
+                          }`}
+                        >
+                          {cell.marginPct.toFixed(1)}%
+                        </td>
+                        <td>
+                          <span className={`badge badge-sm ${marginPillClasses(cell.band)}`}>
+                            {cell.band}
+                          </span>
+                        </td>
+                      </tr>
+                      {open ? (
+                        <tr className="bg-base-200/50">
+                          <td colSpan={4} className="py-3">
+                            <div className="flex flex-wrap items-end justify-between gap-3 px-1">
+                              <dl className="grid grid-cols-2 gap-x-6 gap-y-2 text-sm sm:grid-cols-4">
+                                <div>
+                                  <dt className="text-xs uppercase tracking-wide opacity-60">
+                                    Loads
+                                  </dt>
+                                  <dd className="font-semibold tabular-nums">{cell.shipments}</dd>
+                                </div>
+                                <div>
+                                  <dt className="text-xs uppercase tracking-wide opacity-60">
+                                    Revenue
+                                  </dt>
+                                  <dd className="font-semibold tabular-nums">
+                                    {money(cell.revenue)}
+                                  </dd>
+                                </div>
+                                <div>
+                                  <dt className="text-xs uppercase tracking-wide opacity-60">
+                                    Carrier cost
+                                  </dt>
+                                  <dd className="font-semibold tabular-nums">
+                                    {money(cell.carrierCost)}
+                                  </dd>
+                                </div>
+                                <div>
+                                  <dt className="text-xs uppercase tracking-wide opacity-60">
+                                    Other direct
+                                  </dt>
+                                  <dd className="font-semibold tabular-nums">
+                                    {money(cell.otherDirect)}
+                                  </dd>
+                                </div>
+                              </dl>
+                              <Link href={cell.href} className="link link-primary text-sm shrink-0">
+                                Open detail →
+                              </Link>
+                            </div>
+                          </td>
+                        </tr>
+                      ) : null}
+                    </Fragment>
+                  );
+                })}
               </tbody>
             </table>
           </div>

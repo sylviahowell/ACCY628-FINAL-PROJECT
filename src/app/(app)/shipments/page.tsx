@@ -1,6 +1,8 @@
 import Link from "next/link";
+import { Suspense } from "react";
 import { EmptyState } from "@/components/EmptyState";
 import { FilterBanner, resolveSearchParams } from "@/components/FilterBanner";
+import { FocusScroll } from "@/components/FocusScroll";
 import { ShipmentsTriage, type ShipmentListRow } from "@/components/ShipmentsTriage";
 import { requirePathAccess } from "@/lib/authz";
 import { filterShipments, shipmentFilterLabel } from "@/lib/list-filters";
@@ -12,6 +14,7 @@ import { isInternalStaff } from "@/lib/roles";
 /** Map manager-nav `?status=` shortcuts onto the shared `?filter=` vocabulary. */
 function resolveShipmentFilter(params: Record<string, string | undefined>) {
   if (params.filter) return params.filter;
+  if (params.category === "upcoming") return "pickup-upcoming";
   if (params.status === "delayed") return "delayed";
   if (params.status === "unassigned") return "unassigned";
   if (params.status === "ready") return "ready-to-bill";
@@ -47,7 +50,12 @@ export default async function ShipmentsPage({
   }
 
   const { data: shipments } = await query;
-  const allRows = shipments ?? [];
+  const allRowsRaw = shipments ?? [];
+  // Offered loads wait in Load offers until the carrier accepts.
+  const allRows =
+    profile.role === "carrier"
+      ? allRowsRaw.filter((s) => s.status !== "offered")
+      : allRowsRaw;
 
   const shipmentIds = allRows.map((s) => s.id);
   const { data: pods } =
@@ -73,7 +81,7 @@ export default async function ShipmentsPage({
 
   const title =
     profile.role === "carrier"
-      ? "My assignments"
+      ? "My Deliveries"
       : profile.role === "customer"
         ? "My shipments"
         : profile.role === "billing"
@@ -126,6 +134,9 @@ export default async function ShipmentsPage({
 
   return (
     <div className="space-y-6">
+      <Suspense fallback={null}>
+        <FocusScroll />
+      </Suspense>
       <div className="flex flex-wrap items-end justify-between gap-3">
         <div>
           <h1 className="text-2xl font-bold">{title}</h1>
@@ -135,11 +146,41 @@ export default async function ShipmentsPage({
               : profile.role === "customer"
                 ? "Track your freight from scheduled pickup through delivery."
                 : profile.role === "carrier"
-                  ? "Loads assigned to you — update status and upload POD from each load."
+                  ? "Accepted loads only — confirm pickup, update status, and upload POD. New tenders appear under Load offers first."
                   : "Track freight from scheduled pickup through delivery and completion. Use filters to triage exceptions."}
           </p>
         </div>
-        {isOperations(profile.role) ? (
+        {profile.role === "carrier" ? (
+          <div className="flex flex-wrap gap-2">
+            <Link
+              href="/documents?filter=missing-pod"
+              className="btn btn-primary btn-sm"
+            >
+              Upload POD
+            </Link>
+            <Link
+              href="/shipments?filter=pickup-upcoming"
+              className={`btn btn-sm ${filter === "pickup-upcoming" ? "btn-primary" : "btn-outline"}`}
+            >
+              Upcoming pickups
+            </Link>
+            <Link
+              href="/shipments?filter=delivery-due-today"
+              className={`btn btn-sm ${filter === "delivery-due-today" ? "btn-primary" : "btn-outline"}`}
+            >
+              Due today
+            </Link>
+            <Link
+              href="/shipments"
+              className={`btn btn-sm ${!filter ? "btn-primary" : "btn-outline"}`}
+            >
+              All deliveries
+            </Link>
+            <Link href="/offers" className="btn btn-ghost btn-sm">
+              Load offers
+            </Link>
+          </div>
+        ) : isOperations(profile.role) ? (
           <Link href="/shipments/new" className="btn btn-primary">
             New shipment
           </Link>
@@ -155,7 +196,7 @@ export default async function ShipmentsPage({
             filterLabel
               ? "Nothing matches this filter right now."
               : profile.role === "carrier"
-                ? "Nothing is assigned to your carrier yet."
+                ? "No accepted deliveries yet. Check Load offers for pending tenders."
                 : profile.role === "customer"
                   ? "You do not have any shipments on this account yet."
                   : "Create a load from Broker Operations to start the contract-to-cash flow."
@@ -164,6 +205,10 @@ export default async function ShipmentsPage({
             filterLabel ? (
               <Link href="/shipments" className="btn btn-outline btn-sm">
                 Show all shipments
+              </Link>
+            ) : profile.role === "carrier" ? (
+              <Link href="/offers" className="btn btn-primary btn-sm">
+                Open Load offers
               </Link>
             ) : isOperations(profile.role) ? (
               <Link href="/shipments/new" className="btn btn-primary btn-sm">

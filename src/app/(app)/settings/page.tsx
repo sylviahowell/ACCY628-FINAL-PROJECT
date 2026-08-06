@@ -19,9 +19,12 @@ import { ThemeSelector } from "@/components/ThemeSelector";
 import { NotificationPreferences } from "@/components/NotificationPreferences";
 import { CompanyProfileSettings } from "@/components/CompanyProfileSettings";
 import { BillingPreferences } from "@/components/BillingPreferences";
+import { CarrierInsuranceForm } from "@/components/CarrierInsuranceForm";
 import { updateAccessorialThreshold } from "@/lib/actions/freight";
 import { ROLE_LABELS } from "@/lib/roles";
 import { money } from "@/lib/types";
+import { insuranceRiskStatus, insuranceStatusLabel } from "@/lib/risk-credit";
+import { normalizePodUrl } from "@/lib/display-text";
 
 function SettingsSection({ title, children }: { title: string; children: ReactNode }) {
   return (
@@ -107,11 +110,13 @@ export default async function SettingsPage() {
       ? await supabase
           .from("carriers")
           .select(
-            "name, mc_number, dot_number, contact_name, contact_email, contact_phone, equipment_type, service_area, insurance_expiration, rating",
+            "name, mc_number, dot_number, contact_name, contact_email, contact_phone, equipment_type, service_area, insurance_expiration, insurance_certificate_url, rating",
           )
           .eq("id", profile.carrier_id)
           .maybeSingle()
       : { data: null };
+
+  const today = new Date().toISOString().slice(0, 10);
 
   return (
     <div className="mx-auto max-w-3xl space-y-8 pb-4">
@@ -200,7 +205,7 @@ export default async function SettingsPage() {
           <SettingsCard
             icon={<Building2 className="h-5 w-5" aria-hidden />}
             title="Company of record"
-            description="Shipper profile linked to this portal account. Contact RowanLane to request changes."
+            description="Customer profile linked to this portal account. Contact RowanLane to request changes."
           >
             {customerRecord ? (
               <dl className="divide-y divide-base-300 rounded-lg border border-base-300">
@@ -250,7 +255,36 @@ export default async function SettingsPage() {
                 <DetailRow label="Phone" value={carrierRecord.contact_phone} />
                 <DetailRow label="Equipment" value={carrierRecord.equipment_type} />
                 <DetailRow label="Service area" value={carrierRecord.service_area} />
-                <DetailRow label="Insurance expires" value={carrierRecord.insurance_expiration} />
+                <DetailRow
+                  label="Insurance"
+                  value={
+                    <span className="inline-flex flex-wrap items-center justify-end gap-2">
+                      <span>
+                        {carrierRecord.insurance_expiration
+                          ? `Expires ${carrierRecord.insurance_expiration}`
+                          : "Not on file"}
+                      </span>
+                      <span className="badge badge-outline badge-sm">
+                        {insuranceStatusLabel(
+                          insuranceRiskStatus(
+                            carrierRecord.insurance_expiration ?? null,
+                            today,
+                          ).status,
+                        )}
+                      </span>
+                      {normalizePodUrl(carrierRecord.insurance_certificate_url) ? (
+                        <a
+                          href={normalizePodUrl(carrierRecord.insurance_certificate_url)!}
+                          target="_blank"
+                          rel="noreferrer"
+                          className="link link-primary text-sm"
+                        >
+                          Certificate
+                        </a>
+                      ) : null}
+                    </span>
+                  }
+                />
                 <DetailRow
                   label="Rating"
                   value={
@@ -269,6 +303,20 @@ export default async function SettingsPage() {
               RowanLane rep for changes.
             </p>
           </SettingsCard>
+
+          {carrierRecord ? (
+            <SettingsCard
+              icon={<Shield className="h-5 w-5" aria-hidden />}
+              title="Insurance certificate"
+              description="Upload a current COI and set the expiration date. Expired insurance blocks new load assignments until you renew."
+            >
+              <CarrierInsuranceForm
+                currentExpiration={carrierRecord.insurance_expiration}
+                certificateUrl={carrierRecord.insurance_certificate_url}
+                today={today}
+              />
+            </SettingsCard>
+          ) : null}
         </SettingsSection>
       ) : null}
 

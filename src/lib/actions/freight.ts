@@ -89,6 +89,50 @@ async function persistPodFile(shipmentId: string, file: File, supabase: Awaited<
   return `/pod-uploads/${shipmentId}/${filename}`;
 }
 
+async function persistInsuranceFile(
+  carrierId: string,
+  file: File,
+  supabase: Awaited<ReturnType<typeof createClient>>,
+) {
+  if (file.size <= 0) {
+    throw new Error("Choose an insurance certificate file to upload.");
+  }
+  if (file.size > POD_MAX_BYTES) {
+    throw new Error("Insurance file must be 8 MB or smaller.");
+  }
+  if (!POD_MIME.has(file.type)) {
+    throw new Error("Insurance certificate must be a PDF or image (JPEG, PNG, or WebP).");
+  }
+
+  const bytes = Buffer.from(await file.arrayBuffer());
+  const filename = `${Date.now()}-${safePodFileName(file.name)}`;
+  const objectPath = `${carrierId}/${filename}`;
+
+  const { error: uploadError } = await supabase.storage
+    .from("insurance")
+    .upload(objectPath, bytes, {
+      contentType: file.type,
+      upsert: false,
+    });
+
+  if (!uploadError) {
+    const { data } = supabase.storage.from("insurance").getPublicUrl(objectPath);
+    if (data.publicUrl) return data.publicUrl;
+  }
+
+  if (process.env.VERCEL) {
+    const detail = uploadError?.message ? ` (${uploadError.message})` : "";
+    throw new Error(
+      `Insurance cloud upload failed${detail}. Apply supabase/migrations/20260806140000_carrier_insurance_upload.sql in Supabase before uploading on the live site.`,
+    );
+  }
+
+  const dir = path.join(process.cwd(), "public", "insurance-uploads", carrierId);
+  await mkdir(dir, { recursive: true });
+  await writeFile(path.join(dir, filename), bytes);
+  return `/insurance-uploads/${carrierId}/${filename}`;
+}
+
 /** Hard-block assigning a carrier whose insurance certificate is expired. */
 async function assertCarrierInsuranceCurrent(carrierId: string) {
   const supabase = await createClient();
@@ -117,6 +161,12 @@ function toastPath(path: string, message: string) {
 function toastErrorPath(path: string, message: string) {
   const join = path.includes("?") ? "&" : "?";
   return `${path}${join}toastError=${encodeURIComponent(message)}`;
+}
+
+/** Journal entries are derived on read — refresh Accounting / Profitability after cash & recognition events. */
+function revalidateAccountingSurfaces() {
+  revalidatePath("/accounting");
+  revalidatePath("/profitability");
 }
 
 async function insertDepositInvoice(opts: {
@@ -360,7 +410,7 @@ export async function createShipment(formData: FormData) {
   const [originCity = pickup, originState = ""] = pickup.split(",").map((s) => s.trim());
   const [destCity = delivery, destState = ""] = delivery.split(",").map((s) => s.trim());
 
-  const status: ShipmentStatus = carrierId ? "assigned" : "scheduled";
+  const status: ShipmentStatus = carrierId ? "offered" : "scheduled";
   const supabase = await createClient();
   await expirePastEndContracts();
 
@@ -533,6 +583,9 @@ export async function createShipment(formData: FormData) {
   revalidatePath("/invoices");
   revalidatePath("/ar");
   revalidatePath("/dashboard");
+  if (depositNumber) {
+    revalidateAccountingSurfaces();
+  }
   return data.id as string;
 }
 
@@ -544,7 +597,13 @@ export async function assignCarrier(formData: FormData) {
   }
 
   const shipmentId = String(formData.get("shipment_id") || "");
-  const returnPath = shipmentId ? `/shipments/${shipmentId}` : "/shipments";
+  const returnToRaw = String(formData.get("return_to") || "").trim();
+  const returnPath =
+    returnToRaw.startsWith("/") && !returnToRaw.startsWith("//")
+      ? returnToRaw
+      : shipmentId
+        ? `/shipments/${shipmentId}`
+        : "/shipments";
   const carrierId = String(formData.get("carrier_id") || "") || null;
   const carrierCostRaw = String(formData.get("carrier_cost") || "").trim();
   const supabase = await createClient();
@@ -595,17 +654,32 @@ export async function assignCarrier(formData: FormData) {
   }
 
   if (carrierId && ["draft", "scheduled"].includes(shipment.status)) {
-    patch.status = "assigned";
+    patch.status = "offered";
+  } else if (
+    carrierId &&
+    ["offered", "assigned", "booked"].includes(shipment.status) &&
+    carrierId !== shipment.carrier_id
+  ) {
+    // Re-tender to a different carrier — they must accept again.
+    patch.status = "offered";
   }
-  if (!carrierId && shipment.status === "assigned") {
+  if (!carrierId && ["offered", "assigned", "booked"].includes(shipment.status)) {
     patch.status = "scheduled";
   }
 
   const { error } = await supabase.from("shipments").update(patch).eq("id", shipmentId);
   if (error) throw new Error(error.message);
 
-  if (carrierId && patch.status === "assigned" && shipment.status !== "assigned") {
-    await logStatus(shipmentId, shipment.status, "assigned", profile.id, "Carrier assigned");
+  if (carrierId && patch.status === "offered" && shipment.status !== "offered") {
+    await logStatus(shipmentId, shipment.status, "offered", profile.id, "Carrier offered load");
+  } else if (carrierId && patch.status === "offered" && carrierId !== shipment.carrier_id) {
+    await logStatus(
+      shipmentId,
+      shipment.status,
+      "offered",
+      profile.id,
+      "Carrier reassigned — awaiting acceptance",
+    );
   } else if (!carrierId && patch.status === "scheduled") {
     await logStatus(shipmentId, shipment.status, "scheduled", profile.id, "Carrier unassigned");
   }
@@ -626,7 +700,116 @@ export async function assignCarrier(formData: FormData) {
 
   revalidatePath(`/shipments/${shipmentId}`);
   revalidatePath("/shipments");
+  revalidatePath("/assign");
+  revalidatePath("/offers");
   revalidatePath("/dashboard");
+
+  if (returnToRaw.startsWith("/") && !returnToRaw.startsWith("//")) {
+    redirect(
+      toastPath(
+        returnPath,
+        carrierId ? "Load offered to carrier — awaiting acceptance" : "Carrier unassigned",
+      ),
+    );
+  }
+}
+
+/** Carrier accepts a tendered load offer → becomes an assigned delivery. */
+export async function acceptLoadOffer(formData: FormData) {
+  const profile = await getCurrentProfile();
+  if (!profile || profile.role !== "carrier" || !profile.carrier_id) {
+    throw new Error("Only carriers can accept load offers.");
+  }
+
+  const shipmentId = String(formData.get("shipment_id") || "");
+  const supabase = await createClient();
+  const { data: shipment } = await supabase
+    .from("shipments")
+    .select("id, status, carrier_id, load_number")
+    .eq("id", shipmentId)
+    .single();
+
+  if (!shipment) {
+    redirect(toastErrorPath("/offers", "Offer not found"));
+  }
+  if (shipment.carrier_id !== profile.carrier_id) {
+    redirect(toastErrorPath("/offers", "This offer is not for your carrier."));
+  }
+  if (shipment.status !== "offered") {
+    redirect(toastErrorPath("/offers", "This offer is no longer pending."));
+  }
+
+  const { error } = await supabase
+    .from("shipments")
+    .update({ status: "assigned" })
+    .eq("id", shipmentId);
+  if (error) throw new Error(error.message);
+
+  await logStatus(shipmentId, "offered", "assigned", profile.id, "Carrier accepted load offer");
+
+  revalidatePath("/offers");
+  revalidatePath("/shipments");
+  revalidatePath(`/shipments/${shipmentId}`);
+  revalidatePath("/assign");
+  revalidatePath("/dashboard");
+  redirect(
+    toastPath(
+      `/shipments?filter=pickup-upcoming&focus=${shipmentId}`,
+      `Accepted ${shipment.load_number} — added to upcoming pickups`,
+    ),
+  );
+}
+
+/** Carrier declines a tendered load — returns to broker assign queue. */
+export async function declineLoadOffer(formData: FormData) {
+  const profile = await getCurrentProfile();
+  if (!profile || profile.role !== "carrier" || !profile.carrier_id) {
+    throw new Error("Only carriers can decline load offers.");
+  }
+
+  const shipmentId = String(formData.get("shipment_id") || "");
+  const note = String(formData.get("note") || "").trim();
+  if (note.length < 3) {
+    redirect(toastErrorPath("/offers", "Please enter a short reason for declining."));
+  }
+
+  const supabase = await createClient();
+  const { data: shipment } = await supabase
+    .from("shipments")
+    .select("id, status, carrier_id, load_number")
+    .eq("id", shipmentId)
+    .single();
+
+  if (!shipment) {
+    redirect(toastErrorPath("/offers", "Offer not found"));
+  }
+  if (shipment.carrier_id !== profile.carrier_id) {
+    redirect(toastErrorPath("/offers", "This offer is not for your carrier."));
+  }
+  if (shipment.status !== "offered") {
+    redirect(toastErrorPath("/offers", "This offer is no longer pending."));
+  }
+
+  const { error } = await supabase
+    .from("shipments")
+    .update({ carrier_id: null, status: "scheduled" })
+    .eq("id", shipmentId);
+  if (error) throw new Error(error.message);
+
+  await logStatus(
+    shipmentId,
+    "offered",
+    "scheduled",
+    profile.id,
+    `Carrier declined offer: ${note}`,
+  );
+
+  revalidatePath("/offers");
+  revalidatePath("/shipments");
+  revalidatePath(`/shipments/${shipmentId}`);
+  revalidatePath("/assign");
+  revalidatePath("/dashboard");
+  redirect(toastPath("/offers", `Declined ${shipment.load_number}`));
 }
 
 export async function updateShipmentStatus(
@@ -647,6 +830,9 @@ export async function updateShipmentStatus(
 
   if (profile.role === "carrier" && shipment.carrier_id !== profile.carrier_id) {
     throw new Error("Carriers can only update their assigned loads.");
+  }
+  if (profile.role === "carrier" && shipment.status === "offered") {
+    throw new Error("Accept or decline this offer before updating delivery status.");
   }
   if (profile.role === "customer") throw new Error("Customers cannot change shipment status.");
 
@@ -679,9 +865,13 @@ export async function updateShipmentStatus(
   if (error) throw new Error(error.message);
 
   await logStatus(shipmentId, shipment.status, toStatus, profile.id, opts?.note);
+  revalidatePath("/offers");
   revalidatePath("/shipments");
   revalidatePath(`/shipments/${shipmentId}`);
   revalidatePath("/dashboard");
+  if (["delivered", "completed", "cancelled"].includes(toStatus)) {
+    revalidateAccountingSurfaces();
+  }
 }
 
 /** Ops cancels a load that has not yet been delivered / completed. */
@@ -738,6 +928,7 @@ export async function cancelShipment(formData: FormData) {
   revalidatePath("/invoices");
   revalidatePath("/dashboard");
   revalidatePath("/warnings");
+  revalidateAccountingSurfaces();
   redirect(toastPath("/shipments", `Load ${shipment.load_number} cancelled`));
 }
 
@@ -894,12 +1085,94 @@ export async function uploadPod(formData: FormData) {
   revalidatePath("/invoices");
   revalidatePath("/documents");
   revalidatePath("/dashboard");
+  revalidateAccountingSurfaces();
   redirect(
     toastPath(
       `/shipments/${input.shipment_id}?pod=1`,
       input.replace ? "Proof of delivery replaced" : "Proof of delivery saved",
     ),
   );
+}
+
+export async function updateCarrierInsurance(formData: FormData) {
+  const profile = await getCurrentProfile();
+  if (!profile || profile.role !== "carrier" || !profile.carrier_id) {
+    throw new Error("Only carriers can update their own insurance.");
+  }
+
+  const input = parseForm(
+    z.object({
+      insurance_expiration: z
+        .string()
+        .trim()
+        .regex(/^\d{4}-\d{2}-\d{2}$/, "Enter a valid expiration date."),
+    }),
+    {
+      insurance_expiration: formString(formData, "insurance_expiration"),
+    },
+  );
+
+  const rawFile = formData.get("insurance_file");
+  const hasFile = rawFile instanceof File && rawFile.size > 0;
+
+  const supabase = await createClient();
+  const { data: existing, error: existingErr } = await supabase
+    .from("carriers")
+    .select("id, insurance_expiration, insurance_certificate_url")
+    .eq("id", profile.carrier_id)
+    .maybeSingle();
+  if (existingErr) throw new Error(existingErr.message);
+  if (!existing) throw new Error("Carrier record not found.");
+
+  if (!hasFile && !existing.insurance_certificate_url) {
+    redirect(
+      toastErrorPath(
+        "/settings#carrier-insurance",
+        "Upload an insurance certificate (PDF or image) with the new expiration date.",
+      ),
+    );
+  }
+
+  let certificateUrl: string | null = null;
+  if (hasFile && rawFile instanceof File) {
+    try {
+      certificateUrl = await persistInsuranceFile(profile.carrier_id, rawFile, supabase);
+    } catch (err) {
+      const message = err instanceof Error ? err.message : "Insurance upload failed.";
+      redirect(toastErrorPath("/settings#carrier-insurance", message));
+    }
+  }
+
+  const { error } = await supabase.rpc("update_own_carrier_insurance", {
+    p_expiration: input.insurance_expiration,
+    p_certificate_url: certificateUrl,
+  });
+  if (error) {
+    redirect(
+      toastErrorPath(
+        "/settings#carrier-insurance",
+        error.message || "Could not update insurance.",
+      ),
+    );
+  }
+
+  await supabase.from("status_events").insert({
+    entity_type: "carrier",
+    entity_id: profile.carrier_id,
+    from_status: existing.insurance_expiration ?? null,
+    to_status: input.insurance_expiration,
+    changed_by: profile.id,
+    note: certificateUrl
+      ? "Carrier updated insurance expiration and uploaded a new certificate"
+      : "Carrier updated insurance expiration",
+  });
+
+  revalidatePath("/settings");
+  revalidatePath("/carriers");
+  revalidatePath("/risk");
+  revalidatePath("/warnings");
+  revalidatePath("/dashboard");
+  redirect(toastPath("/settings#carrier-insurance", "Insurance updated"));
 }
 
 export async function requestAccessorial(formData: FormData) {
@@ -1086,6 +1359,7 @@ export async function generateInvoice(shipmentId: string, _formData?: FormData) 
     revalidatePath("/invoices");
     revalidatePath(`/shipments/${shipmentId}`);
     revalidatePath("/dashboard");
+    revalidateAccountingSurfaces();
     redirect(
       toastPath(
         "/invoices",
@@ -1138,6 +1412,7 @@ export async function generateInvoice(shipmentId: string, _formData?: FormData) 
   revalidatePath("/invoices");
   revalidatePath(`/shipments/${shipmentId}`);
   revalidatePath("/dashboard");
+  revalidateAccountingSurfaces();
   const depositNote =
     depositTotal > 0
       ? ` (balance after ${money(depositTotal)} downpayment)`
@@ -1214,12 +1489,11 @@ export async function recordPayment(formData: FormData) {
     });
   }
 
-  revalidatePath("/payments");
   revalidatePath("/invoices");
   revalidatePath("/ar");
   revalidatePath("/dashboard");
   revalidatePath("/controls");
-  revalidatePath("/accounting");
+  revalidateAccountingSurfaces();
 }
 
 /** Write off remaining AR — posts as Bad debt (not cash) via write_off_simulated payment. */
@@ -1292,13 +1566,12 @@ export async function writeOffInvoice(formData: FormData) {
     note: `AR written off to bad debt (${balance.toFixed(2)})`,
   });
 
-  revalidatePath("/payments");
   revalidatePath("/invoices");
   revalidatePath(`/invoices/${invoiceId}`);
   revalidatePath("/ar");
   revalidatePath("/dashboard");
   revalidatePath("/controls");
-  revalidatePath("/accounting");
+  revalidateAccountingSurfaces();
   redirect(
     toastPath(
       `/invoices/${invoiceId}`,
@@ -1311,7 +1584,7 @@ export async function writeOffInvoice(formData: FormData) {
 export async function shipperMarkInvoicePaid(formData: FormData) {
   const profile = await getCurrentProfile();
   if (!profile || profile.role !== "customer" || !profile.customer_id) {
-    throw new Error("Only shippers can mark their own invoices paid.");
+    throw new Error("Only customers can mark their own invoices paid.");
   }
 
   const invoiceId = parseForm(z.object({ id: uuidSchema }), {
@@ -1345,7 +1618,7 @@ export async function shipperMarkInvoicePaid(formData: FormData) {
     amount: balance,
     payment_date: paymentDate,
     method: "ach_simulated",
-    reference: "Shipper portal — mark paid",
+    reference: "Customer portal — mark paid",
     recorded_by: profile.id,
   });
   if (error) throw new Error(error.message);
@@ -1359,16 +1632,16 @@ export async function shipperMarkInvoicePaid(formData: FormData) {
     .eq("id", invoiceId);
 
   revalidatePath("/invoices");
-  revalidatePath("/payments");
   revalidatePath("/ar");
   revalidatePath("/dashboard");
+  revalidateAccountingSurfaces();
   redirect(toastPath("/invoices", `Payment recorded for ${invoice.invoice_number}`));
 }
 
 export async function openDispute(formData: FormData) {
   const profile = await getCurrentProfile();
   if (!profile || profile.role !== "customer") {
-    throw new Error("Only shippers can open billing disputes.");
+    throw new Error("Only customers can open billing disputes.");
   }
   if (!profile.customer_id) {
     throw new Error("No customer account linked to this profile.");
@@ -1555,10 +1828,10 @@ export async function resolveDispute(formData: FormData) {
 
   revalidatePath("/disputes");
   revalidatePath("/invoices");
-  revalidatePath("/payments");
   revalidatePath("/ar");
   revalidatePath("/dashboard");
   revalidatePath("/controls");
+  revalidateAccountingSurfaces();
 }
 
 export async function reviewApproval(formData: FormData) {
@@ -1605,11 +1878,28 @@ export async function reviewApproval(formData: FormData) {
       .update({ discount_approved: decision === "approved" })
       .eq("id", req.entity_id);
   }
+
+  // Credit-hold escalations: approving does not book the load — manager still confirms on Load requests.
+  const coverageHref =
+    req.entity_type === "coverage_request" &&
+    (req.request_type === "credit_hold" || req.request_type === "credit_override")
+      ? `/coverage?focus=${req.entity_id}`
+      : null;
+
   revalidatePath("/settings");
   revalidatePath("/approvals");
   revalidatePath("/warnings");
   revalidatePath("/shipments");
   revalidatePath("/dashboard");
+  revalidatePath("/coverage");
+  if (coverageHref && decision === "approved") {
+    redirect(
+      toastPath(
+        coverageHref,
+        "Override authorized — complete Review & approve on this load request",
+      ),
+    );
+  }
   redirect(
     toastPath(
       "/approvals",
@@ -1657,7 +1947,6 @@ export async function addCollectionNote(formData: FormData) {
   revalidatePath("/dashboard");
   revalidatePath("/ar");
   revalidatePath("/invoices");
-  revalidatePath("/payments");
 }
 
 export async function generateCarrierBill(shipmentId: string, _formData?: FormData) {
@@ -1725,9 +2014,9 @@ export async function generateCarrierBill(shipmentId: string, _formData?: FormDa
   if (error) throw new Error(error.message);
 
   revalidatePath("/ap");
-  revalidatePath("/accounting");
   revalidatePath("/dashboard");
   revalidatePath(`/shipments/${shipmentId}`);
+  revalidateAccountingSurfaces();
   redirect(toastPath("/ap", `Carrier bill ${billNumber} created`));
 }
 
@@ -1780,9 +2069,8 @@ export async function recordCarrierPayment(formData: FormData) {
     .eq("id", billId);
 
   revalidatePath("/ap");
-  revalidatePath("/accounting");
   revalidatePath("/dashboard");
-  revalidatePath("/payments");
+  revalidateAccountingSurfaces();
 }
 
 /** Place or release an AP hold on a carrier bill. */
@@ -1826,7 +2114,7 @@ export async function setCarrierBillHold(formData: FormData) {
   if (error) throw new Error(error.message);
 
   revalidatePath("/ap");
-  revalidatePath("/accounting");
+  revalidateAccountingSurfaces();
   redirect(
     toastPath("/ap", hold ? "Carrier bill placed on hold" : "Carrier bill hold released"),
   );

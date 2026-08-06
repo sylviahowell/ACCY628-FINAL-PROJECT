@@ -66,12 +66,12 @@ export function filterShipments<T extends ShipmentFilterRow>(
         (s) => s.delivery_date === today || s.promised_delivery_date === today,
       );
       break;
-    case "pickup-upcoming":
+      case "pickup-upcoming":
       next = rows.filter(
         (s) =>
           Boolean(s.pickup_date) &&
           (s.pickup_date as string) >= today &&
-          ["assigned", "scheduled", "booked"].includes(s.status),
+          ["assigned", "booked"].includes(s.status),
       );
       break;
     case "delivery-due-today":

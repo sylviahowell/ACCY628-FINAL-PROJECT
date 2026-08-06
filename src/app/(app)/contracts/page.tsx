@@ -1,8 +1,10 @@
 import Link from "next/link";
 import { redirect } from "next/navigation";
+import { Suspense } from "react";
 import { ContractLaneCalculator } from "@/components/ContractLaneCalculator";
 import { EmptyState } from "@/components/EmptyState";
 import { FilterBanner, resolveSearchParams } from "@/components/FilterBanner";
+import { FocusScroll } from "@/components/FocusScroll";
 import { requirePathAccess } from "@/lib/authz";
 import {
   createContract,
@@ -36,6 +38,10 @@ export default async function ContractsPage({
     .select("*, customers(name)")
     .order("created_at", { ascending: false });
   const { data: customers } = await supabase.from("customers").select("id, name").order("name");
+  const { data: pendingCoverage } = await supabase
+    .from("coverage_requests")
+    .select("id, customer_id, contract_id, status")
+    .eq("status", "pending");
   const today = new Date().toISOString().slice(0, 10);
   const soon = new Date();
   soon.setUTCDate(soon.getUTCDate() + 30);
@@ -48,47 +54,72 @@ export default async function ContractsPage({
       )
     : allContracts;
 
+  const pendingByCustomer = new Map<string, number>();
+  const pendingByContract = new Map<string, number>();
+  for (const r of pendingCoverage ?? []) {
+    pendingByCustomer.set(
+      r.customer_id,
+      (pendingByCustomer.get(r.customer_id) ?? 0) + 1,
+    );
+    if (r.contract_id) {
+      pendingByContract.set(
+        r.contract_id,
+        (pendingByContract.get(r.contract_id) ?? 0) + 1,
+      );
+    }
+  }
+  const totalPendingCoverage = (pendingCoverage ?? []).length;
+
   return (
     <div className="space-y-6">
+      <Suspense fallback={null}>
+        <FocusScroll />
+      </Suspense>
       <div>
         <h1 className="text-2xl font-bold">Contracts</h1>
         <p className="text-sm opacity-70">
-          Shipping agreements set mile rates, customer downpayment, fuel %, and payment terms that
-          drive booking and cash.
+          Setup only — shipping agreements set mile rates, downpayment %, fuel %, and payment terms.
+          Daily load approval and carrier assignment happen on{" "}
+          <Link href="/coverage" className="link link-primary">
+            Load requests
+          </Link>{" "}
+          and{" "}
+          <Link href="/assign" className="link link-primary">
+            Assign carriers
+          </Link>
+          .
         </p>
       </div>
 
       <div className="rounded-box border border-primary/20 bg-base-100 p-4 shadow-sm">
-        <h2 className="font-semibold">Contract → cash</h2>
+        <h2 className="font-semibold">Where contracts fit</h2>
         <ol className="mt-2 list-decimal space-y-1 pl-5 text-sm opacity-80">
-          <li>Book the load on the contract (mile rates + downpayment %).</li>
+          <li>Ops creates or renews an active contract for the customer (this page).</li>
           <li>
-            At booking, a downpayment invoice (DEP-…) is created for the shipper; balance invoices
-            after delivery + POD.
+            Customer submits a load request on that contract → broker{" "}
+            <Link href="/coverage" className="link link-primary">
+              approves
+            </Link>{" "}
+            (blocked on credit hold).
           </li>
-          <li>Deliver freight and collect POD.</li>
           <li>
-            Billing invoices the customer (AR)
+            Broker{" "}
+            <Link href="/assign" className="link link-primary">
+              assigns a carrier
+            </Link>{" "}
+            (blocked if insurance expired).
+          </li>
+          <li>
+            After delivery + POD, Billing runs AR / AP
             {isManager ? (
               <>
                 {" "}
                 — <Link href="/invoices" className="link link-primary">Invoices</Link> /{" "}
-                <Link href="/ar" className="link link-primary">AR</Link>
+                <Link href="/ar" className="link link-primary">AR</Link> /{" "}
+                <Link href="/ap" className="link link-primary">AP</Link>
               </>
             ) : (
-              " — run in the Billing portal"
-            )}
-            .
-          </li>
-          <li>
-            Billing pays the carrier (AP / payables)
-            {isManager ? (
-              <>
-                {" "}
-                — <Link href="/ap" className="link link-primary">Accounts Payable</Link>
-              </>
-            ) : (
-              " — run in the Billing portal"
+              " in the Billing portal"
             )}
             .
           </li>
@@ -97,6 +128,15 @@ export default async function ContractsPage({
           Only RowanLane operations can renew or end a contract. Customers and carriers request
           changes through Support — they cannot cancel agreements in the portal.
         </p>
+        {totalPendingCoverage > 0 ? (
+          <p className="mt-3 text-sm">
+            <Link href="/coverage" className="link link-primary font-medium">
+              {totalPendingCoverage} load request
+              {totalPendingCoverage === 1 ? "" : "s"}
+            </Link>{" "}
+            waiting for approval (not approved here).
+          </p>
+        ) : null}
       </div>
 
       {expiringOnly ? (
@@ -220,7 +260,12 @@ export default async function ContractsPage({
               carrier_rate_per_mile: c.carrier_rate_per_mile,
             };
             return (
-              <div key={c.id} className="card bg-base-100 shadow-sm">
+              <div
+                key={c.id}
+                id={`focus-${c.contract_number}`}
+                data-focus={c.contract_number}
+                className="card bg-base-100 shadow-sm transition"
+              >
                 <div className="card-body gap-4">
                   <div className="flex flex-wrap items-start justify-between gap-3">
                     <div>
@@ -247,6 +292,17 @@ export default async function ContractsPage({
                       </p>
                       {c.renewal_option ? (
                         <p className="text-xs opacity-50">Renewable</p>
+                      ) : null}
+                      {(pendingByContract.get(c.id) ?? 0) > 0 ||
+                      (pendingByCustomer.get(c.customer_id) ?? 0) > 0 ? (
+                        <p className="mt-1">
+                          <Link href="/coverage" className="link link-primary text-xs">
+                            {(pendingByContract.get(c.id) ?? 0) > 0
+                              ? `${pendingByContract.get(c.id)} request(s) pending approval`
+                              : `${pendingByCustomer.get(c.customer_id)} request(s) pending for customer`}{" "}
+                            →
+                          </Link>
+                        </p>
                       ) : null}
                     </div>
                   </div>

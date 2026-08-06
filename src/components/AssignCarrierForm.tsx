@@ -28,6 +28,9 @@ type Props = {
   suggestedCarriers: SuggestedCarrier[];
   isManager: boolean;
   action: (formData: FormData) => Promise<void>;
+  /** After assign, stay on this path (e.g. /assign). */
+  returnTo?: string;
+  compact?: boolean;
 };
 
 export function AssignCarrierForm({
@@ -39,6 +42,8 @@ export function AssignCarrierForm({
   suggestedCarriers,
   isManager,
   action,
+  returnTo,
+  compact = false,
 }: Props) {
   const [carrierCost, setCarrierCost] = useState(
     defaultCarrierCost === "" ? "" : String(defaultCarrierCost),
@@ -55,14 +60,20 @@ export function AssignCarrierForm({
 
   return (
     <form
-      id="assign-carrier"
+      id={compact ? undefined : "assign-carrier"}
       action={action}
-      className="mt-4 grid gap-2 border-t border-base-200 pt-3"
+      className={
+        compact
+          ? "grid gap-2"
+          : "mt-4 grid gap-2 border-t border-base-200 pt-3"
+      }
     >
       <input type="hidden" name="shipment_id" value={shipmentId} />
+      {returnTo ? <input type="hidden" name="return_to" value={returnTo} /> : null}
       <p className="text-xs opacity-60">
-        Match using scorecards → confirm insurance → assign → book rate. Prefer Preferred /
-        Approved carriers.
+        {compact
+          ? "Sends an offer to the carrier. They must accept before the load appears in My Deliveries. Expired insurance is blocked."
+          : "Match using scorecards → confirm insurance → send offer. Carrier must accept before pickup."}
       </p>
       {suggestedCarriers.length > 0 ? (
         <div className="rounded-box border border-primary/30 bg-primary/5 p-3">
@@ -124,7 +135,11 @@ export function AssignCarrierForm({
         <p className="text-xs opacity-60">Managers may override negative margin; overrides are logged.</p>
       ) : null}
       <button className="btn btn-primary btn-sm" disabled={blockSubmit}>
-        {blockSubmit ? "Ask a manager — negative margin" : "Save carrier assignment"}
+        {blockSubmit
+          ? "Ask a manager — negative margin"
+          : compact
+            ? "Send offer"
+            : "Send carrier offer"}
       </button>
     </form>
   );

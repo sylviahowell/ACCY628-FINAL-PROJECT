@@ -5,12 +5,23 @@ import type { UserRole } from "@/lib/types";
 import { AUTH_FETCH_TIMEOUT_MS, withTimeout } from "@/lib/with-timeout";
 
 export async function updateSession(request: NextRequest) {
+  const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL?.trim();
+  const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY?.trim();
+
+  // Missing env crashes createServerClient on Edge → Vercel MIDDLEWARE_INVOCATION_FAILED.
+  // Fail soft: let public pages load; app layout still redirects unauthenticated users.
+  if (!supabaseUrl || !supabaseAnonKey) {
+    console.error(
+      "middleware: NEXT_PUBLIC_SUPABASE_URL / NEXT_PUBLIC_SUPABASE_ANON_KEY are not set",
+    );
+    return NextResponse.next({ request });
+  }
+
   let supabaseResponse = NextResponse.next({ request });
 
-  const supabase = createServerClient(
-    process.env.NEXT_PUBLIC_SUPABASE_URL!,
-    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
-    {
+  let supabase;
+  try {
+    supabase = createServerClient(supabaseUrl, supabaseAnonKey, {
       cookies: {
         getAll() {
           return request.cookies.getAll();
@@ -25,13 +36,17 @@ export async function updateSession(request: NextRequest) {
           );
         },
       },
-    },
-  );
+    });
+  } catch (err) {
+    console.error("middleware: failed to create Supabase client", err);
+    return NextResponse.next({ request });
+  }
 
   const path = request.nextUrl.pathname;
   const isStaticAsset =
     path.startsWith("/pod-samples/") ||
     path.startsWith("/pod-uploads/") ||
+    path.startsWith("/insurance-uploads/") ||
     path.startsWith("/brand/");
   if (isStaticAsset) {
     return NextResponse.next();
@@ -55,12 +70,8 @@ export async function updateSession(request: NextRequest) {
     );
     user = authUser;
   } catch {
-    // Hung / unreachable Auth — fail fast instead of ~25s retry stalls
-    if (!isPublic) {
-      const url = request.nextUrl.clone();
-      url.pathname = "/login";
-      return NextResponse.redirect(url);
-    }
+    // Hung / unreachable Auth — fail open so a slow network does not wipe the session
+    // mid-navigation. Page-level getCurrentProfile still enforces sign-in.
     return supabaseResponse;
   }
 

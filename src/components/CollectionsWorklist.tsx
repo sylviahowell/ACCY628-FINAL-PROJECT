@@ -133,7 +133,7 @@ export function CollectionsWorklist({ items }: { items: CollectionWorkItem[] }) 
                           View invoice
                         </Link>
                         <Link
-                          href={`/payments?invoice_id=${item.invoiceId}`}
+                          href={`/ar?invoice_id=${item.invoiceId}&focus=record-payment`}
                           className="btn btn-ghost btn-xs"
                         >
                           Record payment

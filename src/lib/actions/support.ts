@@ -54,7 +54,7 @@ function authorFields(profile: { full_name: string | null; role: string }) {
 export async function createSupportTicket(formData: FormData) {
   const profile = await getCurrentProfile();
   if (!profile || (profile.role !== "customer" && profile.role !== "carrier")) {
-    throw new Error("Only shipper or carrier accounts can open support tickets.");
+    throw new Error("Only customer or carrier accounts can open support tickets.");
   }
   if (profile.role === "customer" && !profile.customer_id) {
     throw new Error("No customer account linked to this profile.");

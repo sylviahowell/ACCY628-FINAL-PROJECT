@@ -6,8 +6,10 @@ import { createClient } from "@/lib/supabase/server";
 import { money } from "@/lib/types";
 
 type EntityContext = {
-  shipmentId: string;
+  shipmentId: string | null;
   loadNumber: string;
+  href: string;
+  openLabel: string;
 };
 
 async function buildEntityContext(
@@ -21,6 +23,9 @@ async function buildEntityContext(
   ];
   const shipmentIdsDirect = [
     ...new Set(rows.filter((a) => a.entity_type === "shipment").map((a) => a.entity_id)),
+  ];
+  const coverageIds = [
+    ...new Set(rows.filter((a) => a.entity_type === "coverage_request").map((a) => a.entity_id)),
   ];
 
   const chargeToShipment = new Map<string, string>();
@@ -44,15 +49,45 @@ async function buildEntityContext(
     for (const s of ships ?? []) loadByShipment.set(s.id, s.load_number);
   }
 
+  if (coverageIds.length) {
+    const { data: coverage } = await supabase
+      .from("coverage_requests")
+      .select("id, pickup_location, delivery_location, customers(name)")
+      .in("id", coverageIds);
+    for (const r of coverage ?? []) {
+      const customerName = (r.customers as { name?: string } | null)?.name ?? "Customer";
+      map.set(`coverage_request:${r.id}`, {
+        shipmentId: null,
+        loadNumber: customerName,
+        href: `/coverage?focus=${r.id}`,
+        openLabel: "Open load request",
+      });
+    }
+  }
+
   for (const a of rows) {
     if (a.entity_type === "shipment") {
       const loadNumber = loadByShipment.get(a.entity_id);
-      if (loadNumber) map.set(`${a.entity_type}:${a.entity_id}`, { shipmentId: a.entity_id, loadNumber });
+      if (loadNumber) {
+        map.set(`${a.entity_type}:${a.entity_id}`, {
+          shipmentId: a.entity_id,
+          loadNumber,
+          href: `/shipments/${a.entity_id}`,
+          openLabel: "Open load",
+        });
+      }
     } else if (a.entity_type === "shipment_charge") {
       const shipmentId = chargeToShipment.get(a.entity_id);
       if (!shipmentId) continue;
       const loadNumber = loadByShipment.get(shipmentId);
-      if (loadNumber) map.set(`${a.entity_type}:${a.entity_id}`, { shipmentId, loadNumber });
+      if (loadNumber) {
+        map.set(`${a.entity_type}:${a.entity_id}`, {
+          shipmentId,
+          loadNumber,
+          href: `/shipments/${shipmentId}`,
+          openLabel: "Open load",
+        });
+      }
     }
   }
 
@@ -79,7 +114,8 @@ function toRow(
     reason: a.reason,
     created_at: a.created_at,
     loadNumber: related?.loadNumber ?? null,
-    shipmentHref: related ? `/shipments/${related.shipmentId}` : null,
+    shipmentHref: related?.href ?? null,
+    openLabel: related?.openLabel ?? null,
   };
 }
 
@@ -110,8 +146,8 @@ export default async function ApprovalsPage() {
       <div>
         <h1 className="text-2xl font-bold">Approval Inbox</h1>
         <p className="text-sm opacity-70">
-          Discounts and large accessorials wait here until a manager decides. Approve in one click;
-          rejections need a short comment.
+          Discounts, large accessorials, and credit-hold load overrides wait here until a manager
+          decides. Credit-hold items open Load requests so the manager can book with an override.
         </p>
       </div>
 
@@ -152,10 +188,14 @@ export default async function ApprovalsPage() {
                 <tbody>
                   {(history ?? []).map((a) => {
                     const related = ctx.get(`${a.entity_type}:${a.entity_id}`);
-                    const href = related ? `/shipments/${related.shipmentId}` : null;
+                    const href = related?.href ?? null;
                     return (
                       <tr key={a.id}>
-                        <td className="capitalize">{a.request_type}</td>
+                        <td className="capitalize">
+                          {a.request_type === "credit_hold" || a.request_type === "credit_override"
+                            ? "Credit hold"
+                            : a.request_type}
+                        </td>
                         <td className="text-sm">{related?.loadNumber ?? "—"}</td>
                         <td>{money(a.amount)}</td>
                         <td>

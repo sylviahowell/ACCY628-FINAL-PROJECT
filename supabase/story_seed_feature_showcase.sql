@@ -63,6 +63,20 @@ UPDATE public.shipments SET
   customer_rate = 2200
 WHERE load_number = 'LD-2014-OPEN';
 
+-- Demo: prior carrier declined so Assign shows reassignment banner
+DELETE FROM public.shipment_status_updates
+WHERE shipment_id = (SELECT id FROM public.shipments WHERE load_number = 'LD-2014-OPEN' LIMIT 1)
+  AND note ILIKE 'Carrier declined offer:%';
+
+INSERT INTO public.shipment_status_updates (
+  shipment_id, from_status, to_status, changed_by, note
+)
+SELECT id, 'offered', 'scheduled', 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaa2',
+  'Carrier declined offer: No capacity on Houston–Memphis this week.'
+FROM public.shipments
+WHERE load_number = 'LD-2014-OPEN'
+LIMIT 1;
+
 UPDATE public.shipments SET
   status = 'delivered',
   delivery_date = (CURRENT_DATE - 1),
@@ -74,9 +88,9 @@ UPDATE public.shipments SET
   delivery_location = 'Dallas, TX'
 WHERE load_number = 'LD-2021-NOPOD';
 
--- Carrier active assignment with pickup today
+-- Carrier active assignment with pickup today (awaiting carrier accept)
 UPDATE public.shipments SET
-  status = 'assigned',
+  status = 'offered',
   carrier_id = '22222222-2222-2222-2222-222222222201',
   pickup_date = CURRENT_DATE,
   promised_delivery_date = (CURRENT_DATE + 2),
@@ -208,18 +222,20 @@ DELETE FROM public.coverage_requests
 WHERE notes ILIKE 'SHOWCASE%' OR notes ILIKE '%C2C-%';
 
 INSERT INTO public.coverage_requests (
-  id, customer_id, requested_by, status,
+  id, customer_id, requested_by, status, contract_id,
   pickup_location, delivery_location, pickup_date, delivery_date,
-  freight_type, weight_lbs, notes
+  freight_type, weight_lbs, miles, quoted_customer_rate, quoted_carrier_cost, notes
 ) VALUES
 (
   '88888888-8888-8888-8888-888888888801',
   '11111111-1111-1111-1111-111111111101',
   'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaa3',
   'pending',
+  (SELECT id FROM public.contracts WHERE contract_number = 'CTR-2026-001' LIMIT 1),
   'Milwaukee, WI', 'Indianapolis, IN',
   CURRENT_DATE + 3, CURRENT_DATE + 5,
   'Dry van', 24000,
+  287, 1004.50, 789.25,
   'SHOWCASE: Shipper needs coverage on Midwest lane — broker Book load.'
 ),
 (
@@ -227,14 +243,20 @@ INSERT INTO public.coverage_requests (
   '11111111-1111-1111-1111-111111111101',
   'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaa3',
   'pending',
+  (SELECT id FROM public.contracts WHERE contract_number = 'CTR-2026-001' LIMIT 1),
   'Detroit, MI', 'Cleveland, OH',
   CURRENT_DATE + 1, CURRENT_DATE + 2,
   'Dry van', 18000,
+  106, 371.00, 291.50,
   'SHOWCASE: Short-haul coverage request — scorecard assign after book.'
 )
 ON CONFLICT (id) DO UPDATE SET
   status = 'pending',
   notes = EXCLUDED.notes,
+  contract_id = EXCLUDED.contract_id,
+  miles = EXCLUDED.miles,
+  quoted_customer_rate = EXCLUDED.quoted_customer_rate,
+  quoted_carrier_cost = EXCLUDED.quoted_carrier_cost,
   pickup_date = EXCLUDED.pickup_date,
   delivery_date = EXCLUDED.delivery_date;
 

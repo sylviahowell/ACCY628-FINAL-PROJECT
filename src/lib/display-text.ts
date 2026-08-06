@@ -23,6 +23,9 @@ export function normalizePodUrl(url: string | null | undefined): string | null {
   if (trimmed.startsWith("/pod-uploads/") || trimmed.startsWith("/pod-samples/")) {
     return trimmed;
   }
+  if (trimmed.startsWith("/insurance-uploads/")) {
+    return trimmed;
+  }
   if (trimmed.includes("/storage/v1/object/")) return trimmed;
 
   // https://docs.freightflow.com/pod/ld-1002.pdf → /pod-samples/ld-1002.pdf

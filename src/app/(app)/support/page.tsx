@@ -1,6 +1,8 @@
 import Link from "next/link";
+import { Suspense } from "react";
 import { requirePathAccess } from "@/lib/authz";
 import { FilterBanner, resolveSearchParams } from "@/components/FilterBanner";
+import { FocusScroll } from "@/components/FocusScroll";
 import { createSupportTicket } from "@/lib/actions/support";
 import { createClient } from "@/lib/supabase/server";
 import { sanitizeDemoText } from "@/lib/display-text";
@@ -25,6 +27,19 @@ export default async function SupportPage({
   const staff = isStaff(profile.role);
   const params = await resolveSearchParams(searchParams);
   const filter = typeof params.filter === "string" ? params.filter : staff ? "active" : "all";
+  const focus = typeof params.focus === "string" ? params.focus : "";
+  const contractFocus =
+    typeof params.contract === "string" ? params.contract.trim() : "";
+  const contractTicketSubject = contractFocus
+    ? `Contract renewal / status — ${contractFocus}`
+    : focus === "contract"
+      ? "Need an active shipping contract"
+      : "";
+  const contractTicketBody = contractFocus
+    ? `I'd like help with contract ${contractFocus} (renewal or status).`
+    : focus === "contract"
+      ? "I don't have an active shipping contract and need one set up to request loads."
+      : "";
 
   const supabase = await createClient();
   const today = new Date().toISOString().slice(0, 10);
@@ -56,7 +71,12 @@ export default async function SupportPage({
   // Portal hub: open operational items (customer only has invoices/disputes context)
   let overdue: { id: string; invoice_number: string; total: number; amount_paid: number }[] = [];
   let delayed: { id: string; load_number: string }[] = [];
-  let openDisputes: { id: string; reason: string; amount_disputed: number }[] = [];
+    let openDisputes: {
+      id: string;
+      reason: string;
+      amount_disputed: number;
+      invoice_id?: string | null;
+    }[] = [];
   let linkShipments: { id: string; load_number: string; status: string }[] = [];
   let linkInvoices: { id: string; invoice_number: string; status: string }[] = [];
 
@@ -69,7 +89,7 @@ export default async function SupportPage({
         .order("due_date", { ascending: true }),
       supabase
         .from("disputes")
-        .select("id, reason, amount_disputed, status")
+        .select("id, reason, amount_disputed, status, invoice_id")
         .eq("customer_id", profile.customer_id)
         .eq("status", "open"),
       supabase
@@ -114,6 +134,9 @@ export default async function SupportPage({
 
   return (
     <div className="space-y-6">
+      <Suspense fallback={null}>
+        <FocusScroll />
+      </Suspense>
       <div>
         <h1 className="text-2xl font-bold">{staff ? "Support inbox" : "Support"}</h1>
         <p className="text-sm opacity-70">
@@ -145,7 +168,10 @@ export default async function SupportPage({
       ) : null}
 
       {!staff ? (
-        <div className="card border border-base-300 bg-base-100 shadow-sm">
+        <div
+          id="focus-contract"
+          className="card border border-base-300 bg-base-100 shadow-sm"
+        >
           <div className="card-body gap-3">
             <h2 className="card-title text-base">Open a ticket</h2>
             <p className="text-sm opacity-70">
@@ -153,6 +179,15 @@ export default async function SupportPage({
                 ? "For invoice amount disputes, open a billing dispute from My invoices. Use tickets for everything else."
                 : "Ask about POD uploads, delivery docs, or account questions — your account team will reply here."}
             </p>
+            {focus === "contract" ? (
+              <div className="alert alert-warning text-sm">
+                <span>
+                  {contractFocus
+                    ? `You're following up on contract ${contractFocus}. Submit the ticket below and ops will help with renewal or status.`
+                    : "You're requesting an active shipping contract. Submit the ticket below and ops will set one up."}
+                </span>
+              </div>
+            ) : null}
             <form action={createSupportTicket} className="grid gap-3 md:grid-cols-2">
               <fieldset className="fieldset md:col-span-2">
                 <legend className="fieldset-legend">Subject</legend>
@@ -162,11 +197,16 @@ export default async function SupportPage({
                   maxLength={200}
                   className="input input-bordered input-sm w-full"
                   placeholder="Short summary of your question"
+                  defaultValue={contractTicketSubject}
                 />
               </fieldset>
               <fieldset className="fieldset">
                 <legend className="fieldset-legend">Category</legend>
-                <select name="category" className="select select-bordered select-sm w-full" defaultValue="other">
+                <select
+                  name="category"
+                  className="select select-bordered select-sm w-full"
+                  defaultValue={focus === "contract" ? "account" : "other"}
+                >
                   <option value="shipment">Shipment</option>
                   <option value="billing">Billing question</option>
                   <option value="account">Account / portal</option>
@@ -216,6 +256,7 @@ export default async function SupportPage({
                   rows={4}
                   className="textarea textarea-bordered w-full text-sm"
                   placeholder="Describe what you need help with"
+                  defaultValue={contractTicketBody}
                 />
               </fieldset>
               <button type="submit" className="btn btn-primary btn-sm w-fit">
@@ -308,14 +349,25 @@ export default async function SupportPage({
                     </li>
                   ))}
                   {overdue.map((i) => (
-                    <li key={i.id}>
-                      Past-due invoice {i.invoice_number} —{" "}
-                      {money(Number(i.total) - Number(i.amount_paid))}
+                    <li key={i.id} id={`focus-${i.id}`}>
+                      Past-due invoice{" "}
+                      <Link className="link link-primary" href={`/invoices/${i.id}`}>
+                        {i.invoice_number}
+                      </Link>{" "}
+                      — {money(Number(i.total) - Number(i.amount_paid))}
                     </li>
                   ))}
                   {openDisputes.map((d) => (
-                    <li key={d.id}>
+                    <li key={d.id} id={`focus-${d.id}`}>
                       Open dispute: {sanitizeDemoText(d.reason)} ({money(d.amount_disputed)})
+                      {d.invoice_id ? (
+                        <>
+                          {" · "}
+                          <Link className="link link-primary" href={`/invoices/${d.invoice_id}`}>
+                            Open invoice
+                          </Link>
+                        </>
+                      ) : null}
                     </li>
                   ))}
                 </ul>

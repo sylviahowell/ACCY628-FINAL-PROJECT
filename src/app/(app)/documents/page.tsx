@@ -43,11 +43,16 @@ export default async function DocumentsPage({
 
   return (
     <div className="space-y-6">
-      <div>
-        <h1 className="text-2xl font-bold">Documents</h1>
-        <p className="text-sm opacity-70">
-          Proof of delivery and delivery paperwork for your assigned loads.
-        </p>
+      <div className="flex flex-wrap items-end justify-between gap-3">
+        <div>
+          <h1 className="text-2xl font-bold">Delivery Documents</h1>
+          <p className="text-sm opacity-70">
+            Proof of delivery for loads that still need paperwork.
+          </p>
+        </div>
+        <Link href="/shipments" className="btn btn-ghost btn-sm">
+          Back to My Deliveries
+        </Link>
       </div>
 
       {missingOnly ? (

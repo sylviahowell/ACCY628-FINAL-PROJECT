@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import {
   MapContainer,
@@ -101,6 +101,7 @@ function statusColor(status: string, delayed: boolean) {
   if (delayed) return "#ef4444";
   if (status === "in_transit" || status === "picked_up") return "#0284c7";
   if (status === "delivered" || status === "completed") return "#22c55e";
+  if (status === "offered") return "#f59e0b";
   if (status === "scheduled" || status === "assigned" || status === "booked") return "#eab308";
   return "#94a3b8";
 }
@@ -131,13 +132,11 @@ function isSimTracking(status: string) {
  */
 function FitBounds({ points, fitKey }: { points: LatLng[]; fitKey: string }) {
   const map = useMap();
-  const pointsRef = useRef(points);
-  pointsRef.current = points;
+  // Re-fit only when fitKey changes (shipment set), not on sim-clock point churn.
   useEffect(() => {
-    const pts = pointsRef.current;
-    if (pts.length === 0) return;
-    const lats = pts.map((p) => p.lat);
-    const lngs = pts.map((p) => p.lng);
+    if (points.length === 0) return;
+    const lats = points.map((p) => p.lat);
+    const lngs = points.map((p) => p.lng);
     map.fitBounds(
       [
         [Math.min(...lats), Math.min(...lngs)],
@@ -145,6 +144,7 @@ function FitBounds({ points, fitKey }: { points: LatLng[]; fitKey: string }) {
       ],
       { padding: [40, 40] },
     );
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- points from the fitKey render
   }, [map, fitKey]);
   return null;
 }

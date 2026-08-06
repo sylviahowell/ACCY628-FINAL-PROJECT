@@ -1,24 +1,55 @@
 import Link from "next/link";
-import { BookCoverageForm } from "@/components/BookCoverageForm";
+import { Suspense } from "react";
+import { BookCoverageForm, type CoverageContractOption } from "@/components/BookCoverageForm";
+import { CoverageRequestForm } from "@/components/CoverageRequestForm";
+import { FocusScroll } from "@/components/FocusScroll";
 import { requirePathAccess } from "@/lib/authz";
 import {
   acceptCoverageRequest,
   cancelCoverageRequest,
-  createCoverageRequest,
   declineCoverageRequest,
+  requestCoverageManagerOverride,
 } from "@/lib/actions/coverage";
 import {
   isOnCreditHold,
   pastDueBalanceFromInvoices,
 } from "@/lib/credit-hold";
 import { createClient } from "@/lib/supabase/server";
-import { isOperations } from "@/lib/types";
+import { isOperations, money } from "@/lib/types";
 
 function statusBadge(status: string) {
   if (status === "pending") return "badge-warning";
   if (status === "accepted") return "badge-success";
   if (status === "declined") return "badge-error";
   return "badge-ghost";
+}
+
+function mapContractOption(c: {
+  id: string;
+  contract_number: string;
+  title?: string | null;
+  downpayment_pct: number | null;
+  customer_rate_per_mile: number | null;
+  carrier_rate_per_mile: number | null;
+  fuel_surcharge_pct: number | null;
+  shipping_rates: string | null;
+  start_date: string;
+  end_date: string | null;
+}): CoverageContractOption {
+  return {
+    id: c.id,
+    contract_number: c.contract_number,
+    title: c.title,
+    downpayment_pct: c.downpayment_pct,
+    customer_rate_per_mile:
+      c.customer_rate_per_mile == null ? null : Number(c.customer_rate_per_mile),
+    carrier_rate_per_mile:
+      c.carrier_rate_per_mile == null ? null : Number(c.carrier_rate_per_mile),
+    fuel_surcharge_pct: c.fuel_surcharge_pct == null ? null : Number(c.fuel_surcharge_pct),
+    shipping_rates: c.shipping_rates,
+    start_date: c.start_date,
+    end_date: c.end_date,
+  };
 }
 
 export default async function CoveragePage() {
@@ -30,7 +61,7 @@ export default async function CoveragePage() {
   let query = supabase
     .from("coverage_requests")
     .select(
-      "id, status, pickup_location, delivery_location, pickup_date, delivery_date, freight_type, weight_lbs, notes, shipment_id, created_at, customer_id, customers(name), shipments(load_number)",
+      "id, status, pickup_location, delivery_location, pickup_date, delivery_date, freight_type, weight_lbs, notes, shipment_id, created_at, customer_id, contract_id, miles, quoted_customer_rate, quoted_carrier_cost, customers(name), shipments(load_number), contracts(contract_number, downpayment_pct)",
     )
     .order("created_at", { ascending: false })
     .limit(50);
@@ -40,7 +71,7 @@ export default async function CoveragePage() {
   } else if (!isOps) {
     return (
       <div className="alert alert-warning">
-        <span>Coverage requests are managed by shippers and Broker Operations.</span>
+        <span>Load requests are managed by customers and Broker Operations.</span>
       </div>
     );
   }
@@ -48,15 +79,22 @@ export default async function CoveragePage() {
   const { data: rows } = await query;
   const pending = (rows ?? []).filter((r) => r.status === "pending");
 
-  const { data: contracts } = isOps
-    ? await supabase
-        .from("contracts")
-        .select(
-          "id, contract_number, title, customer_id, status, downpayment_pct, customer_rate_per_mile, carrier_rate_per_mile",
-        )
-        .eq("status", "active")
-        .order("contract_number")
-    : { data: [] as never[] };
+  const { data: contracts } =
+    isOps || isCustomer
+      ? await supabase
+          .from("contracts")
+          .select(
+            "id, contract_number, title, customer_id, status, start_date, end_date, downpayment_pct, fuel_surcharge_pct, shipping_rates, customer_rate_per_mile, carrier_rate_per_mile",
+          )
+          .eq("status", "active")
+          .order("contract_number")
+      : { data: [] as never[] };
+
+  const shipperContracts = isCustomer
+    ? (contracts ?? [])
+        .filter((c) => c.customer_id === profile.customer_id)
+        .map(mapContractOption)
+    : [];
 
   const pendingCustomerIds = [
     ...new Set(pending.map((r) => r.customer_id).filter(Boolean)),
@@ -75,77 +113,64 @@ export default async function CoveragePage() {
     }
   }
 
+  const escalatedRequestIds = new Set<string>();
+  if (isOps && pending.length > 0) {
+    const { data: escalations } = await supabase
+      .from("approval_requests")
+      .select("entity_id")
+      .eq("entity_type", "coverage_request")
+      .eq("status", "pending")
+      .in("request_type", ["credit_hold", "credit_override"])
+      .in(
+        "entity_id",
+        pending.map((r) => r.id),
+      );
+    for (const e of escalations ?? []) escalatedRequestIds.add(e.entity_id);
+  }
+
   return (
     <div className="mx-auto max-w-4xl space-y-6">
+      <Suspense fallback={null}>
+        <FocusScroll />
+      </Suspense>
       <div>
         <h1 className="text-2xl font-bold">
-          {isCustomer ? "Request coverage" : "Coverage requests"}
+          {isCustomer ? "Request a load" : "Load requests"}
         </h1>
         <p className="mt-1 text-sm opacity-70">
           {isCustomer
-            ? "Tell RowanLane you need a carrier on a lane. Broker Operations books the load and assigns coverage."
-            : "Shipper requests for a carrier. Book a load from a pending request, then assign from scorecards."}
+            ? "Submit a lane on your active contract. Broker Operations reviews credit, approves the request, then assigns a carrier."
+            : "Step 2 — review miles and rates, then approve or decline. Credit holds block brokers — escalate to manager Approvals for override. After approve, assign on Assign carriers."}
         </p>
       </div>
 
       {isOps ? (
-        <div className="rounded-box border border-primary/20 bg-base-100 p-4 text-sm shadow-sm">
-          <p className="font-semibold">Coverage process</p>
-          <ol className="mt-2 list-decimal space-y-1 pl-5 opacity-80">
-            <li>Shipper submits a coverage request (lane + dates).</li>
-            <li>Broker/manager reviews here and books an unassigned load.</li>
-            <li>Assign a Preferred / Approved carrier from the load (scorecards).</li>
-            <li>Shipper tracks the load on My Shipments once it exists.</li>
-          </ol>
-        </div>
-      ) : (
-        <div className="rounded-box border border-primary/20 bg-base-100 p-4 text-sm shadow-sm">
-          <p className="font-semibold">How coverage works</p>
-          <ol className="mt-2 list-decimal space-y-1 pl-5 opacity-80">
-            <li>Submit a request with pickup, delivery, and dates.</li>
-            <li>Broker Operations books the load and finds a carrier.</li>
-            <li>Track the shipment on My Shipments after it is booked.</li>
-          </ol>
-        </div>
-      )}
+        <ol className="flex flex-wrap gap-2 text-sm">
+          <li className="rounded-box border border-base-300 bg-base-100 px-3 py-1.5 opacity-70">
+            1. Customer requests
+          </li>
+          <li className="rounded-box border border-primary/40 bg-primary/10 px-3 py-1.5 font-medium">
+            2. Approve here (credit check)
+          </li>
+          <li className="rounded-box border border-base-300 bg-base-100 px-3 py-1.5 opacity-70">
+            <Link href="/assign" className="link link-hover">
+              3. Assign carriers
+            </Link>
+          </li>
+        </ol>
+      ) : null}
 
       {isCustomer ? (
-        <details className="collapse collapse-arrow rounded-box border border-base-300 bg-base-100" open>
-          <summary className="collapse-title font-medium">New coverage request</summary>
-          <div className="collapse-content">
-            <form action={createCoverageRequest} className="grid gap-3 md:grid-cols-2 pb-2">
-              <input
-                name="pickup_location"
-                required
-                placeholder="Pickup (City, ST)"
-                className="input input-bordered"
-              />
-              <input
-                name="delivery_location"
-                required
-                placeholder="Delivery (City, ST)"
-                className="input input-bordered"
-              />
-              <input name="pickup_date" type="date" className="input input-bordered" />
-              <input name="delivery_date" type="date" className="input input-bordered" />
-              <input
-                name="freight_type"
-                placeholder="Freight type (e.g. Dry van)"
-                className="input input-bordered"
-              />
-              <input
-                name="weight_lbs"
-                type="number"
-                placeholder="Weight (lbs)"
-                className="input input-bordered"
-              />
-              <textarea
-                name="notes"
-                className="textarea textarea-bordered md:col-span-2"
-                placeholder="Appointment windows, special handling, preferred equipment…"
-              />
-              <button className="btn btn-primary md:col-span-2">Send to Broker Operations</button>
-            </form>
+        <details className="group rounded-box border border-base-300 bg-base-100" open>
+          <summary className="cursor-pointer list-none px-4 py-3 font-medium marker:content-none">
+            <span className="flex items-center justify-between gap-3">
+              New load request
+              <span className="text-xs font-normal opacity-50 group-open:hidden">Show</span>
+              <span className="hidden text-xs font-normal opacity-50 group-open:inline">Hide</span>
+            </span>
+          </summary>
+          <div className="border-t border-base-200 px-4 pb-5 pt-5">
+            <CoverageRequestForm contracts={shipperContracts} />
           </div>
         </details>
       ) : null}
@@ -153,8 +178,8 @@ export default async function CoveragePage() {
       {isOps && pending.length > 0 ? (
         <div className="alert alert-warning">
           <span>
-            {pending.length} pending coverage request{pending.length === 1 ? "" : "s"} waiting to be
-            booked.
+            {pending.length} pending request{pending.length === 1 ? "" : "s"} waiting for approval.
+            Credit holds block brokers; managers may override.
           </span>
         </div>
       ) : null}
@@ -162,14 +187,22 @@ export default async function CoveragePage() {
       {(rows ?? []).length === 0 ? (
         <p className="text-sm opacity-70">
           {isCustomer
-            ? "No coverage requests yet. Submit one when you need a carrier."
-            : "No coverage requests yet."}
+            ? "No load requests yet. Submit one when you need freight covered."
+            : "No load requests yet."}
         </p>
       ) : (
         <ul className="space-y-3">
           {(rows ?? []).map((r) => {
             const customerName = (r.customers as { name?: string } | null)?.name ?? "Customer";
             const loadNumber = (r.shipments as { load_number?: string } | null)?.load_number;
+            const contractMeta = r.contracts as {
+              contract_number?: string;
+              downpayment_pct?: number | null;
+            } | null;
+            const customerContracts = (contracts ?? [])
+              .filter((c) => c.customer_id === r.customer_id)
+              .map(mapContractOption);
+            const onHold = isOnCreditHold(pastDueByCustomer.get(r.customer_id) ?? 0);
             return (
               <li
                 key={r.id}
@@ -180,10 +213,21 @@ export default async function CoveragePage() {
                   <div className="min-w-0 flex-1">
                     <div className="flex flex-wrap items-center gap-2">
                       <span className={`badge badge-sm capitalize ${statusBadge(r.status)}`}>
-                        {r.status}
+                        {r.status === "accepted" ? "approved" : r.status}
                       </span>
                       {!isCustomer ? (
                         <span className="font-medium">{customerName}</span>
+                      ) : null}
+                      {isOps && r.status === "pending" && onHold ? (
+                        <span className="badge badge-error badge-sm">Credit hold</span>
+                      ) : null}
+                      {contractMeta?.contract_number ? (
+                        <span className="badge badge-outline badge-sm">
+                          {contractMeta.contract_number}
+                          {contractMeta.downpayment_pct != null
+                            ? ` · ${contractMeta.downpayment_pct}% down`
+                            : ""}
+                        </span>
                       ) : null}
                       <span className="text-xs opacity-60">
                         {new Date(r.created_at).toLocaleString()}
@@ -196,15 +240,37 @@ export default async function CoveragePage() {
                       Pickup {r.pickup_date ?? "TBD"} · Delivery {r.delivery_date ?? "TBD"}
                       {r.freight_type ? ` · ${r.freight_type}` : ""}
                       {r.weight_lbs ? ` · ${r.weight_lbs} lbs` : ""}
+                      {r.miles ? ` · ${r.miles} mi` : ""}
                     </p>
+                    {r.quoted_customer_rate != null || r.quoted_carrier_cost != null ? (
+                      <p className="text-sm opacity-70">
+                        Quoted
+                        {r.quoted_customer_rate != null
+                          ? ` customer ${money(Number(r.quoted_customer_rate))}`
+                          : ""}
+                        {r.quoted_carrier_cost != null
+                          ? ` · carrier ${money(Number(r.quoted_carrier_cost))}`
+                          : ""}
+                      </p>
+                    ) : null}
                     {r.notes ? <p className="mt-1 text-sm opacity-60">{r.notes}</p> : null}
                     {loadNumber && r.shipment_id ? (
-                      <Link
-                        href={`/shipments/${r.shipment_id}`}
-                        className="link link-primary mt-1 inline-block text-sm"
-                      >
-                        Open {loadNumber}
-                      </Link>
+                      <p className="mt-1 text-sm">
+                        <Link
+                          href={`/shipments/${r.shipment_id}`}
+                          className="link link-primary"
+                        >
+                          Open {loadNumber}
+                        </Link>
+                        {isOps ? (
+                          <>
+                            {" · "}
+                            <Link href="/assign" className="link link-primary">
+                              Assign carrier
+                            </Link>
+                          </>
+                        ) : null}
+                      </p>
                     ) : null}
                   </div>
                   <div className="flex shrink-0 flex-col gap-2">
@@ -214,18 +280,32 @@ export default async function CoveragePage() {
                           requestId={r.id}
                           isManager={profile.role === "manager"}
                           customerName={customerName}
+                          pickupDate={r.pickup_date}
+                          deliveryDate={r.delivery_date}
+                          pickupLocation={r.pickup_location}
+                          deliveryLocation={r.delivery_location}
+                          initialContractId={r.contract_id}
+                          initialMiles={r.miles == null ? null : Number(r.miles)}
+                          initialCustomerRate={
+                            r.quoted_customer_rate == null
+                              ? null
+                              : Number(r.quoted_customer_rate)
+                          }
+                          initialCarrierCost={
+                            r.quoted_carrier_cost == null
+                              ? null
+                              : Number(r.quoted_carrier_cost)
+                          }
                           pastDue={pastDueByCustomer.get(r.customer_id) ?? 0}
-                          onCreditHold={isOnCreditHold(
-                            pastDueByCustomer.get(r.customer_id) ?? 0,
-                          )}
+                          onCreditHold={onHold}
                           action={acceptCoverageRequest}
-                          contracts={(contracts ?? [])
-                            .filter((c) => c.customer_id === r.customer_id)
-                            .map((c) => ({
-                              id: c.id,
-                              contract_number: c.contract_number,
-                              downpayment_pct: c.downpayment_pct,
-                            }))}
+                          escalateAction={
+                            profile.role === "broker"
+                              ? requestCoverageManagerOverride
+                              : undefined
+                          }
+                          alreadyEscalated={escalatedRequestIds.has(r.id)}
+                          contracts={customerContracts}
                         />
                         <details>
                           <summary className="btn btn-ghost btn-xs cursor-pointer">Decline…</summary>
@@ -235,7 +315,7 @@ export default async function CoveragePage() {
                               name="note"
                               required
                               minLength={3}
-                              placeholder="Reason for shipper"
+                              placeholder="Reason for customer"
                               className="input input-bordered input-sm"
                             />
                             <button className="btn btn-error btn-sm">Confirm decline</button>

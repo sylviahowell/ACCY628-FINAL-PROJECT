@@ -17,10 +17,55 @@ const CITY_COORDS: Record<string, LatLng> = {
   "kansas city, mo": { lat: 39.0997, lng: -94.5786 },
   "st louis, mo": { lat: 38.627, lng: -90.1994 },
   "st. louis, mo": { lat: 38.627, lng: -90.1994 },
+  "des moines, ia": { lat: 41.5868, lng: -93.625 },
+  "indianapolis, in": { lat: 39.7684, lng: -86.1581 },
+  "louisville, ky": { lat: 38.2527, lng: -85.7585 },
+  "detroit, mi": { lat: 42.3314, lng: -83.0458 },
+  "cleveland, oh": { lat: 41.4993, lng: -81.6944 },
+  "minneapolis, mn": { lat: 44.9778, lng: -93.265 },
+  "milwaukee, wi": { lat: 43.0389, lng: -87.9065 },
+  "los angeles, ca": { lat: 34.0522, lng: -118.2437 },
+  "new york, ny": { lat: 40.7128, lng: -74.006 },
+  "jacksonville, fl": { lat: 30.3322, lng: -81.6557 },
+  "charlotte, nc": { lat: 35.2271, lng: -80.8431 },
 };
+
+/** Earth mean radius in statute miles. */
+const EARTH_RADIUS_MI = 3958.8;
+
+/** Highway distance is typically longer than straight-line; demo factor for quotes. */
+const ROAD_DISTANCE_FACTOR = 1.18;
 
 function scrub(s: string) {
   return s.trim().toLowerCase().replace(/\./g, "");
+}
+
+/** Great-circle distance in miles between two lat/lng points. */
+export function haversineMiles(a: LatLng, b: LatLng): number {
+  const toRad = (deg: number) => (deg * Math.PI) / 180;
+  const dLat = toRad(b.lat - a.lat);
+  const dLng = toRad(b.lng - a.lng);
+  const lat1 = toRad(a.lat);
+  const lat2 = toRad(b.lat);
+  const h =
+    Math.sin(dLat / 2) ** 2 +
+    Math.cos(lat1) * Math.cos(lat2) * Math.sin(dLng / 2) ** 2;
+  return 2 * EARTH_RADIUS_MI * Math.asin(Math.min(1, Math.sqrt(h)));
+}
+
+/**
+ * Estimate road miles between two place strings (e.g. "Chicago, IL").
+ * Uses the demo city table — returns null when either place is unknown.
+ */
+export function estimateLaneMiles(
+  pickupLocation?: string | null,
+  deliveryLocation?: string | null,
+): number | null {
+  const origin = lookupCoords(null, null, pickupLocation);
+  const dest = lookupCoords(null, null, deliveryLocation);
+  if (!origin || !dest) return null;
+  if (origin.lat === dest.lat && origin.lng === dest.lng) return 0;
+  return Math.max(1, Math.round(haversineMiles(origin, dest) * ROAD_DISTANCE_FACTOR));
 }
 
 /** Candidate place strings: location free-text first, then city/state. */

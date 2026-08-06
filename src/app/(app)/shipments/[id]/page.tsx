@@ -9,7 +9,9 @@ import {
 import { requirePathAccess } from "@/lib/authz";
 import {
   assignCarrier,
+  acceptLoadOffer,
   cancelShipment,
+  declineLoadOffer,
   generateCarrierBill,
   generateInvoice,
   logDelayUpdate,
@@ -33,13 +35,14 @@ import {
   customerFacingHealth,
   filterTimelineForAudience,
 } from "@/lib/portal-views";
+import { parseCarrierDeclineReason } from "@/lib/carrier-declines";
 import { canManageBilling } from "@/lib/roles";
 import { insuranceRiskStatus } from "@/lib/risk-credit";
 import { buildCarrierScorecards, suggestCarriersForLoad, tierBadge } from "@/lib/carrier-scorecard";
 import { isControlOverrideNote } from "@/lib/control-activity";
 import { computeShipmentHealth } from "@/lib/shipment-health";
 import { createClient } from "@/lib/supabase/server";
-import { isOperations, money, statusBadge, type ShipmentStatus } from "@/lib/types";
+import { formatStatusLabel, isOperations, money, statusBadge, type ShipmentStatus } from "@/lib/types";
 
 export default async function ShipmentDetailPage({
   params,
@@ -450,8 +453,24 @@ export default async function ShipmentDetailPage({
     href?: string;
     form?: "invoice" | "pod" | "assign" | "carrier_bill";
   } | null = null;
-  if (canAssign && !s.carrier_id) {
+  const latestDeclineReason = (timeline ?? [])
+    .map((t) => parseCarrierDeclineReason(t.note as string | null))
+    .find((r): r is string => Boolean(r));
+  if (canAssign && !s.carrier_id && latestDeclineReason) {
+    nextAction = {
+      label: `Carrier declined — reassign (${latestDeclineReason})`,
+      form: "assign",
+      href: `/assign?focus=${s.id}`,
+    };
+  } else if (canAssign && !s.carrier_id) {
     nextAction = { label: "Assign a carrier to cover this load", form: "assign" };
+  } else if (canAssign && s.status === "offered" && s.carrier_id) {
+    nextAction = {
+      label: "Awaiting carrier acceptance — reassign from Assign carriers if needed",
+      href: `/assign?focus=${s.id}`,
+    };
+  } else if (isCarrier && s.status === "offered") {
+    nextAction = { label: "Accept or decline this load offer", href: "/offers" };
   } else if (canOperate && ["delivered", "completed"].includes(s.status) && !hasPod) {
     nextAction = { label: "Confirm delivery and attach proof of delivery", form: "pod" };
   } else if (canBill && ["delivered", "completed"].includes(s.status) && hasPod && !billed) {
@@ -496,8 +515,39 @@ export default async function ShipmentDetailPage({
           <p className="text-sm opacity-70">
             {s.pickup_location} → {s.delivery_location}
           </p>
-          <span className={`badge mt-2 ${statusBadge(s.status)}`}>{s.status}</span>
+          <span className={`badge mt-2 ${statusBadge(s.status)}`}>
+            {formatStatusLabel(s.status)}
+          </span>
+          {s.status === "offered" ? (
+            <p className="mt-2 text-sm font-medium text-warning">
+              {isCarrier
+                ? "This load is offered to you — accept it to add it to My Deliveries."
+                : "Awaiting carrier acceptance of this offer."}
+            </p>
+          ) : null}
         </div>
+        {isCarrier && s.status === "offered" ? (
+          <div className="flex w-full max-w-xs flex-col gap-2 rounded-box border border-warning/40 bg-warning/5 p-3">
+            <form action={acceptLoadOffer}>
+              <input type="hidden" name="shipment_id" value={s.id} />
+              <button className="btn btn-primary btn-sm w-full">Accept offer</button>
+            </form>
+            <details>
+              <summary className="btn btn-ghost btn-xs cursor-pointer">Decline…</summary>
+              <form action={declineLoadOffer} className="mt-2 flex flex-col gap-2">
+                <input type="hidden" name="shipment_id" value={s.id} />
+                <input
+                  name="note"
+                  required
+                  minLength={3}
+                  placeholder="Reason for ops"
+                  className="input input-bordered input-sm"
+                />
+                <button className="btn btn-error btn-sm">Confirm decline</button>
+              </form>
+            </details>
+          </div>
+        ) : null}
         {canOperate || canBill ? (
           <div className="flex flex-wrap gap-2">
             {canOperate && ["assigned", "booked"].includes(s.status) ? (
@@ -549,6 +599,18 @@ export default async function ShipmentDetailPage({
           </div>
         ) : null}
       </div>
+
+      {canAssign && !s.carrier_id && latestDeclineReason ? (
+        <div className="alert alert-error text-sm">
+          <span>
+            Carrier declined this offer: {latestDeclineReason}. Reassign from{" "}
+            <Link href={`/assign?focus=${s.id}`} className="link font-semibold">
+              Assign carriers
+            </Link>{" "}
+            or use the form below.
+          </span>
+        </div>
+      ) : null}
 
       {showInternalFinance && profile.role !== "broker" && margin < 0 ? (
         <div className="alert alert-warning">
@@ -623,7 +685,7 @@ export default async function ShipmentDetailPage({
             ) : null}
             {nextAction.form === "assign" ? (
               <a href="#assign-carrier" className="btn btn-primary btn-sm">
-                Assign carrier
+                {latestDeclineReason ? "Reassign carrier" : "Assign carrier"}
               </a>
             ) : null}
           </div>

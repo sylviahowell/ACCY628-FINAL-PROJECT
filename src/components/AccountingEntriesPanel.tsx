@@ -36,7 +36,7 @@ export function AccountingEntriesPanel({
     <ExpandableSection
       id="accounting-entries"
       title="Accounting entries"
-      description="Balanced demo journal lines derived from POD, invoices, customer cash, and carrier AP — not a separate posted ledger."
+      description="Live journal lines — auto-refresh when POD is filed, invoices are billed, customer payments land, write-offs post, or carrier AP is paid."
       badge={`${filtered.length} entr${filtered.length === 1 ? "y" : "ies"}`}
       defaultOpen={activeFilter !== "all"}
     >

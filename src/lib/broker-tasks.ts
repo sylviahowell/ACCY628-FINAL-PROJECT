@@ -16,6 +16,7 @@ export type BrokerTask = {
     | "pickup_today"
     | "delivery_today"
     | "unassigned"
+    | "declined_offer"
     | "delayed"
     | "customer_contact"
     | "carrier_pending"
@@ -81,9 +82,12 @@ export function buildBrokerTasks(input: {
     customers?: { name?: string } | null;
   }[];
   podShipmentIds: Set<string>;
+  /** Latest carrier decline reason by shipment id (still unassigned after decline). */
+  declinesByShipment?: Map<string, { reason: string; at: string | null }>;
 }): BrokerTask[] {
   const tasks: BrokerTask[] = [];
   const { today } = input;
+  const declines = input.declinesByShipment ?? new Map();
 
   for (const s of input.shipments) {
     if (s.status === "cancelled") continue;
@@ -100,7 +104,12 @@ export function buildBrokerTasks(input: {
         deadline: s.pickup_date,
         status: s.status,
         priority: "high",
-        action: s.carrier_id ? "Confirm pickup with carrier" : "Assign carrier before pickup window",
+        action:
+          s.status === "offered"
+            ? "Waiting on carrier to accept offer"
+            : s.carrier_id
+              ? "Confirm pickup with carrier"
+              : "Assign carrier before pickup window",
         category: "pickup_today",
         createdBy: s.created_by,
         href: `/shipments/${s.id}`,
@@ -128,20 +137,38 @@ export function buildBrokerTasks(input: {
     }
 
     if (!s.carrier_id) {
-      tasks.push({
-        id: `ua-${s.id}`,
-        shipmentId: s.id,
-        loadNumber: s.load_number,
-        customer: cust,
-        route,
-        deadline: s.pickup_date,
-        status: s.status,
-        priority: s.pickup_date && s.pickup_date <= today ? "high" : "medium",
-        action: "Assign a covered carrier from scorecards",
-        category: "unassigned",
-        createdBy: s.created_by,
-        href: `/shipments/${s.id}`,
-      });
+      const decline = declines.get(s.id);
+      if (decline) {
+        tasks.push({
+          id: `declined-${s.id}`,
+          shipmentId: s.id,
+          loadNumber: s.load_number,
+          customer: cust,
+          route,
+          deadline: s.pickup_date,
+          status: s.status,
+          priority: "high",
+          action: `Carrier declined — reassign (${decline.reason})`,
+          category: "declined_offer",
+          createdBy: s.created_by,
+          href: `/assign?focus=${s.id}`,
+        });
+      } else {
+        tasks.push({
+          id: `ua-${s.id}`,
+          shipmentId: s.id,
+          loadNumber: s.load_number,
+          customer: cust,
+          route,
+          deadline: s.pickup_date,
+          status: s.status,
+          priority: s.pickup_date && s.pickup_date <= today ? "high" : "medium",
+          action: "Assign a covered carrier from scorecards",
+          category: "unassigned",
+          createdBy: s.created_by,
+          href: `/assign?focus=${s.id}`,
+        });
+      }
     }
 
     const delayed =
@@ -179,12 +206,30 @@ export function buildBrokerTasks(input: {
       });
     }
 
+    // Tendered offer still awaiting carrier accept
+    if (s.status === "offered" && s.carrier_id) {
+      tasks.push({
+        id: `offer-${s.id}`,
+        shipmentId: s.id,
+        loadNumber: s.load_number,
+        customer: cust,
+        route,
+        deadline: s.pickup_date,
+        status: s.status,
+        priority: s.pickup_date && s.pickup_date <= today ? "high" : "medium",
+        action: "Awaiting carrier acceptance of load offer",
+        category: "carrier_pending",
+        createdBy: s.created_by,
+        href: `/shipments/${s.id}`,
+      });
+    }
+
     // Carrier assigned but pickup date passed without pickup progress
     if (
       s.carrier_id &&
       s.pickup_date &&
       s.pickup_date < today &&
-      ["scheduled", "assigned", "booked"].includes(s.status)
+      ["assigned", "booked"].includes(s.status)
     ) {
       tasks.push({
         id: `cr-${s.id}`,
@@ -290,7 +335,9 @@ export function filterBrokerTasks(
     case "delayed":
       return tasks.filter((t) => t.category === "delayed");
     case "unassigned":
-      return tasks.filter((t) => t.category === "unassigned");
+      return tasks.filter(
+        (t) => t.category === "unassigned" || t.category === "declined_offer",
+      );
     case "high_priority":
       return tasks.filter((t) => t.priority === "high");
     default:
@@ -302,7 +349,10 @@ export function brokerTaskStats(tasks: BrokerTask[]) {
   return {
     pickupsToday: tasks.filter((t) => t.category === "pickup_today").length,
     deliveriesToday: tasks.filter((t) => t.category === "delivery_today").length,
-    unassigned: tasks.filter((t) => t.category === "unassigned").length,
+    unassigned: tasks.filter(
+      (t) => t.category === "unassigned" || t.category === "declined_offer",
+    ).length,
+    declinedOffers: tasks.filter((t) => t.category === "declined_offer").length,
     delayed: tasks.filter((t) => t.category === "delayed").length,
     customerContact: tasks.filter((t) => t.category === "customer_contact").length,
     carrierPending: tasks.filter((t) => t.category === "carrier_pending").length,

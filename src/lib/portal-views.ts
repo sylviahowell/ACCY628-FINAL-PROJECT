@@ -130,7 +130,7 @@ export function buildCarrierTasks(input: {
 }): CarrierTask[] {
   const tasks: CarrierTask[] = [];
   for (const s of input.shipments) {
-    if (["cancelled", "completed"].includes(s.status)) continue;
+    if (["cancelled", "completed", "offered"].includes(s.status)) continue;
     const route =
       s.pickup_location && s.delivery_location
         ? `${s.pickup_location} → ${s.delivery_location}`
@@ -138,7 +138,7 @@ export function buildCarrierTasks(input: {
 
     if (
       s.pickup_date === input.today &&
-      ["scheduled", "assigned", "booked"].includes(s.status)
+      ["assigned", "booked"].includes(s.status)
     ) {
       tasks.push({
         id: `pu-${s.id}`,

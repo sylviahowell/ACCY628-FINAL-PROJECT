@@ -1,4 +1,6 @@
 import { redirect } from "next/navigation";
+import { Suspense } from "react";
+import { FocusScroll } from "@/components/FocusScroll";
 import { RiskCreditWorkspace } from "@/components/RiskCreditWorkspace";
 import { requirePathAccess } from "@/lib/authz";
 import {
@@ -16,10 +18,19 @@ import {
 } from "@/lib/credit-hold";
 import { money } from "@/lib/types";
 import { createClient } from "@/lib/supabase/server";
+import { resolveSearchParams } from "@/components/FilterBanner";
 
-export default async function RiskCreditPage() {
+export default async function RiskCreditPage({
+  searchParams,
+}: {
+  searchParams?:
+    | Promise<Record<string, string | string[] | undefined>>
+    | Record<string, string | string[] | undefined>;
+}) {
   const profile = await requirePathAccess("/risk");
   if (profile.role !== "manager" && profile.role !== "broker") redirect("/dashboard");
+  const params = await resolveSearchParams(searchParams);
+  const focusId = params.focus ?? null;
 
   const supabase = await createClient();
   const today = new Date().toISOString().slice(0, 10);
@@ -111,6 +122,9 @@ export default async function RiskCreditPage() {
 
   return (
     <div className="space-y-6">
+      <Suspense fallback={null}>
+        <FocusScroll />
+      </Suspense>
       <div>
         <h1 className="text-2xl font-bold">Risk &amp; Credit</h1>
         <p className="text-sm opacity-70">
@@ -130,7 +144,11 @@ export default async function RiskCreditPage() {
         </p>
       </div>
 
-      <RiskCreditWorkspace customers={customerRows} carriers={carrierRows} />
+      <RiskCreditWorkspace
+        customers={customerRows}
+        carriers={carrierRows}
+        focusId={focusId}
+      />
     </div>
   );
 }

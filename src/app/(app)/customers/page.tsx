@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { redirect } from "next/navigation";
 import { EmptyState } from "@/components/EmptyState";
+import { FilterBanner, resolveSearchParams } from "@/components/FilterBanner";
 import { requirePathAccess } from "@/lib/authz";
 import { createCustomer } from "@/lib/actions/freight";
 import {
@@ -11,9 +12,16 @@ import {
 import { createClient } from "@/lib/supabase/server";
 import { isOperations, money } from "@/lib/types";
 
-export default async function CustomersPage() {
+export default async function CustomersPage({
+  searchParams,
+}: {
+  searchParams?: Promise<Record<string, string | string[] | undefined>> | Record<string, string | string[] | undefined>;
+}) {
   const profile = await requirePathAccess("/customers");
   if (!isOperations(profile.role)) redirect("/dashboard");
+
+  const params = await resolveSearchParams(searchParams);
+  const customerId = params.customer;
 
   const supabase = await createClient();
   const today = new Date().toISOString().slice(0, 10);
@@ -25,6 +33,14 @@ export default async function CustomersPage() {
     .from("invoices")
     .select("customer_id, total, amount_paid, status, due_date");
 
+  const allCustomers = customers ?? [];
+  const visibleCustomers = customerId
+    ? allCustomers.filter((c) => c.id === customerId)
+    : allCustomers;
+  const scopedName =
+    visibleCustomers[0]?.name ??
+    (customerId ? allCustomers.find((c) => c.id === customerId)?.name : null);
+
   return (
     <div className="space-y-6">
       <div>
@@ -35,32 +51,49 @@ export default async function CustomersPage() {
         </p>
       </div>
 
-      <details className="collapse collapse-arrow rounded-box border border-base-300 bg-base-100">
-        <summary className="collapse-title font-medium">Add customer</summary>
-        <div className="collapse-content">
-          <form action={createCustomer} className="grid gap-3 md:grid-cols-2">
-            <input name="name" required placeholder="Company name" className="input input-bordered" />
-            <input name="contact_name" placeholder="Contact name" className="input input-bordered" />
-            <input name="contact_email" type="email" placeholder="Email" className="input input-bordered" />
-            <input name="contact_phone" placeholder="Phone" className="input input-bordered" />
-            <input name="billing_address" placeholder="Billing address" className="input input-bordered md:col-span-2" />
-            <input name="shipping_address" placeholder="Shipping address" className="input input-bordered md:col-span-2" />
-            <input name="payment_terms" defaultValue="Net 30" placeholder="Payment terms" className="input input-bordered" />
-            <input name="credit_limit" type="number" defaultValue={50000} placeholder="Credit limit" className="input input-bordered" />
-            <textarea name="notes" placeholder="Notes" className="textarea textarea-bordered md:col-span-2" />
-            <button className="btn btn-primary md:col-span-2">Save customer</button>
-          </form>
-        </div>
-      </details>
+      {customerId ? (
+        <FilterBanner
+          label={
+            scopedName
+              ? `customer profile for ${scopedName}`
+              : "selected customer (not found)"
+          }
+          clearHref="/customers"
+        />
+      ) : null}
+
+      {!customerId ? (
+        <details className="collapse collapse-arrow rounded-box border border-base-300 bg-base-100">
+          <summary className="collapse-title font-medium">Add customer</summary>
+          <div className="collapse-content">
+            <form action={createCustomer} className="grid gap-3 md:grid-cols-2">
+              <input name="name" required placeholder="Company name" className="input input-bordered" />
+              <input name="contact_name" placeholder="Contact name" className="input input-bordered" />
+              <input name="contact_email" type="email" placeholder="Email" className="input input-bordered" />
+              <input name="contact_phone" placeholder="Phone" className="input input-bordered" />
+              <input name="billing_address" placeholder="Billing address" className="input input-bordered md:col-span-2" />
+              <input name="shipping_address" placeholder="Shipping address" className="input input-bordered md:col-span-2" />
+              <input name="payment_terms" defaultValue="Net 30" placeholder="Payment terms" className="input input-bordered" />
+              <input name="credit_limit" type="number" defaultValue={50000} placeholder="Credit limit" className="input input-bordered" />
+              <textarea name="notes" placeholder="Notes" className="textarea textarea-bordered md:col-span-2" />
+              <button className="btn btn-primary md:col-span-2">Save customer</button>
+            </form>
+          </div>
+        </details>
+      ) : null}
 
       <div className="grid gap-4">
-        {(customers ?? []).length === 0 ? (
+        {visibleCustomers.length === 0 ? (
           <EmptyState
-            title="No customers yet"
-            description="Add a shipper to attach contracts and book loads."
+            title={customerId ? "Customer not found" : "No customers yet"}
+            description={
+              customerId
+                ? "Clear the filter to see all customers, or check the link from Risk."
+                : "Add a shipper to attach contracts and book loads."
+            }
           />
         ) : null}
-        {(customers ?? []).map((c) => {
+        {visibleCustomers.map((c) => {
           const openShipments = (shipments ?? []).filter(
             (s) => s.customer_id === c.id && !["completed", "cancelled"].includes(s.status),
           ).length;

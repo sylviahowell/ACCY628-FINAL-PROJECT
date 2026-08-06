@@ -19,6 +19,14 @@ import {
 import { createClient } from "@/lib/supabase/server";
 import { money } from "@/lib/types";
 
+function arHref(opts: { customer?: string; filter?: string }) {
+  const q = new URLSearchParams();
+  if (opts.customer) q.set("customer", opts.customer);
+  if (opts.filter) q.set("filter", opts.filter);
+  const s = q.toString();
+  return s ? `/ar?${s}` : "/ar";
+}
+
 export default async function AccountsReceivablePage({
   searchParams,
 }: {
@@ -27,6 +35,7 @@ export default async function AccountsReceivablePage({
   await requirePathAccess("/ar");
   const params = await resolveSearchParams(searchParams);
   const filter = params.filter;
+  const customerId = params.customer;
   const filterLabel = arFilterLabel(filter);
 
   const supabase = await createClient();
@@ -43,7 +52,22 @@ export default async function AccountsReceivablePage({
     .order("created_at", { ascending: false });
 
   const invList = invoices ?? [];
-  const mappedInvoices = invList.map((i) => ({
+  const scopedInvList = customerId
+    ? invList.filter((i) => i.customer_id === customerId)
+    : invList;
+
+  let resolvedCustomerName: string | null =
+    ((scopedInvList[0]?.customers as { name?: string } | null)?.name ?? null) || null;
+  if (customerId && !resolvedCustomerName) {
+    const { data: cust } = await supabase
+      .from("customers")
+      .select("name")
+      .eq("id", customerId)
+      .maybeSingle();
+    resolvedCustomerName = cust?.name ?? null;
+  }
+
+  const mappedInvoices = scopedInvList.map((i) => ({
     id: i.id,
     invoice_number: i.invoice_number,
     customer_id: i.customer_id,
@@ -54,7 +78,7 @@ export default async function AccountsReceivablePage({
     customers: i.customers as { name?: string } | null,
   }));
 
-  const aging = computeAging(invList, today);
+  const aging = computeAging(scopedInvList, today);
   const totalAr =
     aging.current + aging.d1_30 + aging.d31_60 + aging.d61_90 + aging.d90_plus;
   const pastDue = aging.d1_30 + aging.d31_60 + aging.d61_90 + aging.d90_plus;
@@ -101,6 +125,19 @@ export default async function AccountsReceivablePage({
       active ? "ring-2 ring-primary" : ""
     }`;
 
+  const bannerLabel = (() => {
+    const parts: string[] = [];
+    if (customerId) {
+      parts.push(
+        resolvedCustomerName
+          ? `AR for ${resolvedCustomerName}`
+          : "AR for selected customer",
+      );
+    }
+    if (filterLabel) parts.push(filterLabel);
+    return parts.length ? parts.join(" · ") : null;
+  })();
+
   return (
     <div className="space-y-6">
       <Suspense fallback={null}>
@@ -113,28 +150,40 @@ export default async function AccountsReceivablePage({
         </p>
       </div>
 
-      {filterLabel ? <FilterBanner label={filterLabel} clearHref="/ar" /> : null}
+      {bannerLabel ? <FilterBanner label={bannerLabel} clearHref="/ar" /> : null}
 
       <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-        <Link href="/ar" className={tileClass(!filter)}>
+        <Link
+          href={arHref({ customer: customerId })}
+          className={tileClass(!filter)}
+        >
           <div className="stat">
             <div className="stat-title">Total AR</div>
             <div className="stat-value text-xl">{money(totalAr)}</div>
           </div>
         </Link>
-        <Link href="/ar?filter=current" className={tileClass(filter === "current")}>
+        <Link
+          href={arHref({ customer: customerId, filter: "current" })}
+          className={tileClass(filter === "current")}
+        >
           <div className="stat">
             <div className="stat-title">Current</div>
             <div className="stat-value text-xl">{money(aging.current)}</div>
           </div>
         </Link>
-        <Link href="/ar?filter=past-due" className={tileClass(filter === "past-due")}>
+        <Link
+          href={arHref({ customer: customerId, filter: "past-due" })}
+          className={tileClass(filter === "past-due")}
+        >
           <div className="stat">
             <div className="stat-title">Past due</div>
             <div className="stat-value text-xl">{money(pastDue)}</div>
           </div>
         </Link>
-        <Link href="/ar?filter=d90_plus" className={tileClass(filter === "d90_plus")}>
+        <Link
+          href={arHref({ customer: customerId, filter: "d90_plus" })}
+          className={tileClass(filter === "d90_plus")}
+        >
           <div className="stat">
             <div className="stat-title">90+ days</div>
             <div className="stat-value text-xl text-error">{money(aging.d90_plus)}</div>
@@ -152,8 +201,14 @@ export default async function AccountsReceivablePage({
       <div className="card bg-base-100 shadow-sm">
         <div className="card-body gap-3">
           <div>
-            <h2 className="card-title text-base">Customers by open AR</h2>
-            <p className="text-sm opacity-70">Concentration of who owes us.</p>
+            <h2 className="card-title text-base">
+              {customerId ? "Customer open AR" : "Customers by open AR"}
+            </h2>
+            <p className="text-sm opacity-70">
+              {customerId
+                ? "Balances for this customer only."
+                : "Concentration of who owes us."}
+            </p>
           </div>
           {customerRollup.length === 0 ? (
             <p className="text-sm opacity-70">No open balances.</p>

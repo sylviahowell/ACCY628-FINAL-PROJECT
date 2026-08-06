@@ -236,10 +236,16 @@ export function RiskCreditWorkspace({
                     </td>
                     <td className="text-xs opacity-70">{c.paymentTerms}</td>
                     <td className="text-right">
-                      <Link href="/customers" className="btn btn-ghost btn-xs">
+                      <Link
+                        href={`/customers?customer=${encodeURIComponent(c.id)}`}
+                        className="btn btn-ghost btn-xs"
+                      >
                         Open
                       </Link>
-                      <Link href="/ar" className="btn btn-ghost btn-xs">
+                      <Link
+                        href={`/ar?customer=${encodeURIComponent(c.id)}`}
+                        className="btn btn-ghost btn-xs"
+                      >
                         AR
                       </Link>
                     </td>

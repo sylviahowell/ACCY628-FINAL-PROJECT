@@ -119,6 +119,7 @@ export function statusBadge(status: string) {
     completed: "badge-success",
     cancelled: "badge-error",
     pending: "badge-warning",
+    pending_accessorial: "badge-warning",
     partial: "badge-warning",
     paid: "badge-success",
     overdue: "badge-error",

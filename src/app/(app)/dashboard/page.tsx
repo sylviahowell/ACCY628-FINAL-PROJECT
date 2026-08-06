@@ -872,7 +872,7 @@ export default async function DashboardPage() {
             </div>
           }
         />
-        <div className="rounded-box border border-primary/20 bg-base-100 px-4 py-3 text-sm shadow-sm">
+        <div className="rounded-box border border-base-300 bg-base-100 px-4 py-3 text-sm shadow-sm">
           <p className="font-semibold">Coverage process</p>
           <ol className="mt-1 list-decimal space-y-0.5 pl-5 opacity-80">
             <li>Shipper submits a coverage request (lane + dates).</li>
@@ -1115,7 +1115,7 @@ export default async function DashboardPage() {
           ) : (
             <ul className="space-y-2 text-sm">
               {openDisputes.map((d) => (
-                <li key={d.id} className="rounded-box bg-warning/15 p-3">
+                <li key={d.id} className="rounded-box border border-warning/30 bg-warning/10 p-3">
                   {sanitizeDemoText(d.reason)} — {money(d.amount_disputed)}
                 </li>
               ))}
@@ -1230,7 +1230,7 @@ export default async function DashboardPage() {
             </div>
           }
         />
-        <div className="rounded-box border border-primary/20 bg-base-100 px-4 py-3 text-sm shadow-sm">
+        <div className="rounded-box border border-base-300 bg-base-100 px-4 py-3 text-sm shadow-sm">
           <p className="font-semibold">Need a carrier?</p>
           <p className="mt-1 opacity-80">
             Submit a coverage request with your lane and dates. Broker Operations books the load,
@@ -1417,7 +1417,7 @@ export default async function DashboardPage() {
               {missingPod.map((s) => (
                 <li
                   key={s.id}
-                  className="flex flex-wrap items-center justify-between gap-2 rounded-box bg-warning/10 px-3 py-2"
+                  className="flex flex-wrap items-center justify-between gap-2 rounded-box border border-warning/30 bg-warning/10 px-3 py-2"
                 >
                   <span>{s.load_number} — upload POD</span>
                   <Link href={`/shipments/${s.id}`} className="btn btn-warning btn-xs">
@@ -1495,7 +1495,7 @@ function Stat({
 
 function Panel({ title, children }: { title: string; children: React.ReactNode }) {
   return (
-    <div className="card bg-base-100 shadow-sm">
+    <div className="card border border-base-300 bg-base-100 shadow-sm">
       <div className="card-body">
         <h3 className="card-title text-base">{title}</h3>
         {children}

@@ -247,7 +247,8 @@ UPDATE public.invoices SET
   amount_paid = 0
 WHERE invoice_number IN ('INV-9001', 'INV-9002', 'INV-EDGE-OVERDUE');
 
--- Ensure an overdue invoice exists for Midwest
+-- Ensure an overdue disputed invoice exists (Prairie Foods — not the demo shipper portal,
+-- which must stay under the $1,000 past-due credit-hold threshold so brokers can book coverage)
 INSERT INTO public.invoices (
   id, invoice_number, customer_id, shipment_id, status,
   issue_date, due_date, subtotal, total, amount_paid
@@ -255,7 +256,7 @@ INSERT INTO public.invoices (
 SELECT
   '99999999-9999-9999-9999-999999999901',
   'INV-SHOW-OVER',
-  '11111111-1111-1111-1111-111111111101',
+  '11111111-1111-1111-1111-111111111104',
   s.id,
   'sent',
   CURRENT_DATE - 45,
@@ -264,6 +265,7 @@ SELECT
 FROM public.shipments s
 WHERE s.load_number = 'LD-1001'
 ON CONFLICT (id) DO UPDATE SET
+  customer_id = '11111111-1111-1111-1111-111111111104',
   status = 'sent',
   due_date = CURRENT_DATE - 15,
   amount_paid = 0,
@@ -275,16 +277,26 @@ INSERT INTO public.disputes (
   'aaaa1111-bbbb-cccc-dddd-eeeeeeeeee01',
   '99999999-9999-9999-9999-999999999901',
   (SELECT id FROM public.shipments WHERE load_number = 'LD-1001' LIMIT 1),
-  '11111111-1111-1111-1111-111111111101',
+  '11111111-1111-1111-1111-111111111104',
   'SHOWCASE: Shipper disputes detention line on INV-SHOW-OVER — billing to resolve.',
   400,
   'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaa3',
   'open'
 )
-ON CONFLICT (id) DO UPDATE SET status = 'open', reason = EXCLUDED.reason, amount_disputed = 400;
+ON CONFLICT (id) DO UPDATE SET
+  status = 'open',
+  customer_id = '11111111-1111-1111-1111-111111111104',
+  reason = EXCLUDED.reason,
+  amount_disputed = 400;
 
 UPDATE public.invoices SET status = 'disputed'
 WHERE id = '99999999-9999-9999-9999-999999999901';
+
+-- Keep demo shipper (Midwest) under credit-hold threshold so brokers can Book load
+UPDATE public.invoices SET
+  due_date = (CURRENT_DATE + 30)
+WHERE invoice_number IN ('INV-9001', 'DEP-SHOW-DOWN')
+  AND customer_id = '11111111-1111-1111-1111-111111111101';
 
 INSERT INTO public.collection_notes (invoice_id, note, created_by)
 SELECT

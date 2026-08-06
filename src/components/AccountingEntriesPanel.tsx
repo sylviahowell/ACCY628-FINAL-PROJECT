@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { ExpandableSection } from "@/components/ExpandableSection";
 import {
   ENTRY_TYPE_LABEL,
   entryTotals,
@@ -29,68 +30,71 @@ export function AccountingEntriesPanel({
       ? entries
       : entries.filter((e) => e.type === activeFilter);
 
+  const shown = filtered.slice(0, 40);
+
   return (
-    <div id="accounting-entries" className="card bg-base-100 shadow-sm">
-      <div className="card-body gap-4">
-        <div className="flex flex-wrap items-start justify-between gap-3">
-          <div>
-            <h2 className="card-title text-base">Accounting entries</h2>
-            <p className="text-sm opacity-70">
-              Balanced demo journal lines derived from POD, invoices, customer cash, and
-              carrier AP — not a separate posted ledger.
-            </p>
-          </div>
-          <span className="badge badge-ghost badge-sm">
-            {filtered.length} entr{filtered.length === 1 ? "y" : "ies"}
-          </span>
-        </div>
+    <ExpandableSection
+      id="accounting-entries"
+      title="Accounting entries"
+      description="Balanced demo journal lines derived from POD, invoices, customer cash, and carrier AP — not a separate posted ledger."
+      badge={`${filtered.length} entr${filtered.length === 1 ? "y" : "ies"}`}
+      defaultOpen={activeFilter !== "all"}
+    >
+      <div className="flex flex-wrap gap-2 pb-1">
+        {FILTERS.map((f) => {
+          const href =
+            f.key === "all"
+              ? "/accounting#accounting-entries"
+              : `/accounting?entries=${f.key}#accounting-entries`;
+          const active = activeFilter === f.key;
+          return (
+            <Link
+              key={f.key}
+              href={href}
+              className={`btn btn-xs ${active ? "btn-primary" : "btn-ghost"}`}
+            >
+              {f.label}
+            </Link>
+          );
+        })}
+      </div>
 
-        <div className="flex flex-wrap gap-2">
-          {FILTERS.map((f) => {
-            const href =
-              f.key === "all" ? "/accounting#accounting-entries" : `/accounting?entries=${f.key}#accounting-entries`;
-            const active = activeFilter === f.key;
-            return (
-              <Link
-                key={f.key}
-                href={href}
-                className={`btn btn-xs ${active ? "btn-primary" : "btn-ghost"}`}
-              >
-                {f.label}
-              </Link>
-            );
-          })}
-        </div>
-
-        <div className="space-y-3">
-          {filtered.slice(0, 40).map((entry) => {
-            const { debit, credit, balanced } = entryTotals(entry);
-            return (
-              <div
-                key={entry.id}
-                className="rounded-box border border-base-300 bg-base-200/40 p-3"
-              >
-                <div className="mb-2 flex flex-wrap items-baseline justify-between gap-2">
-                  <div>
+      <div className="space-y-2 pb-2">
+        {shown.map((entry) => {
+          const { debit, credit, balanced } = entryTotals(entry);
+          return (
+            <details
+              key={entry.id}
+              className="collapse collapse-arrow rounded-box border border-base-300 bg-base-200/40"
+            >
+              <summary className="collapse-title min-h-0 py-3 text-sm">
+                <div className="flex flex-wrap items-baseline justify-between gap-2 pr-2">
+                  <div className="min-w-0">
                     <span className="badge badge-outline badge-sm mr-2">
                       {ENTRY_TYPE_LABEL[entry.type]}
                     </span>
-                    <span className="text-sm font-medium">{entry.memo}</span>
+                    <span className="font-medium">{entry.memo}</span>
                   </div>
-                  <div className="text-xs opacity-70">
+                  <div className="shrink-0 text-xs opacity-70">
                     {entry.date}
-                    {entry.refHref ? (
-                      <>
-                        {" · "}
-                        <Link href={entry.refHref} className="link link-primary">
-                          {entry.refLabel}
-                        </Link>
-                      </>
-                    ) : null}
+                    <span className="ml-2 tabular-nums font-medium opacity-90">
+                      {formatEntryMoney(debit)}
+                    </span>
                     {!balanced ? (
                       <span className="ml-2 text-error">unbalanced</span>
                     ) : null}
                   </div>
+                </div>
+              </summary>
+              <div className="collapse-content">
+                <div className="mb-2 text-xs opacity-70">
+                  {entry.refHref ? (
+                    <Link href={entry.refHref} className="link link-primary">
+                      {entry.refLabel}
+                    </Link>
+                  ) : (
+                    entry.refLabel
+                  )}
                 </div>
                 <div className="overflow-x-auto">
                   <table className="table table-xs">
@@ -124,17 +128,17 @@ export function AccountingEntriesPanel({
                   </table>
                 </div>
               </div>
-            );
-          })}
+            </details>
+          );
+        })}
 
-          {filtered.length === 0 ? (
-            <p className="text-sm opacity-60">No entries for this filter yet.</p>
-          ) : null}
-          {filtered.length > 40 ? (
-            <p className="text-xs opacity-60">Showing latest 40 of {filtered.length}.</p>
-          ) : null}
-        </div>
+        {filtered.length === 0 ? (
+          <p className="text-sm opacity-60">No entries for this filter yet.</p>
+        ) : null}
+        {filtered.length > 40 ? (
+          <p className="text-xs opacity-60">Showing latest 40 of {filtered.length}.</p>
+        ) : null}
       </div>
-    </div>
+    </ExpandableSection>
   );
 }

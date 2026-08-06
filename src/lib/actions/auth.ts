@@ -3,6 +3,7 @@
 import { revalidatePath } from "next/cache";
 import { headers } from "next/headers";
 import { redirect } from "next/navigation";
+import { cache } from "react";
 import { createClient } from "@/lib/supabase/server";
 import {
   demoUserForRole,
@@ -39,7 +40,8 @@ const DEMO_SIGNIN_HELP =
   "Do not rely on auto sign-up — it sends confirmation emails and hits the free-tier rate limit. " +
   "In Auth → Providers → Email, turn off Confirm email, then create the five @rowanlane.example users.";
 
-export async function getCurrentProfile(): Promise<Profile | null> {
+/** Deduped per RSC request so layout + page guards share one auth/profile fetch. */
+export const getCurrentProfile = cache(async (): Promise<Profile | null> => {
   try {
     const supabase = await createClient();
     const {
@@ -66,7 +68,7 @@ export async function getCurrentProfile(): Promise<Profile | null> {
     // Auth/profile hangs should not crash app routes — treat as signed out.
     return null;
   }
-}
+});
 
 async function signInDemoAccount(role: UserRole) {
   const demo = demoUserForRole(role);
@@ -210,7 +212,8 @@ export async function enterDemoMode(role: UserRole, _formData?: FormData) {
  */
 export async function activateDemoModeSession() {
   await setDemoModeCookie(true);
-  revalidatePath("/", "layout");
+  // Soft client navigation + router.refresh() reloads the shell; avoid
+  // revalidatePath("/", "layout") which invalidates the entire app tree.
 }
 
 /**

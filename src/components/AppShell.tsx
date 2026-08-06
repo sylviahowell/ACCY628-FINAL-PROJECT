@@ -333,27 +333,21 @@ function navFor(
   }
 }
 
-export async function AppShell({
-  profile,
-  isDemoMode,
-  children,
-}: {
-  profile: Profile;
-  isDemoMode: boolean;
-  children: React.ReactNode;
-}) {
+async function AppShellNav({ profile }: { profile: Profile }) {
   const isManager = profile.role === "manager";
   const isBroker = profile.role === "broker";
   const isBilling = profile.role === "billing";
   const loadSupportCount = isManager || isBroker || isBilling;
-  const [shipCounts, profitCounts, supportOpenCount] = await Promise.all([
+
+  const [shipCounts, profitCounts, supportOpenCount, invBase] = await Promise.all([
     isManager || isBroker ? loadManagerShipCounts() : Promise.resolve(null),
     isManager ? loadManagerProfitCounts() : Promise.resolve(null),
     loadSupportCount ? loadOpenSupportTicketCount() : Promise.resolve(0),
+    isManager ? loadManagerInvoiceCounts(0) : Promise.resolve(null),
   ]);
   const invCounts =
-    isManager && shipCounts
-      ? await loadManagerInvoiceCounts(shipCounts.ready)
+    isManager && shipCounts && invBase
+      ? { ...invBase, ready: shipCounts.ready }
       : null;
   const { primary, more } = navFor(
     profile.role,
@@ -362,6 +356,51 @@ export async function AppShell({
     profitCounts,
     supportOpenCount,
   );
+
+  return (
+    <>
+      <AppNavLinks links={primary} />
+      {more.length > 0 ? (
+        <details className="border-t border-base-300 px-3 py-2">
+          <summary className="flex cursor-pointer list-none items-center gap-2 px-3 py-2 text-sm font-medium opacity-70">
+            <MoreHorizontal className="h-4 w-4" />
+            More modules
+          </summary>
+          <AppNavLinks links={more} />
+        </details>
+      ) : null}
+    </>
+  );
+}
+
+function AppShellNavFallback({ profile }: { profile: Profile }) {
+  const { primary, more } = navFor(profile.role, null, null, null, 0);
+  return (
+    <>
+      <AppNavLinks links={primary} />
+      {more.length > 0 ? (
+        <details className="border-t border-base-300 px-3 py-2">
+          <summary className="flex cursor-pointer list-none items-center gap-2 px-3 py-2 text-sm font-medium opacity-70">
+            <MoreHorizontal className="h-4 w-4" />
+            More modules
+          </summary>
+          <AppNavLinks links={more} />
+        </details>
+      ) : null}
+    </>
+  );
+}
+
+/** Sync shell so page content is not blocked on nav badge queries. */
+export function AppShell({
+  profile,
+  isDemoMode,
+  children,
+}: {
+  profile: Profile;
+  isDemoMode: boolean;
+  children: React.ReactNode;
+}) {
   const showDemoSelector = isDemoMode;
   const roleDisplay = showDemoSelector
     ? demoRoleLabel(profile.role)
@@ -434,16 +473,9 @@ export async function AppShell({
               </p>
             ) : null}
           </div>
-          <AppNavLinks links={primary} />
-          {more.length > 0 ? (
-            <details className="border-t border-base-300 px-3 py-2">
-              <summary className="flex cursor-pointer list-none items-center gap-2 px-3 py-2 text-sm font-medium opacity-70">
-                <MoreHorizontal className="h-4 w-4" />
-                More modules
-              </summary>
-              <AppNavLinks links={more} />
-            </details>
-          ) : null}
+          <Suspense fallback={<AppShellNavFallback profile={profile} />}>
+            <AppShellNav profile={profile} />
+          </Suspense>
         </aside>
       </div>
     </div>

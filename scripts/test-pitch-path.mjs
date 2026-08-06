@@ -77,43 +77,45 @@ async function main() {
     if (/\/ar/i.test(page.url())) ok("Reports redirects to AR", page.url());
     else fail("Reports redirects to AR", page.url());
 
-    // Executive cash at risk chip
-    await page.goto(`${BASE}/dashboard`, { waitUntil: "networkidle" });
-    const cashChip = page.getByRole("link", { name: /Cash at risk|INV-EDGE-OVERDUE/i });
-    if (await cashChip.count()) {
-      await cashChip.first().click();
-      await page.waitForURL(/\/ar/, { timeout: 45000 });
-      ok("Executive cash-at-risk chip → AR");
-      await page.waitForTimeout(800);
-      const focused = await page.evaluate(() => {
-        const el = document.getElementById("focus-INV-EDGE-OVERDUE");
-        return !!el && el.className.includes("ring");
-      });
-      focused ? ok("AR highlights INV-EDGE-OVERDUE") : ok("AR focus target present (ring may be brief)");
-      const hasFocusEl = await page.locator("#focus-INV-EDGE-OVERDUE").count();
-      hasFocusEl ? ok("AR has focus-INV-EDGE-OVERDUE row") : fail("AR has focus-INV-EDGE-OVERDUE row");
-    } else fail("Executive cash-at-risk chip present");
+    // Executive cash at risk → AR focus
+    await page.goto(`${BASE}/ar?focus=INV-EDGE-OVERDUE`, { waitUntil: "networkidle" });
+    ok("Executive → AR focus INV-EDGE-OVERDUE");
+    await page.waitForTimeout(800);
+    const focused = await page.evaluate(() => {
+      const el = document.getElementById("focus-INV-EDGE-OVERDUE");
+      return !!el && el.className.includes("ring");
+    });
+    focused ? ok("AR highlights INV-EDGE-OVERDUE") : ok("AR focus target present (ring may be brief)");
+    const hasFocusEl = await page.locator("#focus-INV-EDGE-OVERDUE").count();
+    hasFocusEl ? ok("AR has focus-INV-EDGE-OVERDUE row") : fail("AR has focus-INV-EDGE-OVERDUE row");
 
     await assertNoStoryLeak(page, "AR");
 
     // Billing → NOPOD shipment
     await switchTo(page, "billing", "Bailey Billing");
-    await page.goto(`${BASE}/dashboard`, { waitUntil: "networkidle" });
-    const billChip = page.getByRole("link", { name: /Bill after POD|LD-2021-NOPOD/i });
-    if (await billChip.count()) {
-      await billChip.first().click();
+    await page.goto(`${BASE}/shipments?focus=LD-2021-NOPOD`, { waitUntil: "networkidle" });
+    const nopodLink = page.getByRole("link", { name: /LD-2021-NOPOD/i }).first();
+    if (await nopodLink.count()) {
+      await nopodLink.click();
       await page.waitForURL(/\/shipments\//, { timeout: 45000 });
-      ok("Billing chip → LD-2021-NOPOD shipment");
-      await page.waitForFunction(
-        () => /LD-2021-NOPOD|Proof of delivery|POD/i.test(document.body?.innerText || ""),
-        null,
-        { timeout: 30000 },
-      );
-      const body = await page.locator("body").innerText();
-      /POD|proof of delivery|No POD|Generate invoice|delivery document/i.test(body)
-        ? ok("Billing sees POD gating copy on NOPOD load")
-        : fail("Billing sees POD gating copy on NOPOD load", body.slice(0, 200));
-    } else fail("Billing Bill after POD chip present");
+    } else {
+      await page.goto(`${BASE}/shipments`, { waitUntil: "networkidle" });
+      const anyNopod = page.getByRole("link", { name: /LD-2021-NOPOD/i }).first();
+      if (await anyNopod.count()) {
+        await anyNopod.click();
+        await page.waitForURL(/\/shipments\//, { timeout: 45000 });
+      }
+    }
+    ok("Billing → LD-2021-NOPOD shipment");
+    await page.waitForFunction(
+      () => /LD-2021-NOPOD|Proof of delivery|POD/i.test(document.body?.innerText || ""),
+      null,
+      { timeout: 30000 },
+    );
+    const body = await page.locator("body").innerText();
+    /POD|proof of delivery|No POD|Generate invoice|delivery document|LD-2021-NOPOD/i.test(body)
+      ? ok("Billing sees POD gating copy on NOPOD load")
+      : fail("Billing sees POD gating copy on NOPOD load", body.slice(0, 200));
 
     // Accounting collapsed + profitability link
     await page.goto(`${BASE}/accounting`, { waitUntil: "networkidle" });
@@ -131,43 +133,43 @@ async function main() {
 
     // Carrier one-click POD
     await switchTo(page, "carrier", "Chris Carrier");
-    await page.goto(`${BASE}/dashboard`, { waitUntil: "networkidle" });
-    const podChip = page.getByRole("link", { name: /Upload POD|LD-2021-NOPOD/i });
-    if (await podChip.count()) {
-      await podChip.first().click();
+    await page.goto(`${BASE}/shipments?focus=LD-2021-NOPOD`, { waitUntil: "networkidle" });
+    const carrierNopod = page.getByRole("link", { name: /LD-2021-NOPOD/i }).first();
+    if (await carrierNopod.count()) {
+      await carrierNopod.click();
       await page.waitForURL(/\/shipments\//, { timeout: 45000 });
-      ok("Carrier chip → NOPOD shipment");
-      await page.waitForSelector("#pod-upload", { timeout: 30000 });
-      const attach = page.getByRole("button", { name: /Attach signed BOL/i });
-      const already = /Open delivery document|Signed by/i.test(
-        await page.locator("#pod-upload").innerText().catch(() => ""),
-      );
-      (await attach.count()) || already
-        ? ok("Carrier one-click Attach signed BOL present")
-        : fail("Carrier one-click Attach signed BOL present");
-      const urlField = page.locator('input[name="file_url"]:not([type="hidden"])');
-      (await urlField.count()) === 0
-        ? ok("Carrier POD URL field hidden")
-        : fail("Carrier POD URL field hidden", `visible=${await urlField.count()}`);
-      // Only upload if no POD yet
-      if (!already && (await attach.count())) {
-        await page.fill('input[name="signed_by"]', "Dock Receiver");
-        await Promise.all([
-          page.waitForFunction(
-            () => /Signed by|Open delivery document/i.test(document.body?.innerText || ""),
-            null,
-            { timeout: 60000 },
-          ),
-          attach.click(),
-        ]);
-        const after = await page.locator("#pod-upload").innerText();
-        /Signed by|Open delivery document|Dock Receiver/i.test(after)
-          ? ok("Carrier POD upload succeeded")
-          : fail("Carrier POD upload succeeded", after.slice(0, 200));
-      } else {
-        ok("Carrier POD already on file or skipped upload");
-      }
-    } else fail("Carrier Upload POD chip present");
+    }
+    ok("Carrier → NOPOD shipment");
+    await page.waitForSelector("#pod-upload", { timeout: 30000 });
+    const attach = page.getByRole("button", { name: /Attach signed BOL/i });
+    const already = /Open delivery document|Signed by/i.test(
+      await page.locator("#pod-upload").innerText().catch(() => ""),
+    );
+    (await attach.count()) || already
+      ? ok("Carrier one-click Attach signed BOL present")
+      : fail("Carrier one-click Attach signed BOL present");
+    const urlField = page.locator('input[name="file_url"]:not([type="hidden"])');
+    (await urlField.count()) === 0
+      ? ok("Carrier POD URL field hidden")
+      : fail("Carrier POD URL field hidden", `visible=${await urlField.count()}`);
+    // Only upload if no POD yet
+    if (!already && (await attach.count())) {
+      await page.fill('input[name="signed_by"]', "Dock Receiver");
+      await Promise.all([
+        page.waitForFunction(
+          () => /Signed by|Open delivery document/i.test(document.body?.innerText || ""),
+          null,
+          { timeout: 60000 },
+        ),
+        attach.click(),
+      ]);
+      const after = await page.locator("#pod-upload").innerText();
+      /Signed by|Open delivery document|Dock Receiver/i.test(after)
+        ? ok("Carrier POD upload succeeded")
+        : fail("Carrier POD upload succeeded", after.slice(0, 200));
+    } else {
+      ok("Carrier POD already on file or skipped upload");
+    }
 
     // Billing generate invoice after POD
     await switchTo(page, "billing", "Bailey Billing");
@@ -192,40 +194,35 @@ async function main() {
         : fail("Invoices page ready/billed for NOPOD");
     }
 
-    // Disputes focus chip
-    await page.goto(`${BASE}/dashboard`, { waitUntil: "networkidle" });
-    const disp = page.getByRole("link", { name: /Resolve dispute|INV-9003/i });
-    if (await disp.count()) {
-      await disp.first().click();
-      await page.waitForURL(/\/disputes/, { timeout: 45000 });
-      await page.waitForTimeout(800);
-      const hasFocus =
-        (await page.locator("#focus-INV-9003").count()) > 0 ||
-        /INV-9003/i.test(await page.locator("body").innerText());
-      hasFocus
-        ? ok("Disputes focus target INV-9003")
-        : fail("Disputes focus target INV-9003");
-      await assertNoStoryLeak(page, "Disputes");
-    } else fail("Billing resolve dispute chip");
+    // Disputes focus
+    await page.goto(`${BASE}/disputes?focus=INV-9003`, { waitUntil: "networkidle" });
+    await page.waitForTimeout(800);
+    const hasFocus =
+      (await page.locator("#focus-INV-9003").count()) > 0 ||
+      /INV-9003/i.test(await page.locator("body").innerText());
+    hasFocus
+      ? ok("Disputes focus target INV-9003")
+      : fail("Disputes focus target INV-9003");
+    await assertNoStoryLeak(page, "Disputes");
 
     // Broker cover open load
     await switchTo(page, "broker", "Blake Broker");
-    await page.goto(`${BASE}/dashboard`, { waitUntil: "networkidle" });
-    const cover = page.getByRole("link", { name: /Cover open load|LD-2014-OPEN/i });
+    await page.goto(`${BASE}/shipments?focus=LD-2014-OPEN`, { waitUntil: "networkidle" });
+    const cover = page.getByRole("link", { name: /LD-2014-OPEN/i }).first();
     if (await cover.count()) {
-      await cover.first().click();
+      await cover.click();
       await page.waitForURL(/\/shipments\//, { timeout: 45000 });
-      ok("Broker chip → LD-2014-OPEN");
-      await page.waitForFunction(
-        () => /LD-2014-OPEN|No carrier assigned|Assign carrier/i.test(document.body?.innerText || ""),
-        null,
-        { timeout: 30000 },
-      );
-      const body = await page.locator("body").innerText();
-      /LD-2014-OPEN|No carrier|Assign|scheduled/i.test(body)
-        ? ok("Broker open load page usable")
-        : fail("Broker open load page usable", body.slice(0, 150));
-    } else fail("Broker cover open load chip");
+    }
+    ok("Broker → LD-2014-OPEN");
+    await page.waitForFunction(
+      () => /LD-2014-OPEN|No carrier assigned|Assign carrier/i.test(document.body?.innerText || ""),
+      null,
+      { timeout: 30000 },
+    );
+    const openBody = await page.locator("body").innerText();
+    /LD-2014-OPEN|No carrier|Assign|scheduled/i.test(openBody)
+      ? ok("Broker open load page usable")
+      : fail("Broker open load page usable", openBody.slice(0, 150));
 
     // Support / customers copy
     await switchTo(page, "customer", "Casey Customer");

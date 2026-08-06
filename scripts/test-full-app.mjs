@@ -21,6 +21,7 @@ const ALLOWED = {
     "/payments",
     "/ar",
     "/disputes",
+    "/support",
     "/accounting",
     "/reports",
     "/profitability",
@@ -36,6 +37,7 @@ const ALLOWED = {
     "/contracts",
     "/shipments",
     "/carriers",
+    "/support",
     "/settings",
   ],
   billing: [
@@ -46,12 +48,13 @@ const ALLOWED = {
     "/payments",
     "/ar",
     "/disputes",
+    "/support",
     "/accounting",
     "/profitability",
     "/settings",
   ],
   customer: ["/dashboard", "/warnings", "/shipments", "/invoices", "/coverage", "/support", "/settings"],
-  carrier: ["/dashboard", "/warnings", "/shipments", "/documents", "/settings"],
+  carrier: ["/dashboard", "/warnings", "/shipments", "/documents", "/support", "/settings"],
 };
 
 const ROLES = [
@@ -60,21 +63,21 @@ const ROLES = [
     cardIndex: 0,
     name: "Morgan Manager",
     dashboardHint: /Executive|Profitability|Morning|KPI|Approvals|margin/i,
-    forbidden: ["/support", "/documents"],
+    forbidden: ["/documents"],
   },
   {
     role: "broker",
     cardIndex: 1,
     name: "Blake Broker",
     dashboardHint: /Broker|Operations|Task|Shipment|Carrier/i,
-    forbidden: ["/invoices", "/ar", "/profitability", "/support", "/documents", "/approvals", "/controls"],
+    forbidden: ["/invoices", "/ar", "/profitability", "/documents", "/approvals", "/controls"],
   },
   {
     role: "billing",
     cardIndex: 2,
     name: "Bailey Billing",
     dashboardHint: /Billing|Invoice|AR|Collection|Unbilled|Receivable/i,
-    forbidden: ["/customers", "/carriers", "/contracts", "/support", "/documents", "/approvals", "/controls", "/risk", "/coverage"],
+    forbidden: ["/customers", "/carriers", "/contracts", "/documents", "/approvals", "/controls", "/risk", "/coverage"],
   },
   {
     role: "customer",
@@ -88,7 +91,7 @@ const ROLES = [
     cardIndex: 4,
     name: "Chris Carrier",
     dashboardHint: /Carrier|Load|Deliver|Assigned|Document|Pickup/i,
-    forbidden: ["/approvals", "/customers", "/invoices", "/ar", "/profitability", "/support", "/accounting", "/controls", "/risk", "/coverage"],
+    forbidden: ["/approvals", "/customers", "/invoices", "/ar", "/profitability", "/accounting", "/controls", "/risk", "/coverage"],
   },
 ];
 
@@ -282,12 +285,13 @@ async function main() {
     await page.getByRole("button", { name: /^Sign In$/i }).click();
     await page.waitForURL(/\/dashboard/, { timeout: 60000 });
     ok("Password login works");
-    (await page.locator('select[aria-label="Demo Role"]').count()) === 0
-      ? ok("Password login hides demo selector")
-      : fail("Password login hides demo selector");
+    // Demo portal emails keep Demo Mode (role selector + Exit Demo), not a normal Sign out.
+    (await page.locator('select[aria-label="Demo Role"]').count()) > 0
+      ? ok("Password login keeps demo selector for demo accounts")
+      : fail("Password login keeps demo selector for demo accounts");
     await visitAndCheck(page, "/profitability", "password-login");
     await visitAndCheck(page, "/approvals", "password-login");
-    await page.getByRole("button", { name: /Sign out/i }).click();
+    await page.getByRole("button", { name: /Exit Demo|Sign out/i }).click();
     await page.waitForURL(/\/login/, { timeout: 60000 });
     ok("Sign out works");
 

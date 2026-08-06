@@ -567,7 +567,7 @@ export default async function DashboardPage() {
         resolveLoadNumber,
         sanitize: sanitizeDemoText,
       }),
-      3,
+      5,
     );
 
     return (

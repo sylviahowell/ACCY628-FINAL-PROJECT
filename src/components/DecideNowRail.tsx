@@ -1,10 +1,33 @@
+"use client";
+
 import Link from "next/link";
-import type { DecideNowItem } from "@/lib/decide-now";
+import { useState } from "react";
+import type { DecideNowItem, DecideNowTone } from "@/lib/decide-now";
 
 export type { DecideNowItem };
 
+type SortOrder = "urgent-desc" | "urgent-asc";
+
+const TONE_URGENCY: Record<DecideNowTone, number> = {
+  error: 3,
+  warning: 2,
+  info: 1,
+};
+
+function compareUrgency(a: DecideNowItem, b: DecideNowItem): number {
+  const toneA = TONE_URGENCY[a.tone ?? "warning"];
+  const toneB = TONE_URGENCY[b.tone ?? "warning"];
+  if (toneB !== toneA) return toneB - toneA;
+  return b.score - a.score;
+}
+
 export function DecideNowRail({ items }: { items: DecideNowItem[] }) {
+  const [sortOrder, setSortOrder] = useState<SortOrder>("urgent-desc");
   const count = items.length;
+
+  const sorted = [...items].sort(compareUrgency);
+  if (sortOrder === "urgent-asc") sorted.reverse();
+
   const borderTone =
     count === 0
       ? "border-success/30"
@@ -15,35 +38,63 @@ export function DecideNowRail({ items }: { items: DecideNowItem[] }) {
   return (
     <div className={`card border bg-base-100 shadow-sm ${borderTone}`}>
       <div className="card-body gap-3 p-4 sm:p-5">
-        <div className="flex flex-wrap items-center justify-between gap-2">
-          <div className="flex items-center gap-2">
-            <h2 className="text-lg font-bold tracking-tight">Decide now</h2>
-            <span
-              className={`badge badge-sm ${
-                count === 0 ? "badge-success" : "badge-warning"
-              }`}
-            >
-              {count === 0 ? "Clear" : `Top ${count}`}
-            </span>
+        <div className="flex flex-wrap items-start justify-between gap-3">
+          <div className="min-w-0 space-y-1">
+            <div className="flex flex-wrap items-center gap-2">
+              <h2 className="text-lg font-bold tracking-tight">Needs attention</h2>
+              <span
+                className={`badge badge-sm ${
+                  count === 0 ? "badge-success" : "badge-warning"
+                }`}
+              >
+                {count === 0 ? "All clear" : `${count} open`}
+              </span>
+            </div>
+            <p className="text-sm opacity-70">
+              Exceptions for executive review — ranked by urgency.
+            </p>
           </div>
-          <p className="text-sm opacity-70">
-            Highest-impact decisions — one click to act.
-          </p>
+
+          {count > 0 ? (
+            <label className="form-control w-full max-w-[14rem] sm:w-auto">
+              <span className="label py-0 pb-1">
+                <span className="label-text text-xs opacity-70">Sort by</span>
+              </span>
+              <select
+                className="select select-bordered select-sm"
+                aria-label="Sort attention items by urgency"
+                value={sortOrder}
+                onChange={(e) => setSortOrder(e.target.value as SortOrder)}
+              >
+                <option value="urgent-desc">Most urgent first</option>
+                <option value="urgent-asc">Least urgent first</option>
+              </select>
+            </label>
+          ) : null}
         </div>
 
         {count === 0 ? (
           <p className="rounded-box bg-success/10 px-3 py-2 text-sm">
-            No decisions waiting — network looks healthy.
+            Nothing urgent — network looks healthy.
           </p>
         ) : (
           <ul className="space-y-2">
-            {items.map((item) => {
+            {sorted.map((item, index) => {
               const cta = item.cta ?? "Review";
+              const rank =
+                sortOrder === "urgent-desc" ? index + 1 : sorted.length - index;
               return (
                 <li
                   key={item.id}
-                  className={`grid grid-cols-1 items-center gap-3 rounded-box border px-3 py-2.5 sm:grid-cols-[minmax(0,1fr)_6.5rem] ${toneRowClass(item.tone)}`}
+                  className={`grid grid-cols-1 items-center gap-3 rounded-box border px-3 py-2.5 sm:grid-cols-[2rem_minmax(0,1fr)_6.5rem] ${toneRowClass(item.tone)}`}
                 >
+                  <span
+                    className="badge badge-ghost badge-sm tabular-nums justify-self-start sm:justify-self-center"
+                    title={`Urgency rank ${rank}`}
+                    aria-label={`Urgency rank ${rank}`}
+                  >
+                    {rank}
+                  </span>
                   <div className="min-w-0">
                     <div className="flex flex-wrap items-baseline gap-x-2 gap-y-0.5">
                       <p className="font-semibold">{item.title}</p>
@@ -57,6 +108,9 @@ export function DecideNowRail({ items }: { items: DecideNowItem[] }) {
                           </span>
                         ) : null}
                       </p>
+                      <span className={`badge badge-xs ${urgencyBadgeClass(item.tone)}`}>
+                        {urgencyLabel(item.tone)}
+                      </span>
                     </div>
                     <p className="text-sm opacity-70">{item.detail}</p>
                   </div>
@@ -75,6 +129,18 @@ export function DecideNowRail({ items }: { items: DecideNowItem[] }) {
       </div>
     </div>
   );
+}
+
+function urgencyLabel(tone: DecideNowItem["tone"]) {
+  if (tone === "error") return "Critical";
+  if (tone === "info") return "Watch";
+  return "High";
+}
+
+function urgencyBadgeClass(tone: DecideNowItem["tone"]) {
+  if (tone === "error") return "badge-error";
+  if (tone === "info") return "badge-info";
+  return "badge-warning";
 }
 
 function toneRowClass(tone: DecideNowItem["tone"]) {

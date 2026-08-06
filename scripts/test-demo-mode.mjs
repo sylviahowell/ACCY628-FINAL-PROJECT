@@ -69,11 +69,11 @@ async function main() {
 
     // 3) Switch through all roles
     const roles = [
-      { value: "broker", name: "Blake Broker", navHint: /Broker Operations Dashboard/i },
-      { value: "billing", name: "Bailey Billing", navHint: /Billing & Accounting Dashboard|Accounts Receivable/i },
-      { value: "customer", name: "Casey Customer", navHint: /Shipper Dashboard|My Shipments/i },
-      { value: "carrier", name: "Chris Carrier", navHint: /Carrier Dashboard|My Deliveries|Documents/i },
-      { value: "manager", name: "Morgan Manager", navHint: /Executive Dashboard|Profitability/i },
+      { value: "broker", name: "Blake Broker", navHint: /Broker Operations/i },
+      { value: "billing", name: "Bailey Billing", navHint: /Billing & Accounting/i },
+      { value: "customer", name: "Casey Customer", navHint: /Shipper/i },
+      { value: "carrier", name: "Chris Carrier", navHint: /Carrier/i },
+      { value: "manager", name: "Morgan Manager", navHint: /Executive|Manager|Profitability|Approvals/i },
     ];
 
     for (const role of roles) {

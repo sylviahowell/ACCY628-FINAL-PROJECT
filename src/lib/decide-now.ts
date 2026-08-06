@@ -33,10 +33,22 @@ function ageLabel(days: number): string {
   return `${days} days`;
 }
 
-export function rankDecideNowItems(items: DecideNowItem[], limit = 3): DecideNowItem[] {
+const TONE_URGENCY: Record<DecideNowTone, number> = {
+  error: 3_000_000_000,
+  warning: 1_500_000_000,
+  info: 500_000_000,
+};
+
+/** Rank by urgency: critical tone first, then score (impact / age). */
+export function rankDecideNowItems(items: DecideNowItem[], limit = 5): DecideNowItem[] {
   return [...items]
     .filter((i) => i.score > 0)
-    .sort((a, b) => b.score - a.score)
+    .sort((a, b) => {
+      const toneA = TONE_URGENCY[a.tone ?? "warning"];
+      const toneB = TONE_URGENCY[b.tone ?? "warning"];
+      if (toneB !== toneA) return toneB - toneA;
+      return b.score - a.score;
+    })
     .slice(0, limit);
 }
 
@@ -92,7 +104,8 @@ export function buildDecideNowCandidates(input: {
       href: "/coverage",
       tone: "warning",
       cta: "Review",
-      score: input.coverageCount * 50_000,
+      // Waiting shippers: volume drives urgency within the warning band.
+      score: 400_000 + input.coverageCount * 80_000,
     });
   }
 
@@ -120,9 +133,10 @@ export function buildDecideNowCandidates(input: {
         } · ${oldest.request_type}`,
       ),
       href,
-      tone: "warning",
+      tone: ageDays >= 3 ? "error" : "warning",
       cta: "Review",
-      score: approvalSum,
+      // Stale approvals escalate; dollars still matter within the band.
+      score: 500_000 + ageDays * 120_000 + approvalSum,
     });
   }
 
@@ -153,7 +167,8 @@ export function buildDecideNowCandidates(input: {
       href: "/shipments?status=delayed",
       tone: "error",
       cta: "Review",
-      score: exposure,
+      // Service failures: days late outweigh pure dollar size.
+      score: 800_000 + daysLate * 150_000 + exposure,
     });
   }
 
@@ -177,7 +192,7 @@ export function buildDecideNowCandidates(input: {
       href: "/ar?filter=cash-at-risk",
       tone: "error",
       cta: "Review",
-      score: input.cashAtRisk,
+      score: 700_000 + input.cashAtRisk,
     });
   }
 
@@ -192,7 +207,9 @@ export function buildDecideNowCandidates(input: {
       href: "/risk",
       tone: input.riskTone,
       cta: "Review",
-      score: input.riskIssueCount * 25_000,
+      score:
+        (input.riskTone === "error" ? 650_000 : 350_000) +
+        input.riskIssueCount * 40_000,
     });
   }
 
@@ -215,7 +232,8 @@ export function buildDecideNowCandidates(input: {
       href: "/shipments?filter=ready-to-bill",
       tone: "warning",
       cta: "Review",
-      score: unbilledValue,
+      // Revenue waiting — important, but below service / credit failures.
+      score: 250_000 + unbilledValue,
     });
   }
 
@@ -235,7 +253,7 @@ export function buildDecideNowCandidates(input: {
       href: "/ar?filter=past-due",
       tone: "warning",
       cta: "Review",
-      score: overdueBal,
+      score: 300_000 + overdueBal,
     });
   }
 
@@ -250,7 +268,7 @@ export function buildDecideNowCandidates(input: {
       href: "/disputes?filter=open",
       tone: "info",
       cta: "Review",
-      score: input.openDisputeCount * 10_000,
+      score: 150_000 + input.openDisputeCount * 25_000,
     });
   }
 

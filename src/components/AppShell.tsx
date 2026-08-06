@@ -440,7 +440,12 @@ export function AppShell({
               </div>
               {!showDemoSelector ? (
                 <form action={signOut}>
-                  <button type="submit" className="btn btn-ghost btn-sm gap-1" title="Sign out">
+                  <button
+                    type="submit"
+                    className="btn btn-ghost btn-sm gap-1"
+                    title="Sign out"
+                    aria-label="Sign out"
+                  >
                     <LogOut className="h-4 w-4" />
                     <span className="hidden sm:inline">Sign out</span>
                   </button>

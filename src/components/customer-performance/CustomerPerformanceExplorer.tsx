@@ -190,7 +190,7 @@ export function CustomerPerformanceExplorer({
           <p className="mt-1 max-w-2xl text-sm opacity-70">
             {isCarrier
               ? "Inspect carrier buy-side cost, margin contribution, and delivery reliability."
-              : "Inspect shipper sell-side revenue, margin, and delivery reliability."}
+              : "Inspect customer sell-side revenue, margin, and delivery reliability."}
           </p>
         </div>
 
@@ -201,7 +201,7 @@ export function CustomerPerformanceExplorer({
               className={`btn btn-sm join-item flex-1 ${mode === "shipper" ? "btn-primary" : "btn-ghost"}`}
               onClick={() => selectMode("shipper")}
             >
-              Shippers
+              Customers
             </button>
             <button
               type="button"
@@ -215,17 +215,17 @@ export function CustomerPerformanceExplorer({
           <label className="form-control w-full">
             <span className="label py-0 pb-1">
               <span className="label-text text-xs font-medium opacity-70">
-                {isCarrier ? "Carrier" : "Shipper"}
+                {isCarrier ? "Carrier" : "Customer"}
               </span>
             </span>
             <select
               className="select select-bordered cpe-select"
-              aria-label={isCarrier ? "Select carrier" : "Select shipper"}
+              aria-label={isCarrier ? "Select carrier" : "Select customer"}
               value={partnerId}
               onChange={(e) => selectPartner(e.target.value)}
             >
               <option value={ALL_PARTNERS_ID}>
-                {isCarrier ? "All carriers" : "All shippers"}
+                {isCarrier ? "All carriers" : "All customers"}
               </option>
               {activeList.map((p) => (
                 <option key={p.id} value={p.id}>
@@ -245,7 +245,7 @@ export function CustomerPerformanceExplorer({
             Select a partner to explore performance.
           </p>
           <p className="max-w-md text-sm opacity-60">
-            Choose All for the network view, or pick one shipper or carrier to drill in.
+            Choose All for the network view, or pick one customer or carrier to drill in.
           </p>
         </div>
       ) : (

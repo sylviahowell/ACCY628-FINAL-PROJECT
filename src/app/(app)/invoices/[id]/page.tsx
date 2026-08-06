@@ -112,7 +112,7 @@ export default async function InvoiceDetailPage({
           ) : null}
           {canManageBilling(profile.role) && balance > 0 && inv.status !== "disputed" ? (
             <Link
-              href={`/payments?invoice_id=${inv.id}`}
+              href={`/ar?invoice_id=${inv.id}&focus=record-payment`}
               className="btn btn-ghost btn-sm"
             >
               Record payment

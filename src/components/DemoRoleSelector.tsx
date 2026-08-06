@@ -1,7 +1,6 @@
 "use client";
 
-import { useEffect, useState, useTransition } from "react";
-import { useRouter } from "next/navigation";
+import { useEffect, useState } from "react";
 import { Beaker, LogOut } from "lucide-react";
 import { activateDemoModeSession, exitDemo } from "@/lib/actions/auth";
 import { clientSignInDemoRole } from "@/lib/demo-auth-client";
@@ -31,21 +30,26 @@ function clearDemoClientState() {
 }
 
 export function DemoRoleSelector({ activeRole }: { activeRole: UserRole }) {
-  const router = useRouter();
-  const [pending, startTransition] = useTransition();
+  const [pending, setPending] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
     persistDemoClientState(activeRole);
   }, [activeRole]);
 
-  function onChange(next: string) {
+  async function onChange(next: string) {
+    if (pending) return;
+
     if (next === "exit") {
       clearDemoClientState();
       setError(null);
-      startTransition(async () => {
+      setPending(true);
+      try {
         await exitDemo();
-      });
+      } catch (e) {
+        setPending(false);
+        setError(e instanceof Error ? e.message : "Could not exit demo");
+      }
       return;
     }
 
@@ -53,17 +57,16 @@ export function DemoRoleSelector({ activeRole }: { activeRole: UserRole }) {
     if (role === activeRole) return;
     persistDemoClientState(role);
     setError(null);
-    startTransition(async () => {
-      try {
-        await clientSignInDemoRole(role);
-        await activateDemoModeSession();
-        // Soft nav + refresh: keep SPA shell warm; cookies already updated client-side.
-        router.replace(`/dashboard?portal=${encodeURIComponent(role)}`);
-        router.refresh();
-      } catch (e) {
-        setError(e instanceof Error ? e.message : "Could not switch demo role");
-      }
-    });
+    setPending(true);
+    try {
+      await clientSignInDemoRole(role);
+      await activateDemoModeSession();
+      // Full reload so middleware + RSC see the new auth cookies (soft nav races /login).
+      window.location.assign(`/dashboard?portal=${encodeURIComponent(role)}`);
+    } catch (e) {
+      setPending(false);
+      setError(e instanceof Error ? e.message : "Could not switch demo role");
+    }
   }
 
   return (
@@ -85,7 +88,9 @@ export function DemoRoleSelector({ activeRole }: { activeRole: UserRole }) {
           aria-label="Demo Role"
           disabled={pending}
           value={activeRole}
-          onChange={(e) => onChange(e.target.value)}
+          onChange={(e) => {
+            void onChange(e.target.value);
+          }}
         >
           {DEMO_ROLE_OPTIONS.map((opt) => (
             <option key={opt.role} value={opt.role}>
@@ -113,10 +118,7 @@ export function DemoRoleSelector({ activeRole }: { activeRole: UserRole }) {
         disabled={pending}
         title="Exit Demo Mode"
         onClick={() => {
-          clearDemoClientState();
-          startTransition(async () => {
-            await exitDemo();
-          });
+          void onChange("exit");
         }}
       >
         <LogOut className="h-3.5 w-3.5" />

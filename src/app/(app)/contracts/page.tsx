@@ -94,9 +94,9 @@ export default async function ContractsPage({
       <div className="rounded-box border border-primary/20 bg-base-100 p-4 shadow-sm">
         <h2 className="font-semibold">Where contracts fit</h2>
         <ol className="mt-2 list-decimal space-y-1 pl-5 text-sm opacity-80">
-          <li>Ops creates or renews an active contract for the shipper (this page).</li>
+          <li>Ops creates or renews an active contract for the customer (this page).</li>
           <li>
-            Shipper submits a load request on that contract → broker{" "}
+            Customer submits a load request on that contract → broker{" "}
             <Link href="/coverage" className="link link-primary">
               approves
             </Link>{" "}

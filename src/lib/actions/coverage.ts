@@ -5,6 +5,7 @@ import { redirect } from "next/navigation";
 import { getCurrentProfile } from "@/lib/actions/auth";
 import { formString, nonEmptyString, parseForm, uuidSchema } from "@/lib/action-schema";
 import { isDateOutsideContractWindow } from "@/lib/contract-terms";
+import { calcLaneQuote } from "@/lib/contract-pricing";
 import { depositAmountDue } from "@/lib/invoice-helpers";
 import { expirePastEndContracts } from "@/lib/actions/contracts-lifecycle";
 import {
@@ -61,7 +62,7 @@ async function logStatus(
 export async function createCoverageRequest(formData: FormData) {
   const profile = await getCurrentProfile();
   if (!profile || profile.role !== "customer" || !profile.customer_id) {
-    throw new Error("Only shipper accounts can request coverage.");
+    throw new Error("Only customer accounts can request coverage.");
   }
 
   const input = parseForm(
@@ -123,6 +124,17 @@ export async function createCoverageRequest(formData: FormData) {
     );
   }
 
+  const liveQuote =
+    input.miles && input.miles > 0 ? calcLaneQuote(input.miles, contract) : null;
+  const quotedCustomer =
+    input.quoted_customer_rate != null && input.quoted_customer_rate > 0
+      ? input.quoted_customer_rate
+      : liveQuote?.customerLineHaul ?? null;
+  const quotedCarrier =
+    input.quoted_carrier_cost != null && input.quoted_carrier_cost >= 0
+      ? input.quoted_carrier_cost
+      : liveQuote?.carrierPay ?? null;
+
   const { error } = await supabase.from("coverage_requests").insert({
     customer_id: profile.customer_id,
     requested_by: profile.id,
@@ -135,14 +147,8 @@ export async function createCoverageRequest(formData: FormData) {
     freight_type: input.freight_type || null,
     weight_lbs: input.weight_lbs || null,
     miles: input.miles && input.miles > 0 ? input.miles : null,
-    quoted_customer_rate:
-      input.quoted_customer_rate != null && input.quoted_customer_rate > 0
-        ? input.quoted_customer_rate
-        : null,
-    quoted_carrier_cost:
-      input.quoted_carrier_cost != null && input.quoted_carrier_cost >= 0
-        ? input.quoted_carrier_cost
-        : null,
+    quoted_customer_rate: quotedCustomer,
+    quoted_carrier_cost: quotedCarrier,
     notes: input.notes || null,
   });
   if (error) throw new Error(error.message);
@@ -158,7 +164,7 @@ export async function createCoverageRequest(formData: FormData) {
 export async function cancelCoverageRequest(formData: FormData) {
   const profile = await getCurrentProfile();
   if (!profile || profile.role !== "customer" || !profile.customer_id) {
-    throw new Error("Only the requesting shipper can cancel.");
+    throw new Error("Only the requesting customer can cancel.");
   }
   const id = parseForm(z.object({ id: uuidSchema }), {
     id: formString(formData, "request_id"),
@@ -389,6 +395,19 @@ export async function acceptCoverageRequest(formData: FormData) {
     .eq("id", id);
   if (updErr) throw new Error(updErr.message);
 
+  // Close any broker → manager credit-hold escalations for this request.
+  await supabase
+    .from("approval_requests")
+    .update({
+      status: "approved",
+      reviewed_by: profile.id,
+      reviewed_at: new Date().toISOString(),
+    })
+    .eq("entity_type", "coverage_request")
+    .eq("entity_id", id)
+    .eq("status", "pending")
+    .in("request_type", ["credit_hold", "credit_override"]);
+
   revalidatePath("/coverage");
   revalidatePath("/contracts");
   revalidatePath("/shipments");
@@ -396,10 +415,106 @@ export async function acceptCoverageRequest(formData: FormData) {
   revalidatePath("/invoices");
   revalidatePath("/dashboard");
   revalidatePath("/warnings");
+  revalidatePath("/approvals");
   redirect(
     toastPath(
       `/assign?focus=${ship.id}`,
       "Request approved — assign a carrier next",
+    ),
+  );
+}
+
+/**
+ * Broker escalates a credit-hold (or credit-limit) blocked request to the manager Approvals inbox.
+ */
+export async function requestCoverageManagerOverride(formData: FormData) {
+  const profile = await getCurrentProfile();
+  if (!profile || profile.role !== "broker") {
+    throw new Error("Only brokers can escalate load requests to a manager.");
+  }
+
+  const id = parseForm(z.object({ id: uuidSchema }), {
+    id: formString(formData, "request_id"),
+  }).id;
+  const note = String(formData.get("note") || "").trim();
+
+  const supabase = await createClient();
+  const { data: req } = await supabase
+    .from("coverage_requests")
+    .select(
+      "id, status, customer_id, pickup_location, delivery_location, customers(name)",
+    )
+    .eq("id", id)
+    .maybeSingle();
+  if (!req) {
+    redirect(toastErrorPath("/coverage", "Request not found."));
+  }
+  if (req.status !== "pending") {
+    redirect(toastErrorPath("/coverage", "Only pending requests can be escalated."));
+  }
+
+  const today = new Date().toISOString().slice(0, 10);
+  const { data: openInvoices } = await supabase
+    .from("invoices")
+    .select("total, amount_paid, status, due_date")
+    .eq("customer_id", req.customer_id)
+    .neq("status", "cancelled");
+  const pastDue = pastDueBalanceFromInvoices(openInvoices ?? [], today);
+  const onCreditHold = isOnCreditHold(pastDue);
+  if (!onCreditHold) {
+    redirect(
+      toastErrorPath(
+        "/coverage",
+        "This customer is not on credit hold — you can approve the request yourself.",
+      ),
+    );
+  }
+
+  const { data: existing } = await supabase
+    .from("approval_requests")
+    .select("id")
+    .eq("entity_type", "coverage_request")
+    .eq("entity_id", id)
+    .eq("status", "pending")
+    .in("request_type", ["credit_hold", "credit_override"])
+    .limit(1);
+  if ((existing ?? []).length > 0) {
+    redirect(
+      toastPath(
+        "/coverage",
+        "Already sent to a manager — waiting in Approvals.",
+      ),
+    );
+  }
+
+  const customerName =
+    (req.customers as { name?: string } | null)?.name ?? "Customer";
+  const lane = `${req.pickup_location} → ${req.delivery_location}`;
+  const reasonParts = [
+    `Credit hold override needed for ${customerName} (${lane}).`,
+    `Past-due AR ${pastDue.toFixed(2)}.`,
+    note ? `Broker note: ${note}` : null,
+  ].filter(Boolean);
+
+  const { error } = await supabase.from("approval_requests").insert({
+    request_type: "credit_hold",
+    entity_type: "coverage_request",
+    entity_id: id,
+    amount: pastDue,
+    reason: reasonParts.join(" "),
+    status: "pending",
+    requested_by: profile.id,
+  });
+  if (error) throw new Error(error.message);
+
+  revalidatePath("/coverage");
+  revalidatePath("/approvals");
+  revalidatePath("/dashboard");
+  revalidatePath("/warnings");
+  redirect(
+    toastPath(
+      "/coverage",
+      "Sent to manager Approvals for credit-hold override",
     ),
   );
 }

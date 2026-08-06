@@ -140,8 +140,8 @@ export function buildFollowTheCashSteps(input: {
 
   const invoiceHref = invoiceId ? `/invoices/${invoiceId}` : "/invoices";
   const collectHref = invoiceId
-    ? `/payments?invoice_id=${invoiceId}`
-    : "/payments";
+    ? `/ar?invoice_id=${invoiceId}&focus=record-payment`
+    : "/ar?focus=record-payment";
   const collectedOrWritten = cashCollected > 0 || wroteOff || invoiceBalance <= 0;
 
   const steps: CashStoryStep[] = [

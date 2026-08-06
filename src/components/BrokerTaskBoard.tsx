@@ -14,7 +14,7 @@ const FILTERS: { id: BrokerFilter; label: string }[] = [
   { id: "my_loads", label: "My loads" },
   { id: "due_today", label: "Due today" },
   { id: "delayed", label: "Delayed" },
-  { id: "unassigned", label: "Unassigned" },
+  { id: "unassigned", label: "Needs carrier" },
   { id: "high_priority", label: "High priority" },
 ];
 
@@ -110,8 +110,12 @@ export function BrokerTaskBoard({
                     <td className="max-w-[14rem] truncate text-xs">{t.route}</td>
                     <td className="text-xs">{t.deadline ?? "—"}</td>
                     <td>
-                      <span className={`badge badge-sm ${statusBadge(t.status)}`}>
-                        {formatStatusLabel(t.status)}
+                      <span
+                        className={`badge badge-sm h-auto min-h-5 whitespace-normal px-2 py-1 leading-tight ${statusBadge(t.status)}`}
+                      >
+                        {t.status === "pending_accessorial"
+                          ? "Accessorial"
+                          : formatStatusLabel(t.status)}
                       </span>
                     </td>
                     <td className="text-sm">{t.action}</td>

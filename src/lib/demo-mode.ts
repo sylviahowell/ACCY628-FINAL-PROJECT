@@ -15,7 +15,7 @@ export const DEMO_ROLE_OPTIONS: {
   { role: "manager", label: "Executive / Manager", fullName: "Morgan Manager" },
   { role: "broker", label: "Broker Operations", fullName: "Blake Broker" },
   { role: "billing", label: "Billing & Accounting", fullName: "Bailey Billing" },
-  { role: "customer", label: "Shipper / Customer", fullName: "Casey Customer" },
+  { role: "customer", label: "Customer", fullName: "Casey Customer" },
   { role: "carrier", label: "Carrier", fullName: "Chris Carrier" },
 ];
 

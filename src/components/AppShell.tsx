@@ -8,7 +8,6 @@ import {
   Menu,
   ClipboardList,
   FileText,
-  FolderOpen,
   HelpCircle,
   Inbox,
   LayoutDashboard,
@@ -22,9 +21,9 @@ import {
   Truck,
   UserCheck,
   Users,
-  Wallet,
 } from "lucide-react";
 import { AppNavLinks, type ShellNavItem } from "@/components/AppNavLinks";
+import { CustomizableManagerNav } from "@/components/CustomizableManagerNav";
 import { DemoRoleSelector } from "@/components/DemoRoleSelector";
 import { FlashToast } from "@/components/FlashToast";
 import { RowanLaneMark } from "@/components/RowanLaneMark";
@@ -39,6 +38,7 @@ import { ROLE_LABELS, ROLE_PORTAL_BLURB } from "@/lib/roles";
 type ShipNavCounts = {
   delayed: number;
   unassigned: number;
+  offered: number;
   ready: number;
   needsPod: number;
 };
@@ -61,6 +61,7 @@ async function loadManagerShipCounts(): Promise<ShipNavCounts> {
   const rows = ships ?? [];
   let delayed = 0;
   let unassigned = 0;
+  let offered = 0;
   const deliveredIds: string[] = [];
 
   for (const s of rows) {
@@ -70,6 +71,9 @@ async function loadManagerShipCounts(): Promise<ShipNavCounts> {
     }
     if (!s.carrier_id && !closed) {
       unassigned += 1;
+    }
+    if (s.status === "offered" && s.carrier_id) {
+      offered += 1;
     }
     if (["delivered", "completed"].includes(s.status)) {
       deliveredIds.push(s.id);
@@ -95,7 +99,7 @@ async function loadManagerShipCounts(): Promise<ShipNavCounts> {
     needsPod = deliveredIds.filter((id) => !podSet.has(id)).length;
   }
 
-  return { delayed, unassigned, ready, needsPod };
+  return { delayed, unassigned, offered, ready, needsPod };
 }
 
 async function loadManagerInvoiceCounts(readyFromShips: number): Promise<InvoiceNavCounts> {
@@ -132,11 +136,22 @@ async function loadOpenSupportTicketCount(): Promise<number> {
   return count ?? 0;
 }
 
+async function loadCarrierOfferCount(carrierId: string): Promise<number> {
+  const supabase = await createClient();
+  const { count } = await supabase
+    .from("shipments")
+    .select("id", { count: "exact", head: true })
+    .eq("carrier_id", carrierId)
+    .eq("status", "offered");
+  return count ?? 0;
+}
+
 function navFor(
   role: Profile["role"],
   shipCounts?: ShipNavCounts | null,
   invCounts?: InvoiceNavCounts | null,
   supportOpenCount = 0,
+  offerCount = 0,
 ): { primary: ShellNavItem[]; more: ShellNavItem[] } {
   const i = (node: ReactNode) => node;
   const settings: ShellNavItem = {
@@ -153,7 +168,7 @@ function navFor(
 
   switch (role) {
     case "manager": {
-      const c = shipCounts ?? { delayed: 0, unassigned: 0, ready: 0, needsPod: 0 };
+      const c = shipCounts ?? { delayed: 0, unassigned: 0, offered: 0, ready: 0, needsPod: 0 };
       const inv = invCounts ?? { ready: 0, overdue: 0, open: 0 };
       return {
         primary: [
@@ -161,40 +176,7 @@ function navFor(
           { href: "/warnings", label: "Warnings", icon: i(<AlertTriangle className="h-4 w-4" />) },
           { href: "/approvals", label: "Approvals", icon: i(<CheckSquare className="h-4 w-4" />) },
           { href: "/risk", label: "Risk & Credit", icon: i(<ShieldAlert className="h-4 w-4" />) },
-          { href: "/coverage", label: "Load requests", icon: i(<Inbox className="h-4 w-4" />) },
-          {
-            href: "/assign",
-            label: "Assign carriers",
-            icon: i(<UserCheck className="h-4 w-4" />),
-            count: c.unassigned > 0 ? c.unassigned : undefined,
-          },
           { href: "/controls", label: "Control activity", icon: i(<ScrollText className="h-4 w-4" />) },
-          {
-            href: "/shipments",
-            label: "Shipments",
-            icon: i(<Package className="h-4 w-4" />),
-            children: [
-              { href: "/shipments?status=delayed", label: "Delayed", count: c.delayed },
-              { href: "/assign", label: "Needs carrier", count: c.unassigned },
-              { href: "/shipments?status=ready", label: "Loads to invoice", count: c.ready },
-              { href: "/shipments", label: "All loads" },
-            ],
-          },
-          {
-            href: "/invoices",
-            label: "Invoices",
-            icon: i(<FileText className="h-4 w-4" />),
-            children: [
-              { href: "/invoices?status=ready", label: "Ready to bill", count: inv.ready },
-              { href: "/invoices?status=overdue", label: "Overdue", count: inv.overdue },
-              { href: "/invoices?status=open", label: "Outstanding", count: inv.open },
-              { href: "/invoices", label: "All invoices" },
-            ],
-          },
-          { href: "/ar", label: "Accounts Receivable", icon: i(<BarChart3 className="h-4 w-4" />) },
-          { href: "/ap", label: "Accounts Payable", icon: i(<Banknote className="h-4 w-4" />) },
-          { href: "/disputes", label: "Disputes", icon: i(<AlertTriangle className="h-4 w-4" />) },
-          supportStaff,
           {
             href: "/profitability",
             label: "Profitability",
@@ -209,16 +191,49 @@ function navFor(
           settings,
         ],
         more: [
+          { href: "/coverage", label: "Load requests", icon: i(<Inbox className="h-4 w-4" />) },
+          {
+            href: "/assign",
+            label: "Assign carriers",
+            icon: i(<UserCheck className="h-4 w-4" />),
+            count: c.unassigned + c.offered > 0 ? c.unassigned + c.offered : undefined,
+          },
+          {
+            href: "/shipments",
+            label: "Shipments",
+            icon: i(<Package className="h-4 w-4" />),
+            children: [
+              { href: "/shipments?status=delayed", label: "Delayed", count: c.delayed },
+              { href: "/assign?view=needs", label: "Needs carrier", count: c.unassigned },
+              { href: "/assign?view=awaiting", label: "Awaiting accept", count: c.offered },
+              { href: "/shipments?status=ready", label: "Loads to invoice", count: c.ready },
+              { href: "/shipments", label: "All loads" },
+            ],
+          },
           { href: "/customers", label: "Customers", icon: i(<Users className="h-4 w-4" />) },
           { href: "/carriers", label: "Carriers", icon: i(<Truck className="h-4 w-4" />) },
-          { href: "/contracts", label: "Contracts (setup)", icon: i(<ClipboardList className="h-4 w-4" />) },
-          { href: "/payments", label: "Payments", icon: i(<Wallet className="h-4 w-4" />) },
+          { href: "/contracts", label: "Contracts", icon: i(<ClipboardList className="h-4 w-4" />) },
+          {
+            href: "/invoices",
+            label: "Invoices",
+            icon: i(<FileText className="h-4 w-4" />),
+            children: [
+              { href: "/invoices?status=ready", label: "Ready to bill", count: inv.ready },
+              { href: "/invoices?status=overdue", label: "Overdue", count: inv.overdue },
+              { href: "/invoices?status=open", label: "Outstanding", count: inv.open },
+              { href: "/invoices", label: "All invoices" },
+            ],
+          },
+          { href: "/ar", label: "Accounts Receivable", icon: i(<BarChart3 className="h-4 w-4" />) },
+          { href: "/ap", label: "Accounts Payable", icon: i(<Banknote className="h-4 w-4" />) },
+          { href: "/disputes", label: "Disputes", icon: i(<AlertTriangle className="h-4 w-4" />) },
           { href: "/accounting", label: "Accounting", icon: i(<ClipboardList className="h-4 w-4" />) },
+          supportStaff,
         ],
       };
     }
     case "broker": {
-      const c = shipCounts ?? { delayed: 0, unassigned: 0, ready: 0, needsPod: 0 };
+      const c = shipCounts ?? { delayed: 0, unassigned: 0, offered: 0, ready: 0, needsPod: 0 };
       return {
         primary: [
           { href: "/dashboard", label: "Broker Operations", icon: i(<LayoutDashboard className="h-4 w-4" />) },
@@ -228,23 +243,20 @@ function navFor(
             href: "/assign",
             label: "Assign carriers",
             icon: i(<UserCheck className="h-4 w-4" />),
-            count: c.unassigned > 0 ? c.unassigned : undefined,
-          },
-          { href: "/risk", label: "Risk & Credit", icon: i(<ShieldAlert className="h-4 w-4" />) },
-          {
-            href: "/shipments",
-            label: "Shipments",
-            icon: i(<Package className="h-4 w-4" />),
+            count: c.unassigned + c.offered > 0 ? c.unassigned + c.offered : undefined,
             children: [
-              { href: "/shipments?status=delayed", label: "Delayed", count: c.delayed },
-              { href: "/assign", label: "Needs carrier", count: c.unassigned },
+              { href: "/assign?view=all", label: "All", count: c.unassigned + c.offered },
+              { href: "/assign?view=needs", label: "Needs assignment", count: c.unassigned },
+              { href: "/assign?view=awaiting", label: "Awaiting acceptance", count: c.offered },
               { href: "/shipments?filter=needs-pod", label: "Needs POD", count: c.needsPod },
+              { href: "/shipments?status=delayed", label: "Delayed", count: c.delayed },
               { href: "/shipments", label: "All loads" },
             ],
           },
+          { href: "/risk", label: "Risk & Credit", icon: i(<ShieldAlert className="h-4 w-4" />) },
           { href: "/carriers", label: "Carriers", icon: i(<Truck className="h-4 w-4" />) },
           { href: "/customers", label: "Customers", icon: i(<Users className="h-4 w-4" />) },
-          { href: "/contracts", label: "Contracts (setup)", icon: i(<ClipboardList className="h-4 w-4" />) },
+          { href: "/contracts", label: "Contracts", icon: i(<ClipboardList className="h-4 w-4" />) },
           supportStaff,
           settings,
         ],
@@ -256,15 +268,12 @@ function navFor(
         primary: [
           { href: "/dashboard", label: "Billing & Accounting Dashboard", icon: i(<LayoutDashboard className="h-4 w-4" />) },
           { href: "/warnings", label: "Warnings", icon: i(<AlertTriangle className="h-4 w-4" />) },
-          { href: "/shipments", label: "Shipments", icon: i(<Package className="h-4 w-4" />) },
+          { href: "/accounting", label: "Accounting", icon: i(<ClipboardList className="h-4 w-4" />) },
+          { href: "/profitability", label: "Profitability", icon: i(<LineChart className="h-4 w-4" />) },
           { href: "/invoices", label: "Invoices", icon: i(<FileText className="h-4 w-4" />) },
           { href: "/ar", label: "Accounts Receivable", icon: i(<BarChart3 className="h-4 w-4" />) },
           { href: "/ap", label: "Accounts Payable", icon: i(<Banknote className="h-4 w-4" />) },
-          { href: "/payments", label: "Payments", icon: i(<Wallet className="h-4 w-4" />) },
-          { href: "/disputes", label: "Disputes", icon: i(<AlertTriangle className="h-4 w-4" />) },
           supportStaff,
-          { href: "/accounting", label: "Accounting", icon: i(<ClipboardList className="h-4 w-4" />) },
-          { href: "/profitability", label: "Profitability", icon: i(<LineChart className="h-4 w-4" />) },
           settings,
         ],
         more: [],
@@ -272,7 +281,7 @@ function navFor(
     case "customer":
       return {
         primary: [
-          { href: "/dashboard", label: "Shipper Dashboard", icon: i(<LayoutDashboard className="h-4 w-4" />) },
+          { href: "/dashboard", label: "Customer Dashboard", icon: i(<LayoutDashboard className="h-4 w-4" />) },
           { href: "/warnings", label: "Alerts", icon: i(<AlertTriangle className="h-4 w-4" />) },
           { href: "/coverage", label: "Request a load", icon: i(<Inbox className="h-4 w-4" />) },
           { href: "/shipments", label: "My Shipments", icon: i(<Package className="h-4 w-4" />) },
@@ -287,8 +296,22 @@ function navFor(
         primary: [
           { href: "/dashboard", label: "Carrier Dashboard", icon: i(<LayoutDashboard className="h-4 w-4" />) },
           { href: "/warnings", label: "Alerts", icon: i(<AlertTriangle className="h-4 w-4" />) },
-          { href: "/shipments", label: "My Deliveries", icon: i(<Truck className="h-4 w-4" />) },
-          { href: "/documents", label: "Documents", icon: i(<FolderOpen className="h-4 w-4" />) },
+          {
+            href: "/offers",
+            label: "Load offers",
+            icon: i(<Inbox className="h-4 w-4" />),
+            count: offerCount > 0 ? offerCount : undefined,
+          },
+          {
+            href: "/shipments",
+            label: "My Deliveries",
+            icon: i(<Truck className="h-4 w-4" />),
+            children: [
+              { href: "/shipments?filter=pickup-upcoming", label: "Upcoming pickups" },
+              { href: "/shipments?filter=delivery-due-today", label: "Due today" },
+              { href: "/shipments", label: "All deliveries" },
+            ],
+          },
           { href: "/support", label: "Support", icon: i(<HelpCircle className="h-4 w-4" />) },
           settings,
         ],
@@ -309,12 +332,16 @@ async function AppShellNav({ profile }: { profile: Profile }) {
   const isManager = profile.role === "manager";
   const isBroker = profile.role === "broker";
   const isBilling = profile.role === "billing";
+  const isCarrier = profile.role === "carrier";
   const loadSupportCount = isManager || isBroker || isBilling;
 
-  const [shipCounts, supportOpenCount, invBase] = await Promise.all([
+  const [shipCounts, supportOpenCount, invBase, offerCount] = await Promise.all([
     isManager || isBroker ? loadManagerShipCounts() : Promise.resolve(null),
     loadSupportCount ? loadOpenSupportTicketCount() : Promise.resolve(0),
     isManager ? loadManagerInvoiceCounts(0) : Promise.resolve(null),
+    isCarrier && profile.carrier_id
+      ? loadCarrierOfferCount(profile.carrier_id)
+      : Promise.resolve(0),
   ]);
   const invCounts =
     isManager && shipCounts && invBase
@@ -325,7 +352,12 @@ async function AppShellNav({ profile }: { profile: Profile }) {
     shipCounts,
     invCounts,
     supportOpenCount,
+    offerCount,
   );
+
+  if (isManager) {
+    return <CustomizableManagerNav defaultPrimary={primary} defaultMore={more} />;
+  }
 
   return (
     <>
@@ -345,6 +377,9 @@ async function AppShellNav({ profile }: { profile: Profile }) {
 
 function AppShellNavFallback({ profile }: { profile: Profile }) {
   const { primary, more } = navFor(profile.role, null, null, 0);
+  if (profile.role === "manager") {
+    return <CustomizableManagerNav defaultPrimary={primary} defaultMore={more} />;
+  }
   return (
     <>
       <AppNavLinks links={primary} />

@@ -1,5 +1,6 @@
 import type { Profile, UserRole } from "@/lib/types";
 import { isActiveFinalInvoice } from "@/lib/invoice-helpers";
+import { latestDeclinesByShipment } from "@/lib/carrier-declines";
 
 export type AlertSeverity = "info" | "warning" | "critical";
 
@@ -88,6 +89,12 @@ type AlertSources = {
     customer_id: string | null;
     carrier_id: string | null;
   }[];
+  /** Recent status notes — used to flag carrier offer declines. */
+  statusUpdates?: {
+    shipment_id: string;
+    note: string | null;
+    created_at?: string | null;
+  }[];
   today: string;
 };
 
@@ -106,6 +113,7 @@ export function buildAlerts(src: AlertSources): AppAlert[] {
       .filter((i) => isActiveFinalInvoice(i) && i.shipment_id)
       .map((i) => i.shipment_id as string),
   );
+  const declines = latestDeclinesByShipment(src.statusUpdates ?? []);
 
   for (const s of src.shipments) {
     if (
@@ -127,12 +135,41 @@ export function buildAlerts(src: AlertSources): AppAlert[] {
     }
 
     if (!s.carrier_id && !["cancelled", "delivered", "completed"].includes(s.status)) {
+      const decline = declines.get(s.id);
+      if (decline) {
+        alerts.push({
+          id: `declined-${s.id}`,
+          severity: "critical",
+          title: "Carrier declined load offer",
+          reason: `${s.load_number}: ${decline.reason}`,
+          action: "Reassign a carrier on Assign carriers",
+          href: `/assign?focus=${s.id}`,
+          related: s.load_number,
+          detectedAt: decline.at?.slice(0, 10) ?? src.today,
+          roles: ["manager", "broker"],
+        });
+      } else {
+        alerts.push({
+          id: `unassigned-${s.id}`,
+          severity: "warning",
+          title: "No carrier assigned",
+          reason: `${s.load_number} needs a carrier`,
+          action: "Assign a carrier",
+          href: `/assign?focus=${s.id}`,
+          related: s.load_number,
+          detectedAt: src.today,
+          roles: ["manager", "broker"],
+        });
+      }
+    }
+
+    if (s.status === "offered" && s.carrier_id) {
       alerts.push({
-        id: `unassigned-${s.id}`,
-        severity: "warning",
-        title: "No carrier assigned",
-        reason: `${s.load_number} needs a carrier`,
-        action: "Assign a carrier",
+        id: `offered-${s.id}`,
+        severity: "info",
+        title: "Awaiting carrier acceptance",
+        reason: `${s.load_number} offer is pending — reassign if needed`,
+        action: "Open Assign carriers to re-tender",
         href: `/assign?focus=${s.id}`,
         related: s.load_number,
         detectedAt: src.today,
@@ -334,7 +371,7 @@ export function buildAlerts(src: AlertSources): AppAlert[] {
     alerts.push({
       id: `coverage-${r.id}`,
       severity: "warning",
-      title: "Shipper coverage request",
+      title: "Customer coverage request",
       reason: `${cust ?? "Customer"}: ${r.pickup_location} → ${r.delivery_location}`,
       action: "Book load, then assign a Preferred / Approved carrier",
       href: `/coverage#focus-${r.id}`,

@@ -6,6 +6,7 @@ import {
   ClipboardList,
   FileWarning,
   HandCoins,
+  Inbox,
   Package,
   PackageCheck,
   Scale,
@@ -14,27 +15,25 @@ import {
   Wallet,
 } from "lucide-react";
 import { MorningBriefCard } from "@/components/ExecutivePanels";
-import { BillingInsightsPanel, UnbilledQueuePanel } from "@/components/BillingPanels";
+import { UnbilledQueuePanel } from "@/components/BillingPanels";
 import { BrokerTaskBoard } from "@/components/BrokerTaskBoard";
 import { CarrierTaskList } from "@/components/CarrierTaskList";
 import { CollectionsWorklist } from "@/components/CollectionsWorklist";
+import { DashboardStatCard } from "@/components/DashboardStatCard";
+import { ExpandableSection } from "@/components/ExpandableSection";
 import {
-  AgingCompositionBar,
-  DashboardStatCard,
-} from "@/components/DashboardStatCard";
-import { PayablesWorklist } from "@/components/PayablesWorklist";
-import { CustomerFriendlyStatusCard } from "@/components/ShipmentHealthCard";
+  ShipperInvoicesPanel,
+  ShipperShipmentsPanel,
+} from "@/components/ShipperDashboardPanels";
 import { ProfitabilityHeatmap } from "@/components/ProfitabilityHeatmap";
 import { ShipmentMapLazy } from "@/components/ShipmentMapLazy";
 import { DecideNowRail } from "@/components/DecideNowRail";
 import { EmptyState } from "@/components/EmptyState";
-import { StatusPie } from "@/components/Charts";
 import { requirePathAccess } from "@/lib/authz";
 import { buildBrokerTasks, brokerTaskStats } from "@/lib/broker-tasks";
+import { latestDeclinesByShipment } from "@/lib/carrier-declines";
 import { buildCarrierScorecards } from "@/lib/carrier-scorecard";
 import {
-  agingChartData,
-  buildBillingInsights,
   buildCollectionWorklist,
   buildUnbilledQueues,
   computeAging,
@@ -46,19 +45,12 @@ import {
   countLateAsOf,
   rankDecideNowItems,
 } from "@/lib/decide-now";
-import {
-  computePayableAging,
-  openApBalance,
-  buildPayableWorklist,
-} from "@/lib/payables";
+import { openApBalance } from "@/lib/payables";
 import { toHeatRows } from "@/lib/heatmap";
 import { buildExecutiveKpis, inRange, monthBounds } from "@/lib/kpi";
 import { morningBriefGreeting } from "@/lib/morning-brief";
 import { isActiveFinalInvoice } from "@/lib/invoice-helpers";
-import {
-  buildCarrierTasks,
-  customerFacingHealth,
-} from "@/lib/portal-views";
+import { buildCarrierTasks } from "@/lib/portal-views";
 import {
   creditStatus,
   insuranceRiskStatus,
@@ -120,7 +112,7 @@ export default async function DashboardPage() {
       .select("id, shipment_id, amount, approval_status, description, payable_to_carrier"),
     supabase
       .from("contracts")
-      .select("id, contract_number, end_date, status, customers(name)"),
+      .select("id, contract_number, end_date, status, customer_id, customers(name)"),
     profile.role === "billing" || profile.role === "manager"
       ? supabase
           .from("collection_notes")
@@ -564,6 +556,13 @@ export default async function DashboardPage() {
   if (profile.role === "broker") {
     const podSet = new Set(podList.map((p) => p.shipment_id));
     const pendingCharges = chargeList.filter((c) => c.approval_status === "pending");
+    const { data: declineUpdates } = await supabase
+      .from("shipment_status_updates")
+      .select("shipment_id, note, created_at")
+      .ilike("note", "Carrier declined offer:%")
+      .order("created_at", { ascending: false })
+      .limit(200);
+    const declinesByShipment = latestDeclinesByShipment(declineUpdates ?? []);
     const brokerTasks = buildBrokerTasks({
       shipments: shipList.map((s) => ({
         id: s.id,
@@ -599,6 +598,7 @@ export default async function DashboardPage() {
         customers: c.customers as { name?: string } | null,
       })),
       podShipmentIds: podSet,
+      declinesByShipment,
     });
     const stats = brokerTaskStats(brokerTasks);
     const brokerScale = Math.max(
@@ -689,90 +689,115 @@ export default async function DashboardPage() {
         };
       });
 
+    const delayedLoads = shipList.filter(
+      (s) =>
+        s.promised_delivery_date &&
+        s.promised_delivery_date < today &&
+        !["delivered", "completed", "cancelled"].includes(s.status),
+    );
+    const unassignedLoads = shipList.filter(
+      (s) =>
+        !s.carrier_id && !["delivered", "completed", "cancelled"].includes(s.status),
+    );
+    const declinedLoads = unassignedLoads.filter((s) => declinesByShipment.has(s.id));
+    const plainUnassigned = unassignedLoads.filter((s) => !declinesByShipment.has(s.id));
+    const offeredLoads = shipList.filter((s) => s.status === "offered" && s.carrier_id);
+    const watchCarriers = scorecards.filter(
+      (c) => c.tier === "Watch List" || c.tier === "Suspended",
+    );
+
     const watchActionItems = [
-      ...(pendingCoverageCount
-        ? [
-            {
-              id: "broker-coverage",
-              title: `${pendingCoverageCount} load request(s)`,
-              metric: String(pendingCoverageCount),
-              metricKind: "count" as const,
-              metricUnit: pendingCoverageCount === 1 ? "request" : "requests",
-              detail: "Approve (credit check), then assign a carrier",
-              href: "/coverage",
-              tone: "warning" as const,
-              cta: "Open",
-              score: pendingCoverageCount * 50_000,
-            },
-          ]
-        : []),
-      ...(stats.delayed
-        ? [
-            {
-              id: "broker-delayed",
-              title: `${stats.delayed} delayed load(s)`,
-              metric: String(stats.delayed),
-              metricKind: "count" as const,
-              metricUnit: stats.delayed === 1 ? "load" : "loads",
-              detail: "Call carriers for ETAs and notify customers",
-              href: "/warnings?severity=critical",
-              tone: "error" as const,
-              cta: "Open",
-              score: stats.delayed * 80_000,
-            },
-          ]
-        : []),
-      ...(stats.unassigned
-        ? [
-            {
-              id: "broker-unassigned",
-              title: `${stats.unassigned} load(s) need coverage`,
-              metric: String(stats.unassigned),
-              metricKind: "count" as const,
-              metricUnit: stats.unassigned === 1 ? "load" : "loads",
-              detail: "Assign on Assign carriers — expired insurance is blocked",
-              href: "/assign",
-              tone: "warning" as const,
-              cta: "Open",
-              score: stats.unassigned * 60_000,
-            },
-          ]
-        : []),
-      ...(stats.accessorial
-        ? [
-            {
-              id: "broker-accessorial",
-              title: `${stats.accessorial} accessorial(s) awaiting approval`,
-              metric: String(stats.accessorial),
-              metricKind: "count" as const,
-              metricUnit: stats.accessorial === 1 ? "charge" : "charges",
-              detail: "Escalate to a manager — only managers can approve or reject",
-              href: "/warnings?severity=info",
-              tone: "info" as const,
-              cta: "Open",
-              score: stats.accessorial * 30_000,
-            },
-          ]
-        : []),
-      ...(scorecards.filter((c) => c.tier === "Watch List" || c.tier === "Suspended").length
-        ? [
-            {
-              id: "broker-carrier-watch",
-              title: "Carrier insurance or performance watch",
-              metric: String(
-                scorecards.filter((c) => c.tier === "Watch List" || c.tier === "Suspended")
-                  .length,
-              ),
-              metricKind: "count" as const,
-              metricUnit: "carriers",
-              detail: "Review Watch List / Suspended carriers before booking",
-              href: "/carriers",
-              tone: "warning" as const,
-              cta: "Open",
-              score: 40_000,
-            },
-          ]
-        : []),
+      ...pendingCoverage.map((r) => ({
+        id: `broker-coverage-${r.id}`,
+        title: "Load request pending",
+        metric: "1",
+        metricKind: "count" as const,
+        metricUnit: "request",
+        detail: `${r.pickup_location} → ${r.delivery_location}`,
+        href: `/coverage?focus=${r.id}`,
+        tone: "warning" as const,
+        cta: "Open",
+        score: 50_000,
+      })),
+      ...delayedLoads.map((s) => ({
+        id: `broker-delayed-${s.id}`,
+        title: `${s.load_number} is delayed`,
+        metric: "1",
+        metricKind: "count" as const,
+        metricUnit: "load",
+        detail: `Promised ${s.promised_delivery_date} · still ${s.status}`,
+        href: `/shipments/${s.id}`,
+        tone: "error" as const,
+        cta: "Open",
+        score: 80_000 + Number(s.customer_rate || 0),
+      })),
+      ...declinedLoads.map((s) => ({
+        id: `broker-declined-${s.id}`,
+        title: `${s.load_number} — carrier declined`,
+        metric: "1",
+        metricKind: "count" as const,
+        metricUnit: "load",
+        detail: declinesByShipment.get(s.id)?.reason ?? "Reassign a carrier",
+        href: `/assign?focus=${s.id}`,
+        tone: "error" as const,
+        cta: "Reassign",
+        score: 75_000 + Number(s.customer_rate || 0),
+      })),
+      ...plainUnassigned.map((s) => ({
+        id: `broker-unassigned-${s.id}`,
+        title: `${s.load_number} needs a carrier`,
+        metric: "1",
+        metricKind: "count" as const,
+        metricUnit: "load",
+        detail: `${s.pickup_location ?? `${s.origin_city}, ${s.origin_state}`} → ${
+          s.delivery_location ?? `${s.dest_city}, ${s.dest_state}`
+        }`,
+        href: `/assign?focus=${s.id}`,
+        tone: "warning" as const,
+        cta: "Open",
+        score: 60_000 + Number(s.customer_rate || 0),
+      })),
+      ...offeredLoads.map((s) => ({
+        id: `broker-offered-${s.id}`,
+        title: `${s.load_number} awaiting acceptance`,
+        metric: "1",
+        metricKind: "count" as const,
+        metricUnit: "load",
+        detail: "Offer pending — reassign if the carrier is unresponsive",
+        href: `/assign?focus=${s.id}`,
+        tone: "info" as const,
+        cta: "Reassign",
+        score: 45_000 + Number(s.customer_rate || 0),
+      })),
+      ...pendingCharges.map((c) => {
+        const ship = shipList.find((s) => s.id === c.shipment_id);
+        return {
+          id: `broker-accessorial-${c.id}`,
+          title: "Accessorial awaiting manager",
+          metric: money(Number(c.amount)),
+          metricKind: "money" as const,
+          detail: `${ship?.load_number ?? "Load"} · ${c.description}`,
+          href: `/shipments/${c.shipment_id}`,
+          tone: "info" as const,
+          cta: "Open",
+          score: 30_000 + Number(c.amount),
+        };
+      }),
+      ...watchCarriers.map((c) => ({
+        id: `broker-carrier-${c.carrierId}`,
+        title: `${c.name} — ${c.tier}`,
+        metric: "1",
+        metricKind: "count" as const,
+        metricUnit: "carrier",
+        detail:
+          c.insuranceStatus === "Expired"
+            ? `Insurance expired${c.insuranceExpiration ? ` ${c.insuranceExpiration}` : ""}`
+            : c.tierReasons[0] ?? "Review before assigning",
+        href: `/risk?focus=${c.carrierId}`,
+        tone: "warning" as const,
+        cta: "Open",
+        score: c.tier === "Suspended" ? 55_000 : 40_000,
+      })),
     ];
     const brokerDecideNow = rankDecideNowItems(watchActionItems, 5);
 
@@ -804,19 +829,6 @@ export default async function DashboardPage() {
             </div>
           }
         />
-        <div className="rounded-box border border-base-300 bg-base-100 px-4 py-3 text-sm shadow-sm">
-          <p className="font-semibold">Simplified ops flow</p>
-          <ol className="mt-1 list-decimal space-y-0.5 pl-5 opacity-80">
-            <li>Shipper submits a load request on their active contract.</li>
-            <li>
-              You approve on Load requests (blocked on credit hold / past-due AR).
-            </li>
-            <li>
-              You assign a carrier on Assign carriers (blocked if insurance expired).
-            </li>
-            <li>Shipper tracks the load on My Shipments.</li>
-          </ol>
-        </div>
         <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-6">
           <DashboardStatCard
             title="Load requests"
@@ -874,7 +886,7 @@ export default async function DashboardPage() {
         <DecideNowRail
           items={brokerDecideNow}
           title="Needs attention"
-          subtitle="Coverage, delays, and carrier exceptions — ranked by urgency."
+          subtitle="Each Open goes to that load request, shipment, assign queue, or risk row."
           emptyTitle="No high-priority broker exceptions"
           emptyDescription="Check the work queue for today&apos;s tasks."
         />
@@ -892,6 +904,18 @@ export default async function DashboardPage() {
             Open carriers
           </Link>
         </div>
+
+        <ExpandableSection
+          title="Simplified ops flow"
+          description="Quick reminder of request → approve → assign."
+        >
+          <ol className="list-decimal space-y-1 pl-5 text-sm opacity-80">
+            <li>Customer submits a load request on their active contract.</li>
+            <li>You approve on Load requests (blocked on credit hold — escalate to manager Approvals).</li>
+            <li>You assign a carrier on Assign carriers (blocked if insurance expired).</li>
+            <li>Customer tracks the load on My Shipments.</li>
+          </ol>
+        </ExpandableSection>
       </div>
     );
   }
@@ -899,21 +923,12 @@ export default async function DashboardPage() {
   // ——— BILLING ———
   if (profile.role === "billing") {
     const thisMonth = monthBounds(0);
-    const paidToday = (payments ?? [])
-      .filter((p) => p.payment_date === today)
-      .reduce((s, p) => s + Number(p.amount), 0);
     const cashMonth = (payments ?? [])
       .filter((p) => inRange(p.payment_date, thisMonth.start, thisMonth.end))
       .reduce((s, p) => s + Number(p.amount), 0);
 
     const aging = computeAging(invList, today);
-    const agingChart = agingChartData(aging);
     const pastDueAr = aging.d1_30 + aging.d31_60 + aging.d61_90 + aging.d90_plus;
-    const openDisputes = disputeList.filter((d) => d.status === "open");
-    const disputedBalance = openDisputes.reduce(
-      (s, d) => s + Number(d.amount_disputed),
-      0,
-    );
 
     const podSet = new Set(podList.map((p) => p.shipment_id));
     const billedSet = new Set(
@@ -956,41 +971,13 @@ export default async function DashboardPage() {
       today,
     });
 
-    const billingInsights = buildBillingInsights({
-      aging,
-      unbilledReady: ready.length,
-      awaitingDocs: awaitingDocs.length,
-      disputedBalance,
-      cashToday: paidToday,
-      cashMonth,
-      overdueCount: pastDue.length,
-    });
-
     const apOpenBilling = openApBalance(carrierBills ?? []);
-    const apAgingBilling = computePayableAging(carrierBills ?? [], today);
-    const apAgingChart = agingChartData(apAgingBilling);
-
-    const payableWorklist = buildPayableWorklist({
-      bills: (carrierBills ?? []).map((b) => ({
-        id: b.id,
-        bill_number: b.bill_number,
-        carrier_id: b.carrier_id,
-        shipment_id: b.shipment_id,
-        total: Number(b.total),
-        amount_paid: Number(b.amount_paid),
-        due_date: b.due_date,
-        status: b.status,
-        carriers: b.carriers as { name?: string } | null,
-        shipments: b.shipments as { load_number?: string } | null,
-      })),
-      today,
-    });
 
     return (
       <div className="space-y-6">
         <Header
           title="Billing & Collections Dashboard"
-          subtitle="AR aging, AP payables, unbilled queues, disputes, and collection actions"
+          subtitle="Unbilled queues, collections follow-up, and cash actions — aging detail lives on AR and AP"
           action={
             <div className="flex flex-wrap gap-2">
               <Link href="/invoices?status=ready" className="btn btn-outline btn-sm">
@@ -999,13 +986,13 @@ export default async function DashboardPage() {
               <Link href="/ap" className="btn btn-outline btn-sm">
                 Accounts Payable
               </Link>
-              <Link href="/payments" className="btn btn-primary btn-sm">
+              <Link href="/ar?focus=record-payment" className="btn btn-primary btn-sm">
                 Record payment
               </Link>
             </div>
           }
         />
-        <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
+        <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
           <DashboardStatCard
             title="Delivered but unbilled"
             value={String(ready.length)}
@@ -1031,15 +1018,6 @@ export default async function DashboardPage() {
             href="/ar"
           />
           <DashboardStatCard
-            title="Past-due share"
-            value={ar > 0 ? `${Math.round((pastDueAr / ar) * 100)}%` : "0%"}
-            icon={AlertTriangle}
-            warn={pastDueAr > 0}
-            meter={ar > 0 ? pastDueAr / ar : 0}
-            meterLabel={`${money(pastDueAr)} past due of ${money(ar)} AR`}
-            href="/ar?filter=d1_30"
-          />
-          <DashboardStatCard
             title="Cash this month"
             value={money(cashMonth)}
             icon={Banknote}
@@ -1049,7 +1027,7 @@ export default async function DashboardPage() {
                 ? `${Math.round(Math.min(100, (cashMonth / ar) * 100))}% of open AR collected this month`
                 : "No open AR baseline"
             }
-            href="/payments?filter=month"
+            href="/ar?receipts=month"
           />
           <DashboardStatCard
             title="Open AP"
@@ -1062,33 +1040,7 @@ export default async function DashboardPage() {
             meterLabel="Share of AR+AP open balances"
             href="/ap"
           />
-          <DashboardStatCard
-            title="Disputed share"
-            value={ar > 0 ? `${Math.round((disputedBalance / ar) * 100)}%` : "0%"}
-            icon={Scale}
-            warn={disputedBalance > 0}
-            meter={ar > 0 ? disputedBalance / ar : 0}
-            meterLabel={`${money(disputedBalance)} disputed of ${money(ar)} AR`}
-            href="/disputes?filter=open"
-          />
         </div>
-
-        <div className="grid gap-4 lg:grid-cols-2">
-          <Panel title="AP aging">
-            <AgingCompositionBar buckets={apAgingChart} />
-            <div className="mt-4 border-t border-base-300 pt-3">
-              <StatusPie data={apAgingChart} labelMode="percent" />
-            </div>
-          </Panel>
-          <Panel title="Invoice aging">
-            <AgingCompositionBar buckets={agingChart} />
-            <div className="mt-4 border-t border-base-300 pt-3">
-              <StatusPie data={agingChart} labelMode="percent" />
-            </div>
-          </Panel>
-        </div>
-
-        <BillingInsightsPanel insights={billingInsights} />
 
         <div className="grid gap-4 lg:grid-cols-2">
           <UnbilledQueuePanel
@@ -1105,27 +1057,19 @@ export default async function DashboardPage() {
 
         <CollectionsWorklist items={worklist} />
 
-        <PayablesWorklist items={payableWorklist} />
-
-        <Panel title="Open billing disputes">
-          {openDisputes.length === 0 ? (
-            <EmptyState
-              title="No open disputes"
-              description="Disputes will appear here when customers contest charges."
-            />
-          ) : (
-            <ul className="space-y-2 text-sm">
-              {openDisputes.map((d) => (
-                <li key={d.id} className="rounded-box border border-warning/30 bg-warning/10 p-3">
-                  {sanitizeDemoText(d.reason)} — {money(d.amount_disputed)}
-                </li>
-              ))}
-            </ul>
-          )}
-          <Link href="/disputes" className="btn btn-ghost btn-sm mt-3">
-            View all disputes
-          </Link>
-        </Panel>
+        <div className="rounded-box border border-base-300 bg-base-100 px-4 py-4">
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <div>
+              <p className="font-semibold">Accounts Payable</p>
+              <p className="text-sm opacity-70">
+                Open AP {money(apOpenBilling)}. Pay, hold, and aging detail live on the AP workbench.
+              </p>
+            </div>
+            <Link href="/ap" className="btn btn-primary btn-sm">
+              Open AP
+            </Link>
+          </div>
+        </div>
       </div>
     );
   }
@@ -1135,42 +1079,168 @@ export default async function DashboardPage() {
     const current = shipList.filter(
       (s) => !["completed", "cancelled"].includes(s.status),
     );
+    const sortableShipments = shipList.filter((s) => s.status !== "cancelled");
     const recentDeliveries = shipList.filter((s) =>
       ["delivered", "completed"].includes(s.status),
     );
-    const podSet = new Set(podList.map((p) => p.shipment_id));
     const overdueMine = invList.filter((i) => {
       const bal = Number(i.total) - Number(i.amount_paid);
       return bal > 0 && i.due_date < today && !["paid", "cancelled"].includes(i.status);
     });
     const openDisputes = disputeList.filter((d) => d.status === "open");
+    const myPendingRequests = pendingCoverage.length;
 
-    const statusCards = current.slice(0, 4).map((s) => {
-      const friendly = customerFacingHealth({
-        status: s.status,
-        promised_delivery_date: s.promised_delivery_date,
-        hasPod: podSet.has(s.id),
-        hasCarrier: Boolean(s.carrier_id),
-        hasOpenDispute: disputedShipmentIds.has(s.id),
-        hasOverdueInvoice: overdueMine.length > 0,
-        today,
-      });
-      return { s, friendly };
-    });
+    const soon = new Date(`${today}T00:00:00Z`);
+    soon.setUTCDate(soon.getUTCDate() + 30);
+    const soonStr = soon.toISOString().slice(0, 10);
+    const myContracts = (contracts ?? []).filter(
+      (c) => c.customer_id === profile.customer_id,
+    );
+    const activeContracts = myContracts.filter((c) => c.status === "active");
+    const expiringContracts = activeContracts.filter(
+      (c) => c.end_date && c.end_date <= soonStr,
+    );
+    const primaryContract =
+      expiringContracts[0] ??
+      [...activeContracts].sort((a, b) =>
+        String(a.end_date ?? "9999").localeCompare(String(b.end_date ?? "9999")),
+      )[0] ??
+      null;
+
+    let contractStatusLabel = "None";
+    let contractStatusDetail = "No active contract — contact Support";
+    let contractWarn = true;
+    let contractMeter = 0;
+    if (primaryContract) {
+      const ended =
+        Boolean(primaryContract.end_date) && primaryContract.end_date! < today;
+      const expiringSoon =
+        Boolean(primaryContract.end_date) &&
+        primaryContract.end_date! >= today &&
+        primaryContract.end_date! <= soonStr;
+
+      const msPerDay = 86_400_000;
+      const daysRemainingRaw = primaryContract.end_date
+        ? Math.ceil(
+            (new Date(`${primaryContract.end_date}T00:00:00Z`).getTime() -
+              new Date(`${today}T00:00:00Z`).getTime()) /
+              msPerDay,
+          )
+        : null;
+      const daysRemaining =
+        daysRemainingRaw == null ? null : Math.max(0, daysRemainingRaw);
+      const daysRemainingOfYear =
+        daysRemaining == null ? null : Math.min(365, daysRemaining);
+      // Meter = share of a 365-day year already used (closer to expiration = fuller bar).
+      contractMeter =
+        daysRemainingOfYear == null
+          ? 0
+          : Math.min(1, Math.max(0, (365 - daysRemainingOfYear) / 365));
+
+      const remainingLabel =
+        daysRemainingOfYear == null
+          ? null
+          : `${daysRemainingOfYear}/365 days remaining`;
+
+      if (!primaryContract.end_date) {
+        contractStatusLabel = "Open-ended";
+        contractStatusDetail = `${primaryContract.contract_number} · active`;
+        contractWarn = false;
+        contractMeter = 0;
+      } else if (ended) {
+        contractStatusLabel = primaryContract.end_date as string;
+        contractStatusDetail = `${primaryContract.contract_number} · ended · 0/365 days remaining`;
+        contractWarn = true;
+        contractMeter = 1;
+      } else if (expiringSoon) {
+        contractStatusLabel = primaryContract.end_date as string;
+        contractStatusDetail = `${primaryContract.contract_number} · active · ${remainingLabel}`;
+        contractWarn = true;
+      } else {
+        contractStatusLabel = primaryContract.end_date as string;
+        contractStatusDetail = `${primaryContract.contract_number} · active · ${remainingLabel}`;
+        contractWarn = false;
+      }
+      if (activeContracts.length > 1) {
+        contractStatusDetail += ` · ${activeContracts.length} active`;
+      }
+    }
+
+    function nextShipmentEvent(s: {
+      status: string;
+      pickup_date: string | null;
+      delivery_date: string | null;
+      promised_delivery_date: string | null;
+    }) {
+      if (["delivered", "completed", "cancelled"].includes(s.status)) return null;
+      const delivery = s.promised_delivery_date ?? s.delivery_date;
+      if (
+        s.pickup_date &&
+        s.pickup_date >= today &&
+        ["scheduled", "assigned", "booked"].includes(s.status)
+      ) {
+        return `Next pickup ${s.pickup_date}`;
+      }
+      if (s.status === "in_transit" || s.status === "picked_up") {
+        return delivery ? `Next delivery ${delivery}` : "In transit · delivery TBD";
+      }
+      if (s.pickup_date && s.pickup_date < today && !delivery) {
+        return `Pickup was ${s.pickup_date}`;
+      }
+      if (delivery) {
+        if (s.pickup_date && s.pickup_date >= today) {
+          return `Pickup ${s.pickup_date} · Delivery ${delivery}`;
+        }
+        return delivery >= today ? `Next delivery ${delivery}` : `Delivery was ${delivery}`;
+      }
+      if (s.pickup_date) return `Pickup ${s.pickup_date}`;
+      return null;
+    }
 
     const attentionItems = [
       ...pendingCoverage.slice(0, 2).map((r) => ({
         id: `coverage-${r.id}`,
-        title: "Coverage request pending",
+        title: "Load request pending",
         metric: "1",
         metricKind: "count" as const,
         metricUnit: "request",
         detail: `${r.pickup_location} → ${r.delivery_location}`,
-        href: "/coverage",
+        href: `/coverage?focus=${r.id}`,
         tone: "warning" as const,
         cta: "Open",
         score: 50_000,
       })),
+      ...(contractWarn && primaryContract
+        ? [
+            {
+              id: `contract-${primaryContract.id}`,
+              title: "Contract ending soon",
+              metric: "1",
+              metricKind: "count" as const,
+              metricUnit: "contract",
+              detail: `${primaryContract.contract_number} ends ${primaryContract.end_date}`,
+              href: `/support?focus=contract&contract=${encodeURIComponent(String(primaryContract.contract_number))}`,
+              tone: "warning" as const,
+              cta: "Open",
+              score: 45_000,
+            },
+          ]
+        : !primaryContract
+          ? [
+              {
+                id: "contract-missing",
+                title: "No active contract",
+                metric: "0",
+                metricKind: "count" as const,
+                metricUnit: "contracts",
+                detail: "Load requests need an active shipping agreement",
+                href: "/support?focus=contract",
+                tone: "warning" as const,
+                cta: "Open",
+                score: 55_000,
+              },
+            ]
+          : []),
       ...current
         .filter(
           (s) =>
@@ -1196,7 +1266,7 @@ export default async function DashboardPage() {
         metric: money(Number(i.total) - Number(i.amount_paid)),
         metricKind: "money" as const,
         detail: `Due ${i.due_date}`,
-        href: "/invoices",
+        href: `/invoices/${i.id}`,
         tone: "warning" as const,
         cta: "Open",
         score: 40_000 + (Number(i.total) - Number(i.amount_paid)),
@@ -1207,7 +1277,9 @@ export default async function DashboardPage() {
         metric: money(Number(d.amount_disputed)),
         metricKind: "money" as const,
         detail: sanitizeDemoText(d.reason),
-        href: "/support",
+        href: d.invoice_id
+          ? `/invoices/${d.invoice_id}`
+          : `/support?focus=${d.id}`,
         tone: "info" as const,
         cta: "Open",
         score: 25_000,
@@ -1219,17 +1291,47 @@ export default async function DashboardPage() {
       current.length,
       recentDeliveries.length,
       overdueMine.length,
+      myPendingRequests,
+      invList.length,
     );
+
+    const shipmentPanelRows = sortableShipments.map((s) => ({
+      id: s.id as string,
+      load_number: s.load_number as string,
+      status: s.status as string,
+      carrier_name: (s.carriers as { name?: string } | null)?.name ?? null,
+      lane: `${s.pickup_location ?? `${s.origin_city}, ${s.origin_state}`} → ${
+        s.delivery_location ?? `${s.dest_city}, ${s.dest_state}`
+      }`,
+      pickup_date: (s.pickup_date as string | null) ?? null,
+      delivery_date: (s.delivery_date as string | null) ?? null,
+      next_event: nextShipmentEvent({
+        status: s.status as string,
+        pickup_date: (s.pickup_date as string | null) ?? null,
+        delivery_date: (s.delivery_date as string | null) ?? null,
+        promised_delivery_date: (s.promised_delivery_date as string | null) ?? null,
+      }),
+    }));
+
+    const invoicePanelRows = invList
+      .filter((i) => i.status !== "cancelled")
+      .map((i) => ({
+        id: i.id as string,
+        invoice_number: i.invoice_number as string,
+        status: i.status as string,
+        balance: Math.max(0, Number(i.total) - Number(i.amount_paid)),
+        due_date: i.due_date as string,
+      }));
 
     return (
       <div className="space-y-6">
         <Header
           title="My Dashboard"
-          subtitle="Your shipments, deliveries, invoices, and balances — only your account"
+          subtitle="Your shipments, invoices, and balances — only your account"
           action={
             <div className="flex flex-wrap gap-2">
               <Link href="/coverage" className="btn btn-primary btn-sm">
-                Request coverage
+                Request a load
               </Link>
               <Link href="/warnings" className="btn btn-outline btn-sm">
                 My alerts
@@ -1237,24 +1339,39 @@ export default async function DashboardPage() {
             </div>
           }
         />
-        <div className="rounded-box border border-base-300 bg-base-100 px-4 py-3 text-sm shadow-sm">
-          <p className="font-semibold">Need a carrier?</p>
-          <p className="mt-1 opacity-80">
-            Submit a coverage request with your lane and dates. Broker Operations books the load,
-            assigns a carrier, then you track it on My Shipments. Use{" "}
-            <Link href="/coverage" className="link link-primary font-medium">
-              Request coverage
-            </Link>{" "}
-            above to open the form.
-          </p>
-        </div>
-        <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
+        <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-6">
+          <DashboardStatCard
+            title="Pending load requests"
+            value={String(myPendingRequests)}
+            icon={Inbox}
+            warn={myPendingRequests > 0}
+            meter={myPendingRequests / shipperScale}
+            meterLabel={
+              myPendingRequests > 0
+                ? "Waiting on Broker Operations"
+                : "No pending requests"
+            }
+            href="/coverage"
+          />
+          <DashboardStatCard
+            title="Contract expiration date"
+            value={contractStatusLabel}
+            icon={ClipboardList}
+            warn={contractWarn}
+            meter={contractMeter}
+            meterLabel={contractStatusDetail}
+            href={
+              primaryContract
+                ? `/support?focus=contract&contract=${encodeURIComponent(String(primaryContract.contract_number))}`
+                : "/support?focus=contract"
+            }
+          />
           <DashboardStatCard
             title="Current shipments"
             value={String(current.length)}
             icon={Truck}
             meter={current.length / shipperScale}
-            meterLabel="Share of your shipment activity"
+            meterLabel="Share of your account activity"
             href="/shipments?filter=active"
           />
           <DashboardStatCard
@@ -1262,7 +1379,7 @@ export default async function DashboardPage() {
             value={String(recentDeliveries.length)}
             icon={PackageCheck}
             meter={recentDeliveries.length / shipperScale}
-            meterLabel="Share of your shipment activity"
+            meterLabel="Share of your account activity"
             href="/shipments?filter=delivered"
           />
           <DashboardStatCard
@@ -1298,89 +1415,34 @@ export default async function DashboardPage() {
         <DecideNowRail
           items={shipperDecideNow}
           title="Needs your attention"
-          subtitle="Delays, coverage, and billing items on your account."
+          subtitle="Delays, load requests, contract, and billing items on your account."
           emptyTitle="You're all caught up"
           emptyDescription="No delayed loads, past-due invoices, or open billing questions."
         />
 
-        <section className="space-y-3">
-          <div>
-            <h2 className="text-lg font-bold tracking-tight">Shipment status</h2>
-            <p className="text-sm opacity-70">
-              How your current loads look — lane, ops status, and what needs a follow-up.
-            </p>
-          </div>
-          {statusCards.length === 0 ? (
-            <div className="rounded-box border border-base-300 bg-base-100 px-4 py-6 text-sm opacity-70 shadow-sm">
-              No active shipments to review.
-            </div>
-          ) : (
-            <div className="grid gap-4 sm:grid-cols-2">
-              {statusCards.map(({ s, friendly }) => {
-                const origin =
-                  [s.origin_city, s.origin_state].filter(Boolean).join(", ") ||
-                  s.pickup_location ||
-                  "Origin";
-                const dest =
-                  [s.dest_city, s.dest_state].filter(Boolean).join(", ") ||
-                  s.delivery_location ||
-                  "Destination";
-                return (
-                  <CustomerFriendlyStatusCard
-                    key={s.id}
-                    loadNumber={s.load_number}
-                    href={`/shipments/${s.id}`}
-                    lane={`${origin} → ${dest}`}
-                    opsStatus={formatStatusLabel(s.status)}
-                    health={friendly}
-                  />
-                );
-              })}
-            </div>
-          )}
-        </section>
-
-        <Panel title="Active shipments">
-          <ShipmentList rows={current} empty="No active shipments." />
-        </Panel>
         <div className="grid gap-4 lg:grid-cols-2">
-          <Panel title="Recent deliveries">
-            <ShipmentList rows={recentDeliveries.slice(0, 5)} empty="No deliveries yet." />
-          </Panel>
-          <Panel title="Your invoices">
-            <MiniTable
-              headers={["Invoice", "Status", "Balance", "Due"]}
-              rows={invList.slice(0, 8).map((i) => [
-                i.invoice_number,
-                formatStatusLabel(i.status),
-                money(Number(i.total) - Number(i.amount_paid)),
-                i.due_date,
-              ])}
-            />
-            <Link href="/invoices" className="btn btn-ghost btn-sm mt-2">
-              All invoices
-            </Link>
-            <Link href="/support" className="btn btn-ghost btn-sm mt-2">
-              Support & disputes
-            </Link>
-          </Panel>
+          <ShipperShipmentsPanel rows={shipmentPanelRows} />
+          <ShipperInvoicesPanel rows={invoicePanelRows} />
         </div>
       </div>
     );
   }
 
   // ——— CARRIER ———
-  const assigned = shipList.filter((s) => !["cancelled", "completed"].includes(s.status));
+  const pendingOffers = shipList.filter((s) => s.status === "offered");
+  const assigned = shipList.filter(
+    (s) => !["cancelled", "completed", "offered"].includes(s.status),
+  );
   const upcomingPickups = shipList.filter(
     (s) =>
       s.pickup_date &&
       s.pickup_date >= today &&
-      ["assigned", "scheduled", "booked"].includes(s.status),
+      ["assigned", "booked"].includes(s.status),
   );
   const dueToday = shipList.filter(
     (s) =>
       (s.promised_delivery_date === today || s.delivery_date === today) &&
-      !["completed", "cancelled"].includes(s.status),
+      !["completed", "cancelled", "offered"].includes(s.status),
   );
   const completed = shipList.filter((s) =>
     ["delivered", "completed"].includes(s.status),
@@ -1423,11 +1485,16 @@ export default async function DashboardPage() {
     <div className="space-y-6">
       <Header
         title="Assigned Loads"
-        subtitle="Your pickups, deliveries, documents, and status updates"
+        subtitle="Accept new offers, then manage pickups, deliveries, and POD"
         action={
-          <Link href="/warnings" className="btn btn-outline btn-sm">
-            My alerts
-          </Link>
+          <div className="flex flex-wrap gap-2">
+            <Link href="/offers" className="btn btn-primary btn-sm">
+              Load offers{pendingOffers.length ? ` (${pendingOffers.length})` : ""}
+            </Link>
+            <Link href="/warnings" className="btn btn-outline btn-sm">
+              My alerts
+            </Link>
+          </div>
         }
       />
       {myInsurance.status === "expired" || myInsurance.status === "expiring" ? (
@@ -1445,6 +1512,15 @@ export default async function DashboardPage() {
         </div>
       ) : null}
       <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
+        <DashboardStatCard
+          title="Pending offers"
+          value={String(pendingOffers.length)}
+          icon={Inbox}
+          warn={pendingOffers.length > 0}
+          meter={pendingOffers.length / Math.max(1, pendingOffers.length + assigned.length)}
+          meterLabel="Offers waiting on your accept/decline"
+          href="/offers"
+        />
         <DashboardStatCard
           title="Assigned loads"
           value={String(assigned.length)}

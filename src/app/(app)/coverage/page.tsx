@@ -1,11 +1,14 @@
 import Link from "next/link";
+import { Suspense } from "react";
 import { BookCoverageForm, type CoverageContractOption } from "@/components/BookCoverageForm";
 import { CoverageRequestForm } from "@/components/CoverageRequestForm";
+import { FocusScroll } from "@/components/FocusScroll";
 import { requirePathAccess } from "@/lib/authz";
 import {
   acceptCoverageRequest,
   cancelCoverageRequest,
   declineCoverageRequest,
+  requestCoverageManagerOverride,
 } from "@/lib/actions/coverage";
 import {
   isOnCreditHold,
@@ -68,7 +71,7 @@ export default async function CoveragePage() {
   } else if (!isOps) {
     return (
       <div className="alert alert-warning">
-        <span>Load requests are managed by shippers and Broker Operations.</span>
+        <span>Load requests are managed by customers and Broker Operations.</span>
       </div>
     );
   }
@@ -110,8 +113,26 @@ export default async function CoveragePage() {
     }
   }
 
+  const escalatedRequestIds = new Set<string>();
+  if (isOps && pending.length > 0) {
+    const { data: escalations } = await supabase
+      .from("approval_requests")
+      .select("entity_id")
+      .eq("entity_type", "coverage_request")
+      .eq("status", "pending")
+      .in("request_type", ["credit_hold", "credit_override"])
+      .in(
+        "entity_id",
+        pending.map((r) => r.id),
+      );
+    for (const e of escalations ?? []) escalatedRequestIds.add(e.entity_id);
+  }
+
   return (
     <div className="mx-auto max-w-4xl space-y-6">
+      <Suspense fallback={null}>
+        <FocusScroll />
+      </Suspense>
       <div>
         <h1 className="text-2xl font-bold">
           {isCustomer ? "Request a load" : "Load requests"}
@@ -119,14 +140,14 @@ export default async function CoveragePage() {
         <p className="mt-1 text-sm opacity-70">
           {isCustomer
             ? "Submit a lane on your active contract. Broker Operations reviews credit, approves the request, then assigns a carrier."
-            : "Step 2 — approve or decline shipper requests. Approval is blocked when the customer is on credit hold (past-due AR). Then assign a carrier on Assign carriers."}
+            : "Step 2 — review miles and rates, then approve or decline. Credit holds block brokers — escalate to manager Approvals for override. After approve, assign on Assign carriers."}
         </p>
       </div>
 
       {isOps ? (
         <ol className="flex flex-wrap gap-2 text-sm">
           <li className="rounded-box border border-base-300 bg-base-100 px-3 py-1.5 opacity-70">
-            1. Shipper requests
+            1. Customer requests
           </li>
           <li className="rounded-box border border-primary/40 bg-primary/10 px-3 py-1.5 font-medium">
             2. Approve here (credit check)
@@ -255,6 +276,8 @@ export default async function CoveragePage() {
                           customerName={customerName}
                           pickupDate={r.pickup_date}
                           deliveryDate={r.delivery_date}
+                          pickupLocation={r.pickup_location}
+                          deliveryLocation={r.delivery_location}
                           initialContractId={r.contract_id}
                           initialMiles={r.miles == null ? null : Number(r.miles)}
                           initialCustomerRate={
@@ -270,6 +293,12 @@ export default async function CoveragePage() {
                           pastDue={pastDueByCustomer.get(r.customer_id) ?? 0}
                           onCreditHold={onHold}
                           action={acceptCoverageRequest}
+                          escalateAction={
+                            profile.role === "broker"
+                              ? requestCoverageManagerOverride
+                              : undefined
+                          }
+                          alreadyEscalated={escalatedRequestIds.has(r.id)}
                           contracts={customerContracts}
                         />
                         <details>
@@ -280,7 +309,7 @@ export default async function CoveragePage() {
                               name="note"
                               required
                               minLength={3}
-                              placeholder="Reason for shipper"
+                              placeholder="Reason for customer"
                               className="input input-bordered input-sm"
                             />
                             <button className="btn btn-error btn-sm">Confirm decline</button>

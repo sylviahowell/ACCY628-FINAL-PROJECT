@@ -137,7 +137,7 @@ export function buildExecutiveKpis(input: {
       deltaLabel: `${formatPct(cashDelta)} from last month`,
       tone: cashDelta >= 0 ? "good" : "bad",
       status: cashDelta >= 0 ? "Strong" : "Slower",
-      href: "/payments",
+      href: "/ar?receipts=month",
     },
   ];
 }

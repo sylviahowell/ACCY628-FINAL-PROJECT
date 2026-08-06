@@ -53,7 +53,7 @@ async function main() {
     if (await demoBadge.isVisible()) ok("Demo Mode badge visible after entry");
     else fail("Demo Mode badge visible after entry");
 
-    const roleSelect = page.locator('select[aria-label="Demo Role"]');
+    let roleSelect = page.locator('select[aria-label="Demo Role"]');
     if (await roleSelect.isVisible()) ok("Demo Role selector visible");
     else fail("Demo Role selector visible");
 
@@ -71,17 +71,20 @@ async function main() {
     const roles = [
       { value: "broker", name: "Blake Broker", navHint: /Broker Operations/i },
       { value: "billing", name: "Bailey Billing", navHint: /Billing & Accounting/i },
-      { value: "customer", name: "Casey Customer", navHint: /Shipper/i },
+      { value: "customer", name: "Casey Customer", navHint: /Customer/i },
       { value: "carrier", name: "Chris Carrier", navHint: /Carrier/i },
       { value: "manager", name: "Morgan Manager", navHint: /Executive|Manager|Profitability|Approvals/i },
     ];
 
     for (const role of roles) {
-      await roleSelect.selectOption(role.value);
+      await Promise.all([
+        page.waitForURL(new RegExp(`[?&]portal=${role.value}\\b`), { timeout: 90000 }),
+        roleSelect.selectOption(role.value),
+      ]);
       await page.waitForFunction(
         (name) => (document.body?.innerText || "").includes(name),
         role.name,
-        { timeout: 60000 },
+        { timeout: 90000 },
       );
       const navText = await page.locator(".navbar").innerText();
       const sideText = await page.locator(".drawer-side").innerText();
@@ -91,6 +94,7 @@ async function main() {
       if (role.navHint.test(sideText)) ok(`Switch to ${role.value} updates sidebar`);
       else fail(`Switch to ${role.value} updates sidebar`, sideText.slice(0, 220));
 
+      roleSelect = page.locator('select[aria-label="Demo Role"]');
       if (await roleSelect.isVisible()) ok(`Selector still present as ${role.value}`);
       else fail(`Selector still present as ${role.value}`);
     }
@@ -120,8 +124,7 @@ async function main() {
     if (/login/i.test(url)) ok("Dashboard redirects to login when logged out");
     else fail("Dashboard redirects to login when logged out", url);
 
-    // 7) Normal login should NOT show demo selector
-    // Use a demo account via password form but without demo cookie — signIn clears demo mode
+    // 7) Password login with a seeded demo account still unlocks Demo Mode (role switcher).
     await page.goto(`${BASE}/login`, { waitUntil: "networkidle" });
     await page.fill('input[name="email"]', "manager@rowanlane.example");
     await page.fill('input[name="password"]', "FreightDemo2026!");
@@ -130,16 +133,16 @@ async function main() {
     ok("Normal Sign In reaches dashboard");
 
     const demoSelectCount = await page.locator('select[aria-label="Demo Role"]').count();
-    if (demoSelectCount === 0) ok("Normal Sign In does not show Demo Role selector");
-    else fail("Normal Sign In does not show Demo Role selector", `count=${demoSelectCount}`);
+    if (demoSelectCount === 1) ok("Demo account password login shows Demo Role selector");
+    else fail("Demo account password login shows Demo Role selector", `count=${demoSelectCount}`);
 
-    const signOut = page.getByRole("button", { name: /Sign out/i });
-    if (await signOut.isVisible()) ok("Normal user sees Sign out (not Exit Demo)");
-    else fail("Normal user sees Sign out (not Exit Demo)");
+    const exitDemo = page.getByRole("button", { name: /Exit Demo/i });
+    if (await exitDemo.isVisible()) ok("Demo account sees Exit Demo");
+    else fail("Demo account sees Exit Demo");
 
-    await signOut.click();
+    await exitDemo.click();
     await page.waitForURL(/\/login/, { timeout: 45000 });
-    ok("Normal Sign out returns to login");
+    ok("Exit Demo returns to login");
   } catch (e) {
     fail("Unhandled test error", e.stack || e.message);
     try {

@@ -6,7 +6,8 @@ import { useSearchParams } from "next/navigation";
 /** Scroll to and highlight an element matching ?focus=… (id focus-{value}). */
 export function FocusScroll() {
   const params = useSearchParams();
-  const focus = params.get("focus");
+  // invoice_id on AR scrolls to the record-collection form
+  const focus = params.get("focus") || (params.get("invoice_id") ? "record-payment" : null);
 
   useEffect(() => {
     if (!focus) return;

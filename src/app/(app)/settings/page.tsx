@@ -205,7 +205,7 @@ export default async function SettingsPage() {
           <SettingsCard
             icon={<Building2 className="h-5 w-5" aria-hidden />}
             title="Company of record"
-            description="Shipper profile linked to this portal account. Contact RowanLane to request changes."
+            description="Customer profile linked to this portal account. Contact RowanLane to request changes."
           >
             {customerRecord ? (
               <dl className="divide-y divide-base-300 rounded-lg border border-base-300">

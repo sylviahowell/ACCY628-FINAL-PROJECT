@@ -133,3 +133,18 @@ body {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 }
+
+/* Simulated delayed truck marker on the shipment network map */
+@keyframes rl-sim-truck-pulse {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.55;
+  }
+}
+
+.rl-sim-truck-delayed {
+  animation: rl-sim-truck-pulse 1.6s ease-in-out infinite;
+}

@@ -47,6 +47,20 @@ export function lookupRoutePath(
   return arcFallback(origin, dest, laneIndex);
 }
 
+/** Haversine distance in miles between two points. */
+export function haversineMiles(a: LatLng, b: LatLng): number {
+  const R = 3958.8;
+  const toRad = (d: number) => (d * Math.PI) / 180;
+  const dLat = toRad(b.lat - a.lat);
+  const dLng = toRad(b.lng - a.lng);
+  const lat1 = toRad(a.lat);
+  const lat2 = toRad(b.lat);
+  const h =
+    Math.sin(dLat / 2) ** 2 +
+    Math.cos(lat1) * Math.cos(lat2) * Math.sin(dLng / 2) ** 2;
+  return 2 * R * Math.asin(Math.min(1, Math.sqrt(h)));
+}
+
 /** Cumulative segment lengths (degrees) along a polyline. */
 function pathLengths(path: LatLng[]): { total: number; cum: number[] } {
   const cum = [0];
@@ -58,6 +72,54 @@ function pathLengths(path: LatLng[]): { total: number; cum: number[] } {
     cum.push(total);
   }
   return { total, cum };
+}
+
+/** Path length in statute miles (sum of haversine segments). */
+export function pathLengthMiles(path: LatLng[]): number {
+  let miles = 0;
+  for (let i = 1; i < path.length; i++) {
+    miles += haversineMiles(path[i - 1], path[i]);
+  }
+  return miles;
+}
+
+/** Demo timeline compression: wall-clock vs road-clock (visible motion in a pitch). */
+export const DEMO_GPS_TIME_SCALE = 240;
+
+/**
+ * Highway-realistic motion along a path (origin → dest → origin).
+ * Uses mph + optional demo time scale so a pitch can show motion
+ * while popup still reports the true cruise speed.
+ */
+export function motionAtSpeedMph(
+  path: LatLng[],
+  speedMph: number,
+  nowMs: number,
+  phaseOffsetHours = 0,
+  demoTimeScale = DEMO_GPS_TIME_SCALE,
+): PingPongMotion {
+  const miles = pathLengthMiles(path);
+  if (miles <= 0 || speedMph <= 0) {
+    return { pathT: 0, outbound: true, legProgress: 0 };
+  }
+  const oneWayHours = miles / speedMph;
+  const oneWayMs = (oneWayHours * 3_600_000) / demoTimeScale;
+  return pingPongMotion(
+    nowMs,
+    phaseOffsetHours / Math.max(oneWayHours * 2, 0.01),
+    oneWayMs,
+  );
+}
+
+/** @deprecated Prefer motionAtSpeedMph — path fraction alone counts down on the return leg. */
+export function progressAtSpeedMph(
+  path: LatLng[],
+  speedMph: number,
+  nowMs: number,
+  phaseOffsetHours = 0,
+  demoTimeScale = DEMO_GPS_TIME_SCALE,
+): number {
+  return motionAtSpeedMph(path, speedMph, nowMs, phaseOffsetHours, demoTimeScale).pathT;
 }
 
 /**
@@ -118,17 +180,41 @@ export function simPhaseOffset(seed: string): number {
   return (h >>> 0) / 0xffffffff;
 }
 
+export type PingPongMotion = {
+  /** Fraction along the outbound polyline (0 at origin, 1 at dest). */
+  pathT: number;
+  /** True while driving origin → dest. */
+  outbound: boolean;
+  /**
+   * Progress along the current leg only (always 0→1).
+   * Resets at the turnaround instead of counting down on the return.
+   */
+  legProgress: number;
+};
+
 /**
- * Ping-pong progress 0→1→0 along a shared polyline (origin → dest → origin).
+ * Ping-pong motion along a shared polyline (origin → dest → origin).
  * One-way trip defaults to 60s; round trip is 2×. Uses wall clock so clients stay aligned.
  */
+export function pingPongMotion(
+  nowMs: number = Date.now(),
+  phaseOffset = 0,
+  oneWayMs = 60_000,
+): PingPongMotion {
+  const period = oneWayMs * 2;
+  const shifted = ((nowMs % period) + phaseOffset * period + period) % period;
+  const cycle = shifted / period; // 0→1 over a full round trip
+  const outbound = cycle <= 0.5;
+  const pathT = outbound ? cycle * 2 : 2 - cycle * 2;
+  const legProgress = outbound ? pathT : 1 - pathT;
+  return { pathT, outbound, legProgress };
+}
+
+/** Path fraction 0→1→0 (origin → dest → origin). Prefer pingPongMotion for UI progress. */
 export function pingPongProgress(
   nowMs: number = Date.now(),
   phaseOffset = 0,
   oneWayMs = 60_000,
 ): number {
-  const period = oneWayMs * 2;
-  const shifted = ((nowMs % period) + phaseOffset * period + period) % period;
-  const t = shifted / period; // 0→1 over a full round trip
-  return t <= 0.5 ? t * 2 : 2 - t * 2;
+  return pingPongMotion(nowMs, phaseOffset, oneWayMs).pathT;
 }

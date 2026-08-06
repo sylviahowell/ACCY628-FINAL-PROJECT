@@ -1,0 +1,10 @@
+[
+  { "load_number": "LD-1003", "speed_mph": 62, "phase_hours": 2.4 },
+  { "load_number": "LD-2010-LATE", "speed_mph": 58, "phase_hours": 1.1 },
+  { "load_number": "LD-2022-DISP", "speed_mph": 61, "phase_hours": 4.2 },
+  { "load_number": "LD-1004", "speed_mph": 55, "phase_hours": 0.6 },
+  { "load_number": "LD-GPS-01", "speed_mph": 64, "phase_hours": 0.9 },
+  { "load_number": "LD-GPS-02", "speed_mph": 60, "phase_hours": 1.4 },
+  { "load_number": "LD-GPS-03", "speed_mph": 55, "phase_hours": 3.5 },
+  { "load_number": "LD-GPS-04", "speed_mph": 59, "phase_hours": 0.3 }
+]

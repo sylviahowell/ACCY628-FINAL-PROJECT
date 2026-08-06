@@ -626,3 +626,7 @@ ON CONFLICT (id) DO UPDATE SET
   is_internal = excluded.is_internal,
   author_display_name = excluded.author_display_name,
   author_role = excluded.author_role;
+
+-- Demo GPS fleet (vehicle_positions) — apply migration 20260806160000_vehicle_positions.sql first.
+-- \i story_seed_vehicle_positions.sql
+

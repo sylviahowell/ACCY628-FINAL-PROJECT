@@ -14,12 +14,17 @@ import "leaflet/dist/leaflet.css";
 import { coordKey, lookupCoords, type LatLng } from "@/lib/geo";
 import { formatStatusLabel } from "@/lib/types";
 import {
-  interpolateAlongPath,
+  DEMO_GPS_TIME_SCALE,
   lookupRoutePath,
-  pingPongProgress,
-  simPhaseOffset,
-  simulatedProgress,
 } from "@/lib/route-geometry";
+import { advanceDemoVehiclePositions } from "@/lib/actions/vehicle-positions";
+import {
+  computeDemoPosition,
+  fleetSpecForLoad,
+  isDemoGpsLoad,
+  type VehiclePositionRow,
+} from "@/lib/vehicle-positions";
+import { fetchVehiclePositions } from "@/lib/vehicle-positions-client";
 
 export type MapShipment = {
   id: string;
@@ -49,10 +54,10 @@ type PlottedLane = {
   weight: number;
   opacity: number;
   zRank: number;
-  /** True when this load gets a simulated truck marker. */
+  /** True when this load is in_transit/picked_up (lane styling). */
   simTracking: boolean;
-  /** Schedule-based progress 0→1 for popup only; null if not tracking. */
-  scheduleProgress: number | null;
+  /** Fleet load with vehicle_positions telemetry — only these get truck markers. */
+  demoGps: boolean;
 };
 
 type CityHub = {
@@ -223,6 +228,7 @@ export function ShipmentMap({
           s.delivery_location,
         );
         const simTracking = isSimTracking(s.status);
+        const demoGps = simTracking && isDemoGpsLoad(s.load_number);
         return {
           s,
           origin,
@@ -234,9 +240,7 @@ export function ShipmentMap({
           opacity: style.opacity,
           zRank: style.zRank,
           simTracking,
-          scheduleProgress: simTracking
-            ? simulatedProgress(s.pickup_date, s.promised_delivery_date)
-            : null,
+          demoGps,
         };
       })
       .filter(Boolean) as PlottedLane[];
@@ -254,8 +258,49 @@ export function ShipmentMap({
     [plotted],
   );
 
-  const hasSimMarkers = plotted.some((p) => p.simTracking);
-  const simNow = useSimClock(hasSimMarkers);
+  const hasGpsMarkers = plotted.some((p) => p.demoGps);
+  const simNow = useSimClock(hasGpsMarkers);
+  const [dbPositions, setDbPositions] = useState<Map<string, VehiclePositionRow>>(
+    () => new Map(),
+  );
+  const [gpsDbLive, setGpsDbLive] = useState(false);
+
+  const demoGpsShipments = useMemo(
+    () => plotted.filter((p) => p.demoGps).map((p) => p.s),
+    [plotted],
+  );
+
+  useEffect(() => {
+    let cancelled = false;
+
+    async function syncPositions() {
+      if (demoGpsShipments.length === 0) return;
+      const ids = demoGpsShipments.map((s) => s.id);
+      const advanced = await advanceDemoVehiclePositions(
+        demoGpsShipments.map((s) => ({
+          id: s.id,
+          load_number: s.load_number,
+          origin_city: s.origin_city,
+          origin_state: s.origin_state,
+          dest_city: s.dest_city,
+          dest_state: s.dest_state,
+          pickup_location: s.pickup_location,
+          delivery_location: s.delivery_location,
+        })),
+      );
+      const latest = await fetchVehiclePositions(ids);
+      if (cancelled) return;
+      setDbPositions(latest);
+      setGpsDbLive(Boolean(advanced.ok) || latest.size > 0);
+    }
+
+    void syncPositions();
+    const id = window.setInterval(() => void syncPositions(), 5000);
+    return () => {
+      cancelled = true;
+      window.clearInterval(id);
+    };
+  }, [demoGpsShipments]);
 
   const hubs: CityHub[] = useMemo(() => {
     const map = new Map<string, CityHub>();
@@ -331,7 +376,8 @@ export function ShipmentMap({
           <div>
             <h3 className="card-title text-base">Shipment network map</h3>
             <p className="text-sm opacity-70">
-              Demo highway geometry between hubs · truck icons ping-pong the route (not live GPS)
+              Demo highway geometry · trucks move from vehicle_positions at highway speeds (not live
+              ELD)
             </p>
           </div>
           {exceptionCount > 0 ? (
@@ -513,18 +559,32 @@ export function ShipmentMap({
                 />
               ))}
               {plotted.map((lane) => {
-                if (!lane.simTracking) return null;
-                const phase = simPhaseOffset(lane.s.load_number || lane.s.id);
-                const progress = pingPongProgress(simNow, phase);
-                const pos = interpolateAlongPath(lane.path, progress);
+                if (!lane.demoGps) return null;
+                const fleet = fleetSpecForLoad(lane.s.load_number);
+                if (!fleet) return null;
                 const daysLate = daysPastPromised(lane.s.promised_delivery_date, today);
+                const dbRow = dbPositions.get(lane.s.id);
+                const computed = computeDemoPosition({
+                  path: lane.path,
+                  speedMph: dbRow?.speed_mph ?? fleet.speed_mph,
+                  phaseHours: fleet.phase_hours,
+                  nowMs: simNow,
+                });
+                const recordedMs = dbRow ? Date.parse(dbRow.recorded_at) : NaN;
+                const dbFresh =
+                  dbRow &&
+                  Number.isFinite(recordedMs) &&
+                  simNow - recordedMs < 15_000;
+                const pos = dbFresh
+                  ? { lat: dbRow.lat, lng: dbRow.lng }
+                  : computed.point;
                 return (
                   <CircleMarker
                     key={`truck-${lane.s.id}`}
                     center={[pos.lat, pos.lng]}
                     radius={lane.delayed ? 9 : 8}
                     pathOptions={{
-                      color: lane.delayed ? "#991b1b" : "#0c4a6e",
+                      color: lane.delayed ? "#991b1b" : "#14532d",
                       fillColor: lane.color,
                       fillOpacity: 1,
                       weight: 2.5,
@@ -535,13 +595,16 @@ export function ShipmentMap({
                       <ShipmentPopup
                         s={lane.s}
                         delayed={lane.delayed}
-                        point="Simulated position"
-                        daysLate={daysLate}
-                        progressPct={
-                          lane.scheduleProgress != null
-                            ? Math.round(lane.scheduleProgress * 100)
-                            : undefined
+                        point={
+                          gpsDbLive
+                            ? "Demo GPS position (vehicle_positions)"
+                            : "Demo GPS position (telemetry pending migrate)"
                         }
+                        daysLate={daysLate}
+                        progressPct={Math.round(computed.legProgress * 100)}
+                        speedMph={dbRow?.speed_mph ?? fleet.speed_mph}
+                        coords={pos}
+                        timeScale={DEMO_GPS_TIME_SCALE}
                       />
                     </Popup>
                   </CircleMarker>
@@ -574,8 +637,8 @@ export function ShipmentMap({
               <span className="inline-block h-2 w-2 rounded-full bg-[#0284c7]" /> In transit
             </span>
             <span className="flex items-center gap-1">
-              <span className="inline-block h-2.5 w-2.5 rounded-full border-2 border-[#0c4a6e] bg-[#0284c7]" />{" "}
-              Sim. truck
+              <span className="inline-block h-2.5 w-2.5 rounded-full border-2 border-[#14532d] bg-[#0284c7]" />{" "}
+              Demo GPS
             </span>
             <span className="flex items-center gap-1">
               <span className="inline-block h-2 w-2 rounded-full bg-[#ef4444]" /> Delayed
@@ -583,7 +646,9 @@ export function ShipmentMap({
             <span className="flex items-center gap-1">
               <span className="inline-block h-2 w-2 rounded-full bg-[#22c55e]" /> Delivered
             </span>
-            <span className="w-full opacity-60">Simulated tracking · demo lanes</span>
+            <span className="w-full opacity-60">
+              Demo GPS only · vehicle_positions · highway speeds (timeline compressed for pitch)
+            </span>
           </div>
         </div>
         <p className="text-xs opacity-60">
@@ -591,7 +656,8 @@ export function ShipmentMap({
           {hubs.length === 1 ? "" : "s"}
           {statusFilter === "delayed" ? " · delayed loads only" : ""}
           {statusFilter === "active" ? " · delivered hidden" : ""}. Hollow hubs = pickup; filled =
-          delivery. Routes use cached demo highway geometry — not live ELD/GPS.
+          delivery. Truck markers only for loads in vehicle_positions
+          {gpsDbLive ? " (DB live)" : " (awaiting DB migrate)"} — not live ELD hardware.
         </p>
       </div>
     </div>
@@ -629,12 +695,18 @@ function ShipmentPopup({
   point,
   daysLate,
   progressPct,
+  speedMph,
+  coords,
+  timeScale,
 }: {
   s: MapShipment;
   delayed: boolean;
   point: string;
   daysLate?: number | null;
   progressPct?: number;
+  speedMph?: number;
+  coords?: LatLng;
+  timeScale?: number;
 }) {
   return (
     <div className="min-w-[12rem] text-sm">
@@ -650,7 +722,18 @@ function ShipmentPopup({
           Status: {formatStatusLabel(s.status)}
           {delayed ? " · delayed (past promised delivery)" : ""}
         </li>
-        {progressPct != null ? <li>Schedule progress: ~{progressPct}%</li> : null}
+        {speedMph != null ? (
+          <li>
+            Speed: {speedMph} mph
+            {timeScale != null ? ` · demo clock ${timeScale}×` : ""}
+          </li>
+        ) : null}
+        {coords ? (
+          <li>
+            Lat {coords.lat.toFixed(4)}, Lng {coords.lng.toFixed(4)}
+          </li>
+        ) : null}
+        {progressPct != null ? <li>Route progress: ~{progressPct}%</li> : null}
         <li>Promised delivery: {s.promised_delivery_date ?? "—"}</li>
         {delayed && daysLate != null && daysLate > 0 ? (
           <li>

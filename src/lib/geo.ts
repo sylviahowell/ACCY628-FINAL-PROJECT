@@ -19,14 +19,63 @@ const CITY_COORDS: Record<string, LatLng> = {
   "st. louis, mo": { lat: 38.627, lng: -90.1994 },
 };
 
-function normalizePlace(city?: string | null, state?: string | null, location?: string | null) {
-  if (location?.trim()) {
-    return location.trim().toLowerCase().replace(/\./g, "");
+function scrub(s: string) {
+  return s.trim().toLowerCase().replace(/\./g, "");
+}
+
+/** Candidate place strings: location free-text first, then city/state. */
+function placeCandidates(
+  city?: string | null,
+  state?: string | null,
+  location?: string | null,
+): string[] {
+  const out: string[] = [];
+  if (location?.trim()) out.push(scrub(location));
+  if (city?.trim()) {
+    out.push(scrub(`${city}${state ? `, ${state}` : ""}`));
   }
-  if (city) {
-    return `${city}${state ? `, ${state}` : ""}`.trim().toLowerCase().replace(/\./g, "");
+  return out;
+}
+
+/** Match a scrubbed place string to a canonical CITY_COORDS key. */
+function matchCityKey(raw: string): string | null {
+  if (!raw) return null;
+  if (CITY_COORDS[raw]) {
+    // Prefer dotted-stripped canonical form used by route cache
+    return raw.replace(/\./g, "");
   }
-  return "";
+  const cityOnly = raw.split(",")[0]?.trim();
+  if (!cityOnly) return null;
+  for (const k of Object.keys(CITY_COORDS)) {
+    if (k.startsWith(cityOnly + ",")) return k.replace(/\./g, "");
+  }
+  return null;
+}
+
+/**
+ * Canonical hub key (`city, st`) shared by coords + demo route cache.
+ * Tries pickup/delivery free text, then structured city/state.
+ */
+export function resolvePlaceKey(
+  city?: string | null,
+  state?: string | null,
+  location?: string | null,
+): string | null {
+  for (const candidate of placeCandidates(city, state, location)) {
+    const key = matchCityKey(candidate);
+    if (key) return key;
+  }
+  return null;
+}
+
+/** Reverse-lookup canonical hub key from resolved demo coordinates. */
+export function placeKeyFromCoords(point: LatLng): string | null {
+  for (const [k, v] of Object.entries(CITY_COORDS)) {
+    if (Math.abs(v.lat - point.lat) < 0.001 && Math.abs(v.lng - point.lng) < 0.001) {
+      return k.replace(/\./g, "");
+    }
+  }
+  return null;
 }
 
 export function lookupCoords(
@@ -34,15 +83,9 @@ export function lookupCoords(
   state?: string | null,
   location?: string | null,
 ): LatLng | null {
-  const key = normalizePlace(city, state, location);
+  const key = resolvePlaceKey(city, state, location);
   if (!key) return null;
-  if (CITY_COORDS[key]) return CITY_COORDS[key];
-  // Try city-only match
-  const cityOnly = key.split(",")[0]?.trim();
-  for (const [k, v] of Object.entries(CITY_COORDS)) {
-    if (k.startsWith(cityOnly + ",")) return v;
-  }
-  return null;
+  return CITY_COORDS[key] ?? null;
 }
 
 export function midpoint(a: LatLng, b: LatLng): LatLng {

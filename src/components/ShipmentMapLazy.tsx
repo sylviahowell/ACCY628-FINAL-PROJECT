@@ -8,7 +8,7 @@ const ShipmentMapInner = dynamic(
   {
     ssr: false,
     loading: () => (
-      <div className="card bg-base-100 shadow-sm">
+      <div className="card border border-base-300 bg-base-100 shadow-sm">
         <div className="card-body">
           <div className="skeleton h-8 w-48" />
           <div className="skeleton mt-3 h-[420px] w-full" />

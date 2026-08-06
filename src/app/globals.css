@@ -155,3 +155,83 @@ body {
 .rl-sim-truck-delayed {
   animation: rl-sim-truck-pulse 1.6s ease-in-out infinite;
 }
+
+/* Customer Performance Explorer — executive glass panels */
+.cpe-shell {
+  --cpe-shadow: 0 10px 36px color-mix(in oklab, var(--color-base-content) 7%, transparent);
+  --cpe-shadow-hover: 0 14px 40px color-mix(in oklab, var(--color-base-content) 10%, transparent);
+}
+
+.cpe-hero,
+.cpe-panel,
+.cpe-kpi,
+.cpe-empty,
+.cpe-select {
+  border-radius: 1rem;
+}
+
+.cpe-hero {
+  padding: 1.25rem 1.35rem;
+  background:
+    linear-gradient(
+      135deg,
+      color-mix(in oklab, var(--color-primary) 10%, var(--color-base-100)) 0%,
+      color-mix(in oklab, var(--color-base-100) 88%, transparent) 55%
+    );
+  border: 1px solid color-mix(in oklab, var(--color-base-300) 85%, transparent);
+  box-shadow: var(--cpe-shadow);
+  backdrop-filter: blur(14px);
+}
+
+.cpe-panel,
+.cpe-kpi,
+.cpe-empty {
+  background: color-mix(in oklab, var(--color-base-100) 78%, transparent);
+  border: 1px solid color-mix(in oklab, var(--color-base-300) 80%, transparent);
+  box-shadow: var(--cpe-shadow);
+  backdrop-filter: blur(12px);
+  transition:
+    transform 180ms ease,
+    box-shadow 180ms ease,
+    border-color 180ms ease;
+}
+
+.cpe-panel {
+  padding: 1rem 1.1rem;
+}
+
+.cpe-kpi {
+  padding: 0.85rem 1rem;
+}
+
+.cpe-panel:hover,
+.cpe-kpi:hover {
+  transform: translateY(-2px);
+  box-shadow: var(--cpe-shadow-hover);
+  border-color: color-mix(in oklab, var(--color-primary) 28%, var(--color-base-300));
+}
+
+.cpe-empty {
+  padding: 2.5rem 1.5rem;
+}
+
+.cpe-select {
+  background: color-mix(in oklab, var(--color-base-100) 90%, transparent);
+  box-shadow: var(--cpe-shadow);
+}
+
+.cpe-fade {
+  animation: cpe-fade-in 320ms ease;
+}
+
+@keyframes cpe-fade-in {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+

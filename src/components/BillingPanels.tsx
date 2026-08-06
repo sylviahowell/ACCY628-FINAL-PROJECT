@@ -3,7 +3,7 @@ import type { BillingInsight, UnbilledItem } from "@/lib/collections";
 
 export function BillingInsightsPanel({ insights }: { insights: BillingInsight[] }) {
   return (
-    <div className="card bg-base-100 shadow-sm">
+    <div className="card border border-base-300 bg-base-100 shadow-sm">
       <div className="card-body">
         <h3 className="card-title text-base">Billing insights</h3>
         <p className="text-sm opacity-70">
@@ -38,7 +38,7 @@ export function UnbilledQueuePanel({
   empty: string;
 }) {
   return (
-    <div className="card bg-base-100 shadow-sm">
+    <div className="card border border-base-300 bg-base-100 shadow-sm">
       <div className="card-body">
         <h3 className="card-title text-base">
           {title}{" "}

@@ -6,7 +6,9 @@ import {
   BarChart,
   CartesianGrid,
   Cell,
+  ComposedChart,
   Legend,
+  Line,
   Pie,
   PieChart,
   ResponsiveContainer,
@@ -81,12 +83,38 @@ function useChartReady() {
   );
 }
 
-function ChartFrame({ children }: { children: ReactNode }) {
+function ChartFrame({
+  children,
+  className = "h-64 w-full",
+}: {
+  children: ReactNode;
+  className?: string;
+}) {
   const ready = useChartReady();
   if (!ready) {
-    return <div className="h-64 w-full" aria-hidden />;
+    return <div className={className} aria-hidden />;
   }
-  return <div className="h-64 w-full">{children}</div>;
+  return <div className={className}>{children}</div>;
+}
+
+function tooltipStyle() {
+  return {
+    background: "var(--color-base-100)",
+    borderColor: "var(--color-base-300)",
+    color: "var(--color-base-content)",
+  };
+}
+
+function stackPalette(colors: ChartColors): string[] {
+  return [
+    colors.primary,
+    colors.accent,
+    colors.secondary,
+    colors.success,
+    colors.warning,
+    colors.error,
+    colors.muted,
+  ];
 }
 
 export function MonthlyBars({
@@ -113,11 +141,7 @@ export function MonthlyBars({
           />
           <Tooltip
             formatter={(value) => money(Number(value ?? 0))}
-            contentStyle={{
-              background: "var(--color-base-100)",
-              borderColor: "var(--color-base-300)",
-              color: "var(--color-base-content)",
-            }}
+            contentStyle={tooltipStyle()}
           />
           <Bar
             dataKey={dataKey ?? "value"}
@@ -137,14 +161,7 @@ export function StatusPie({
   data: { name: string; value: number }[];
 }) {
   const colors = useChartColors();
-  const palette = [
-    colors.primary,
-    colors.secondary,
-    colors.accent,
-    colors.success,
-    colors.warning,
-    colors.error,
-  ];
+  const palette = stackPalette(colors);
   return (
     <ChartFrame>
       <ResponsiveContainer width="100%" height="100%">
@@ -162,11 +179,7 @@ export function StatusPie({
           </Pie>
           <Tooltip
             formatter={(value) => money(Number(value ?? 0))}
-            contentStyle={{
-              background: "var(--color-base-100)",
-              borderColor: "var(--color-base-300)",
-              color: "var(--color-base-content)",
-            }}
+            contentStyle={tooltipStyle()}
           />
           <Legend />
         </PieChart>
@@ -203,14 +216,147 @@ export function HorizontalBars({
           />
           <Tooltip
             formatter={(value) => money(Number(value ?? 0))}
-            contentStyle={{
-              background: "var(--color-base-100)",
-              borderColor: "var(--color-base-300)",
-              color: "var(--color-base-content)",
-            }}
+            contentStyle={tooltipStyle()}
           />
           <Bar dataKey="value" name={name} fill={colors.accent} radius={[0, 4, 4, 0]} />
         </BarChart>
+      </ResponsiveContainer>
+    </ChartFrame>
+  );
+}
+
+/** Stacked monthly margin by customer + total profit line. */
+export function ProfitContributionChart({
+  data,
+  seriesKeys,
+}: {
+  data: Array<Record<string, string | number> & { month: string; total: number }>;
+  seriesKeys: string[];
+}) {
+  const colors = useChartColors();
+  const palette = stackPalette(colors);
+
+  return (
+    <ChartFrame className="h-80 w-full">
+      <ResponsiveContainer width="100%" height="100%">
+        <ComposedChart data={data} margin={{ top: 8, right: 12, left: 4, bottom: 0 }}>
+          <CartesianGrid strokeDasharray="3 3" stroke={colors.muted} opacity={0.25} />
+          <XAxis
+            dataKey="month"
+            stroke={colors.content}
+            tick={{ fill: colors.content, fontSize: 12 }}
+          />
+          <YAxis
+            stroke={colors.content}
+            width={84}
+            tick={{ fill: colors.content, fontSize: 11 }}
+            tickFormatter={(v) => money(Number(v))}
+          />
+          <Tooltip
+            formatter={(value, name) => [money(Number(value ?? 0)), String(name)]}
+            contentStyle={tooltipStyle()}
+          />
+          <Legend />
+          {seriesKeys.map((key, i) => (
+            <Bar
+              key={key}
+              dataKey={key}
+              name={key}
+              stackId="margin"
+              fill={palette[i % palette.length]}
+              radius={i === seriesKeys.length - 1 ? [4, 4, 0, 0] : [0, 0, 0, 0]}
+            />
+          ))}
+          <Line
+            type="monotone"
+            dataKey="total"
+            name="Total profit"
+            stroke={colors.secondary}
+            strokeWidth={2.5}
+            dot={{ r: 3, fill: colors.secondary }}
+            activeDot={{ r: 5 }}
+          />
+        </ComposedChart>
+      </ResponsiveContainer>
+    </ChartFrame>
+  );
+}
+
+/** Monthly revenue & COGS bars with margin % on a secondary axis. */
+export function MonthlyEconomicsChart({
+  data,
+}: {
+  data: {
+    month: string;
+    revenue: number;
+    cogs: number;
+    profit: number;
+    marginPct: number;
+  }[];
+}) {
+  const colors = useChartColors();
+
+  return (
+    <ChartFrame className="h-80 w-full">
+      <ResponsiveContainer width="100%" height="100%">
+        <ComposedChart data={data} margin={{ top: 8, right: 16, left: 4, bottom: 0 }}>
+          <CartesianGrid strokeDasharray="3 3" stroke={colors.muted} opacity={0.25} />
+          <XAxis
+            dataKey="month"
+            stroke={colors.content}
+            tick={{ fill: colors.content, fontSize: 12 }}
+          />
+          <YAxis
+            yAxisId="money"
+            stroke={colors.content}
+            width={84}
+            tick={{ fill: colors.content, fontSize: 11 }}
+            tickFormatter={(v) => money(Number(v))}
+          />
+          <YAxis
+            yAxisId="pct"
+            orientation="right"
+            stroke={colors.content}
+            width={48}
+            tick={{ fill: colors.content, fontSize: 11 }}
+            tickFormatter={(v) => `${Number(v)}%`}
+          />
+          <Tooltip
+            formatter={(value, name) => {
+              const label = String(name);
+              if (label === "Margin %") {
+                return [`${Number(value ?? 0).toFixed(1)}%`, label];
+              }
+              return [money(Number(value ?? 0)), label];
+            }}
+            contentStyle={tooltipStyle()}
+          />
+          <Legend />
+          <Bar
+            yAxisId="money"
+            dataKey="revenue"
+            name="Revenue"
+            fill={colors.primary}
+            radius={[4, 4, 0, 0]}
+          />
+          <Bar
+            yAxisId="money"
+            dataKey="cogs"
+            name="COGS"
+            fill={colors.warning}
+            radius={[4, 4, 0, 0]}
+          />
+          <Line
+            yAxisId="pct"
+            type="monotone"
+            dataKey="marginPct"
+            name="Margin %"
+            stroke={colors.success}
+            strokeWidth={2.5}
+            dot={{ r: 3, fill: colors.success }}
+            activeDot={{ r: 5 }}
+          />
+        </ComposedChart>
       </ResponsiveContainer>
     </ChartFrame>
   );

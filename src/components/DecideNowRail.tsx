@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import { useState } from "react";
+import { EmptyState } from "@/components/EmptyState";
 import type { DecideNowItem, DecideNowTone } from "@/lib/decide-now";
 
 export type { DecideNowItem };
@@ -21,7 +22,19 @@ function compareUrgency(a: DecideNowItem, b: DecideNowItem): number {
   return b.score - a.score;
 }
 
-export function DecideNowRail({ items }: { items: DecideNowItem[] }) {
+export function DecideNowRail({
+  items,
+  title = "Needs attention",
+  subtitle = "Exceptions for executive review — ranked by urgency.",
+  emptyTitle = "Nothing urgent",
+  emptyDescription = "Network looks healthy — no ranked exceptions right now.",
+}: {
+  items: DecideNowItem[];
+  title?: string;
+  subtitle?: string;
+  emptyTitle?: string;
+  emptyDescription?: string;
+}) {
   const [sortOrder, setSortOrder] = useState<SortOrder>("urgent-desc");
   const count = items.length;
 
@@ -41,7 +54,7 @@ export function DecideNowRail({ items }: { items: DecideNowItem[] }) {
         <div className="flex flex-wrap items-start justify-between gap-3">
           <div className="min-w-0 space-y-1">
             <div className="flex flex-wrap items-center gap-2">
-              <h2 className="text-lg font-bold tracking-tight">Needs attention</h2>
+              <h2 className="text-lg font-bold tracking-tight">{title}</h2>
               <span
                 className={`badge badge-sm ${
                   count === 0 ? "badge-success" : "badge-warning"
@@ -50,9 +63,7 @@ export function DecideNowRail({ items }: { items: DecideNowItem[] }) {
                 {count === 0 ? "All clear" : `${count} open`}
               </span>
             </div>
-            <p className="text-sm opacity-70">
-              Exceptions for executive review — ranked by urgency.
-            </p>
+            <p className="text-sm opacity-70">{subtitle}</p>
           </div>
 
           {count > 0 ? (
@@ -74,9 +85,7 @@ export function DecideNowRail({ items }: { items: DecideNowItem[] }) {
         </div>
 
         {count === 0 ? (
-          <p className="rounded-box bg-success/10 px-3 py-2 text-sm">
-            Nothing urgent — network looks healthy.
-          </p>
+          <EmptyState title={emptyTitle} description={emptyDescription} />
         ) : (
           <ul className="space-y-2">
             {sorted.map((item, index) => {

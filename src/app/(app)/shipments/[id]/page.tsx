@@ -19,6 +19,10 @@ import {
 import { PodUploadForm } from "@/components/PodUploadForm";
 import { ShipmentJournalStrip } from "@/components/ShipmentJournalStrip";
 import {
+  buildFollowTheCashSteps,
+  FollowTheCashRail,
+} from "@/components/FollowTheCashRail";
+import {
   buildAccountingEntries,
   filterEntriesForShipment,
 } from "@/lib/accounting-entries";
@@ -624,6 +628,34 @@ export default async function ShipmentDetailPage({
             ) : null}
           </div>
         </div>
+      ) : null}
+
+      {showLoadJournals ? (
+        <FollowTheCashRail
+          loadNumber={s.load_number}
+          steps={buildFollowTheCashSteps({
+            hasPod,
+            delivered: ["delivered", "completed"].includes(s.status),
+            recognized: loadJournalEntries.some((e) => e.type === "recognize"),
+            billed,
+            invoiceId: primaryInvoice?.id ?? null,
+            invoiceNumber: primaryInvoice?.invoice_number ?? null,
+            invoiceBalance: primaryInvoice
+              ? Math.max(
+                  0,
+                  Number(primaryInvoice.total) - Number(primaryInvoice.amount_paid),
+                )
+              : 0,
+            invoiceStatus: primaryInvoice?.status ?? null,
+            cashCollected: (loadPayments ?? [])
+              .filter((p) => !(p.method ?? "").toLowerCase().includes("write_off"))
+              .reduce((sum, p) => sum + Number(p.amount), 0),
+            wroteOff: (loadPayments ?? []).some((p) =>
+              (p.method ?? "").toLowerCase().includes("write_off"),
+            ),
+            journalCount: loadJournalEntries.length,
+          })}
+        />
       ) : null}
 
       {canOperate && isDelayed && isOperations(profile.role) ? (

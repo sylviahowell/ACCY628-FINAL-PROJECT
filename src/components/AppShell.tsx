@@ -426,9 +426,6 @@ export function AppShell({
               <RowanLaneMark size={42} />
               <div className="min-w-0">
                 <p className="font-brand text-xl font-bold text-primary">RowanLane</p>
-                <p className="hidden text-xs font-medium tracking-wide text-base-content/50 sm:block">
-                  Contract to cash
-                </p>
               </div>
             </Link>
             <GlobalSearch placeholder={searchPlaceholderForRole(profile.role)} />

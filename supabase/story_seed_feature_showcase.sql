@@ -545,7 +545,9 @@ ON CONFLICT (id) DO UPDATE SET
   resolved_at = excluded.resolved_at,
   updated_at = excluded.updated_at;
 
-INSERT INTO public.support_ticket_messages (id, ticket_id, author_id, body, is_internal, created_at)
+INSERT INTO public.support_ticket_messages (
+  id, ticket_id, author_id, body, is_internal, created_at, author_display_name, author_role
+)
 VALUES
 (
   'cccccccc-cccc-cccc-cccc-cccccccccc01',
@@ -553,7 +555,9 @@ VALUES
   'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaa3',
   'LD-1003 looks delayed past the promised delivery. Can ops confirm a revised ETA for our DC?',
   false,
-  now() - interval '6 hours'
+  now() - interval '6 hours',
+  'Casey Customer',
+  'customer'
 ),
 (
   'cccccccc-cccc-cccc-cccc-cccccccccc02',
@@ -561,7 +565,9 @@ VALUES
   'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaa4',
   'Our drivers are uploading POD photos but the portal still shows Needs POD. What file types do you accept?',
   false,
-  now() - interval '2 days'
+  now() - interval '2 days',
+  'Chris Carrier',
+  'carrier'
 ),
 (
   'cccccccc-cccc-cccc-cccc-cccccccccc03',
@@ -569,7 +575,9 @@ VALUES
   'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaa2',
   'JPG or PNG under 10MB works. Re-upload from Documents → the load — if it still fails, reply here with the load number.',
   false,
-  now() - interval '1 day'
+  now() - interval '1 day',
+  'Blake Broker',
+  'broker'
 ),
 (
   'cccccccc-cccc-cccc-cccc-cccccccccc04',
@@ -577,7 +585,9 @@ VALUES
   'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaa2',
   'Internal: Prairie Haulers often hits mobile compression — watch for HEIC rejects.',
   true,
-  now() - interval '1 day'
+  now() - interval '1 day',
+  'Blake Broker',
+  'broker'
 ),
 (
   'cccccccc-cccc-cccc-cccc-cccccccccc05',
@@ -585,7 +595,9 @@ VALUES
   'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaa3',
   'Is there an after-hours line for emergency freight issues?',
   false,
-  now() - interval '5 days'
+  now() - interval '5 days',
+  'Casey Customer',
+  'customer'
 ),
 (
   'cccccccc-cccc-cccc-cccc-cccccccccc06',
@@ -593,8 +605,12 @@ VALUES
   'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaa2',
   'Yes — after 6pm CT call (312) 555-0199 and select option 1 for on-call ops. Tickets submitted here are monitored Mon–Fri 8am–6pm CT.',
   false,
-  now() - interval '3 days'
+  now() - interval '3 days',
+  'Blake Broker',
+  'broker'
 )
 ON CONFLICT (id) DO UPDATE SET
   body = excluded.body,
-  is_internal = excluded.is_internal;
+  is_internal = excluded.is_internal,
+  author_display_name = excluded.author_display_name,
+  author_role = excluded.author_role;

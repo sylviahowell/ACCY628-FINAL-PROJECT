@@ -79,6 +79,15 @@ type AlertSources = {
     delivery_location: string;
     customers?: { name?: string } | { name?: string }[] | null;
   }[];
+  supportTickets?: {
+    id: string;
+    ticket_number: string;
+    subject: string;
+    status: string;
+    priority: string;
+    customer_id: string | null;
+    carrier_id: string | null;
+  }[];
   today: string;
 };
 
@@ -323,6 +332,41 @@ export function buildAlerts(src: AlertSources): AppAlert[] {
       detectedAt: src.today,
       roles: ["manager", "broker"],
     });
+  }
+
+  const supportTickets = (src.supportTickets ?? []).filter(
+    (t) => t.status === "open" || t.status === "pending",
+  );
+  if (supportTickets.length > 0) {
+    const highCount = supportTickets.filter((t) => t.priority === "high").length;
+    alerts.push({
+      id: "support-queue",
+      severity: highCount > 0 ? "warning" : "info",
+      title: "Support tickets waiting",
+      reason:
+        highCount > 0
+          ? `${supportTickets.length} open/pending · ${highCount} high priority`
+          : `${supportTickets.length} open or pending ticket${supportTickets.length === 1 ? "" : "s"}`,
+      action: "Review and reply in Support inbox",
+      href: "/support",
+      related: "Support",
+      detectedAt: src.today,
+      roles: ["manager", "broker", "billing"],
+    });
+
+    for (const t of supportTickets) {
+      alerts.push({
+        id: `support-ticket-${t.id}`,
+        severity: t.priority === "high" ? "warning" : "info",
+        title: `Support ${t.ticket_number}`,
+        reason: t.subject,
+        action: "Open ticket thread",
+        href: `/support/${t.id}`,
+        related: t.ticket_number,
+        detectedAt: src.today,
+        roles: ["customer", "carrier"],
+      });
+    }
   }
 
   return alerts;

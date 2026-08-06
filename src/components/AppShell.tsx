@@ -371,31 +371,31 @@ export async function AppShell({
     <div className="drawer lg:drawer-open min-h-screen bg-base-200">
       <input id="app-drawer" type="checkbox" className="drawer-toggle" />
       <div className="drawer-content flex flex-col">
-        <div className="navbar min-h-16 flex-wrap items-center gap-x-3 gap-y-3 border-b border-base-300 bg-base-100 px-3 py-2 sm:px-4">
+        <div className="navbar min-h-16 flex-wrap gap-y-2 border-b border-base-300 bg-base-100 px-3 py-2 sm:px-4">
           <div className="flex-none lg:hidden">
             <label htmlFor="app-drawer" className="btn btn-square btn-ghost">
               <Building2 className="h-5 w-5" />
             </label>
           </div>
-          <div className="flex min-w-0 flex-1 basis-[min(100%,18rem)] items-center gap-3 sm:gap-4">
+          <div className="flex min-w-0 flex-1 items-center gap-3 sm:gap-4">
             <div className="flex shrink-0 items-center gap-2">
               <RowanLaneMark size={34} />
               <div className="min-w-0">
                 <p className="text-lg font-bold tracking-tight text-primary">RowanLane</p>
-                <p className="hidden text-xs opacity-60 xl:block">
+                <p className="hidden text-xs opacity-60 sm:block">
                   Freight Brokerage & Logistics Management System
                 </p>
               </div>
             </div>
             <GlobalSearch placeholder={searchPlaceholderForRole(profile.role)} />
           </div>
-          <div className="flex min-w-0 shrink-0 grow basis-auto items-center justify-end gap-2 sm:gap-3">
+          <div className="flex w-full flex-none flex-col items-stretch gap-2 sm:ml-auto sm:w-auto sm:items-end lg:flex-row lg:items-center lg:gap-3">
             {showDemoSelector ? (
               <DemoRoleSelector activeRole={profile.role} />
             ) : null}
 
-            <div className="flex shrink-0 items-center justify-end gap-2">
-              <div className="hidden text-right text-sm lg:block">
+            <div className="flex items-center justify-end gap-2">
+              <div className="hidden text-right text-sm sm:block">
                 <p className="font-medium">{profile.full_name}</p>
                 <p className="badge badge-outline badge-sm">{roleDisplay}</p>
               </div>

@@ -202,7 +202,7 @@ function HeatmapBody({
     <div
       id="focus-margin-leaderboard"
       data-focus="margin-leaderboard"
-      className="card bg-base-100 shadow-sm transition"
+      className="card border border-base-300 bg-base-100 shadow-sm transition"
     >
       <div className="card-body gap-3">
         <div className="flex flex-wrap items-end justify-between gap-3">

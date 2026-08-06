@@ -9,7 +9,7 @@ function priorityBadge(p: CarrierTask["priority"]) {
 
 export function CarrierTaskList({ tasks }: { tasks: CarrierTask[] }) {
   return (
-    <div className="card bg-base-100 shadow-sm">
+    <div className="card border border-base-300 bg-base-100 shadow-sm">
       <div className="card-body gap-2">
         <h3 className="card-title text-base">My task list</h3>
         <p className="text-sm opacity-70">

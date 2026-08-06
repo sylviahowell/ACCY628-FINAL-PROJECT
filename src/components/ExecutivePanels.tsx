@@ -153,7 +153,7 @@ export function BusinessInsightsPanel({
   }[];
 }) {
   return (
-    <div className="card bg-base-100 shadow-sm">
+    <div className="card border border-base-300 bg-base-100 shadow-sm">
       <div className="card-body">
         <h3 className="card-title text-base">Business Insights</h3>
         <p className="text-sm opacity-70">

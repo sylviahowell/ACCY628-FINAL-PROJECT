@@ -1,3 +1,5 @@
+import { money } from "@/lib/types";
+
 export type BrokerPriority = "high" | "medium" | "low";
 
 export type BrokerTask = {
@@ -231,7 +233,7 @@ export function buildBrokerTasks(input: {
       deadline: null,
       status: "pending_accessorial",
       priority: Number(c.amount) >= 250 ? "high" : "medium",
-      action: `Waiting on manager — ${c.description} ($${Number(c.amount).toFixed(0)})`,
+      action: `Waiting on manager — ${c.description} (${money(c.amount)})`,
       category: "accessorial",
       createdBy: s.created_by,
       href: `/shipments/${s.id}`,

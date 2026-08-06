@@ -12,6 +12,7 @@ import { CustomerFriendlyStatusCard } from "@/components/ShipmentHealthCard";
 import { ProfitabilityHeatmap } from "@/components/ProfitabilityHeatmap";
 import { ShipmentMapLazy } from "@/components/ShipmentMapLazy";
 import { DecideNowRail } from "@/components/DecideNowRail";
+import { EmptyState } from "@/components/EmptyState";
 import { HorizontalBars, MonthlyBars, StatusPie } from "@/components/Charts";
 import { requirePathAccess } from "@/lib/authz";
 import { bucketByMonth } from "@/lib/analytics";
@@ -52,7 +53,7 @@ import {
 import { computeShipmentHealth } from "@/lib/shipment-health";
 import { createClient } from "@/lib/supabase/server";
 import { sanitizeDemoText } from "@/lib/display-text";
-import { money, statusBadge } from "@/lib/types";
+import { money, statusBadge, formatStatusLabel } from "@/lib/types";
 
 export default async function DashboardPage() {
   const profile = await requirePathAccess("/dashboard");
@@ -209,9 +210,6 @@ export default async function DashboardPage() {
   const ar = invList.reduce(
     (s, i) => s + Math.max(0, Number(i.total) - Number(i.amount_paid)),
     0,
-  );
-  const openInvoices = invList.filter((i) =>
-    ["pending", "sent", "partial", "overdue", "disputed"].includes(i.status),
   );
   const pastDue = invList.filter((i) => {
     const bal = Number(i.total) - Number(i.amount_paid);
@@ -765,58 +763,92 @@ export default async function DashboardPage() {
         };
       });
 
-    const watchActions = [
+    const watchActionItems = [
       ...(pendingCoverageCount
         ? [
             {
-              title: `${pendingCoverageCount} shipper coverage request(s)`,
-              action: "Book a load from the request, then assign from scorecards",
+              id: "broker-coverage",
+              title: `${pendingCoverageCount} coverage request(s)`,
+              metric: String(pendingCoverageCount),
+              metricKind: "count" as const,
+              metricUnit: pendingCoverageCount === 1 ? "request" : "requests",
+              detail: "Book a load from the request, then assign from scorecards",
               href: "/coverage",
+              tone: "warning" as const,
+              cta: "Open",
+              score: pendingCoverageCount * 50_000,
             },
           ]
         : []),
       ...(stats.delayed
         ? [
             {
+              id: "broker-delayed",
               title: `${stats.delayed} delayed load(s)`,
-              action: "Call carriers for ETAs and notify customers",
+              metric: String(stats.delayed),
+              metricKind: "count" as const,
+              metricUnit: stats.delayed === 1 ? "load" : "loads",
+              detail: "Call carriers for ETAs and notify customers",
               href: "/warnings?severity=critical",
+              tone: "error" as const,
+              cta: "Open",
+              score: stats.delayed * 80_000,
             },
           ]
         : []),
       ...(stats.unassigned
         ? [
             {
+              id: "broker-unassigned",
               title: `${stats.unassigned} unassigned load(s)`,
-              action: "Cover with a Preferred / Approved carrier from scorecards",
+              metric: String(stats.unassigned),
+              metricKind: "count" as const,
+              metricUnit: stats.unassigned === 1 ? "load" : "loads",
+              detail: "Cover with a Preferred / Approved carrier from scorecards",
               href: "/shipments?filter=unassigned",
+              tone: "warning" as const,
+              cta: "Open",
+              score: stats.unassigned * 60_000,
             },
           ]
         : []),
       ...(stats.accessorial
         ? [
             {
-              title: `${stats.accessorial} accessorial(s) awaiting manager approval`,
-              action: "Escalate to a manager — only managers can approve or reject",
+              id: "broker-accessorial",
+              title: `${stats.accessorial} accessorial(s) awaiting approval`,
+              metric: String(stats.accessorial),
+              metricKind: "count" as const,
+              metricUnit: stats.accessorial === 1 ? "charge" : "charges",
+              detail: "Escalate to a manager — only managers can approve or reject",
               href: "/warnings?severity=info",
+              tone: "info" as const,
+              cta: "Open",
+              score: stats.accessorial * 30_000,
             },
           ]
         : []),
       ...(scorecards.filter((c) => c.tier === "Watch List" || c.tier === "Suspended").length
         ? [
             {
+              id: "broker-carrier-watch",
               title: "Carrier insurance or performance watch",
-              action: "Review Watch List / Suspended carriers before booking",
+              metric: String(
+                scorecards.filter((c) => c.tier === "Watch List" || c.tier === "Suspended")
+                  .length,
+              ),
+              metricKind: "count" as const,
+              metricUnit: "carriers",
+              detail: "Review Watch List / Suspended carriers before booking",
               href: "/carriers",
+              tone: "warning" as const,
+              cta: "Open",
+              score: 40_000,
             },
           ]
         : []),
-      {
-        title: "Risk & Credit review",
-        action: "Check customer credit utilization and carrier insurance expiry",
-        href: "/risk",
-      },
     ];
+    const brokerDecideNow = rankDecideNowItems(watchActionItems, 5);
 
     return (
       <div className="space-y-6">
@@ -840,7 +872,7 @@ export default async function DashboardPage() {
             </div>
           }
         />
-        <div className="rounded-box border border-primary/20 bg-base-100 px-4 py-3 text-sm shadow-sm">
+        <div className="rounded-box border border-base-300 bg-base-100 px-4 py-3 text-sm shadow-sm">
           <p className="font-semibold">Coverage process</p>
           <ol className="mt-1 list-decimal space-y-0.5 pl-5 opacity-80">
             <li>Shipper submits a coverage request (lane + dates).</li>
@@ -885,33 +917,13 @@ export default async function DashboardPage() {
           />
         </div>
 
-        {watchActions.length > 0 ? (
-          <Panel title="Recommended actions">
-            <ul className="space-y-2">
-              {watchActions.slice(0, 3).map((w, i) => (
-                <li
-                  key={`${w.href}-${w.title}-${i}`}
-                  className="flex flex-wrap items-center justify-between gap-2 rounded-box border border-warning/30 bg-warning/10 px-3 py-2"
-                >
-                  <div>
-                    <p className="font-medium text-sm">{w.title}</p>
-                    <p className="text-xs opacity-70">{w.action}</p>
-                  </div>
-                  <Link href={w.href} className="btn btn-warning btn-xs">
-                    Open
-                  </Link>
-                </li>
-              ))}
-            </ul>
-            <Link href="/warnings" className="btn btn-ghost btn-sm mt-2">
-              Full warning center
-            </Link>
-          </Panel>
-        ) : (
-          <div className="alert alert-success">
-            <span>No high-priority broker exceptions right now. Check the work queue for today&apos;s tasks.</span>
-          </div>
-        )}
+        <DecideNowRail
+          items={brokerDecideNow}
+          title="Needs attention"
+          subtitle="Coverage, delays, and carrier exceptions — ranked by urgency."
+          emptyTitle="No high-priority broker exceptions"
+          emptyDescription="Check the work queue for today&apos;s tasks."
+        />
 
         <BrokerTaskBoard tasks={brokerTasks} profileId={profile.id} today={today} />
         <ShipmentMapLazy shipments={mapShipments} today={today} />
@@ -1002,11 +1014,6 @@ export default async function DashboardPage() {
     const apOpenBilling = openApBalance(carrierBills ?? []);
     const apAgingBilling = computePayableAging(carrierBills ?? [], today);
     const apAgingChart = agingChartData(apAgingBilling);
-    const apPastDueBilling =
-      apAgingBilling.d1_30 +
-      apAgingBilling.d31_60 +
-      apAgingBilling.d61_90 +
-      apAgingBilling.d90_plus;
 
     const payableWorklist = buildPayableWorklist({
       bills: (carrierBills ?? []).map((b) => ({
@@ -1043,37 +1050,19 @@ export default async function DashboardPage() {
             </div>
           }
         />
-        <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
+        <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
+          <Stat
+            title="Delivered but unbilled"
+            value={String(ready.length)}
+            warn={ready.length > 0}
+            href="/shipments?filter=ready-to-bill"
+          />
           <Stat title="Total AR" value={money(ar)} href="/ar" />
-          <Stat title="Current AR" value={money(aging.current)} href="/ar?filter=current" />
           <Stat
-            title="1–30 days past due"
-            value={money(aging.d1_30)}
-            warn={aging.d1_30 > 0}
+            title="Past-due AR"
+            value={money(aging.d1_30 + aging.d31_60 + aging.d61_90 + aging.d90_plus)}
+            warn={aging.d1_30 + aging.d31_60 + aging.d61_90 + aging.d90_plus > 0}
             href="/ar?filter=d1_30"
-          />
-          <Stat
-            title="31–60 days past due"
-            value={money(aging.d31_60)}
-            warn={aging.d31_60 > 0}
-            href="/ar?filter=d31_60"
-          />
-          <Stat
-            title="61–90 days past due"
-            value={money(aging.d61_90)}
-            warn={aging.d61_90 > 0}
-            href="/ar?filter=d61_90"
-          />
-          <Stat
-            title="More than 90 days"
-            value={money(aging.d90_plus)}
-            warn={aging.d90_plus > 0}
-            href="/ar?filter=d90_plus"
-          />
-          <Stat
-            title="Cash received today"
-            value={money(paidToday)}
-            href="/payments?filter=today"
           />
           <Stat
             title="Cash received this month"
@@ -1082,33 +1071,10 @@ export default async function DashboardPage() {
           />
           <Stat title="Open AP" value={money(apOpenBilling)} warn={apOpenBilling > 0} href="/ap" />
           <Stat
-            title="AP past due"
-            value={money(apPastDueBilling)}
-            warn={apPastDueBilling > 0}
-            href="/ap"
-          />
-          <Stat
-            title="Delivered but unbilled"
-            value={String(ready.length)}
-            warn={ready.length > 0}
-            href="/shipments?filter=ready-to-bill"
-          />
-          <Stat
-            title="Awaiting supporting docs"
-            value={String(awaitingDocs.length)}
-            warn={awaitingDocs.length > 0}
-            href="/shipments?filter=awaiting-docs"
-          />
-          <Stat
             title="Disputed invoice balance"
             value={money(disputedBalance)}
             warn={disputedBalance > 0}
             href="/disputes?filter=open"
-          />
-          <Stat
-            title="Open invoices"
-            value={String(openInvoices.length)}
-            href="/invoices?filter=open"
           />
         </div>
 
@@ -1142,11 +1108,14 @@ export default async function DashboardPage() {
 
         <Panel title="Open billing disputes">
           {openDisputes.length === 0 ? (
-            <p className="text-sm opacity-70">No open disputes.</p>
+            <EmptyState
+              title="No open disputes"
+              description="Disputes will appear here when customers contest charges."
+            />
           ) : (
             <ul className="space-y-2 text-sm">
               {openDisputes.map((d) => (
-                <li key={d.id} className="rounded-box bg-warning/15 p-3">
+                <li key={d.id} className="rounded-box border border-warning/30 bg-warning/10 p-3">
                   {sanitizeDemoText(d.reason)} — {money(d.amount_disputed)}
                 </li>
               ))}
@@ -1188,12 +1157,18 @@ export default async function DashboardPage() {
       return { s, friendly };
     });
 
-    const attention = [
+    const attentionItems = [
       ...pendingCoverage.slice(0, 2).map((r) => ({
-        key: `coverage-${r.id}`,
+        id: `coverage-${r.id}`,
         title: "Coverage request pending",
+        metric: "1",
+        metricKind: "count" as const,
+        metricUnit: "request",
         detail: `${r.pickup_location} → ${r.delivery_location}`,
         href: "/coverage",
+        tone: "warning" as const,
+        cta: "Open",
+        score: 50_000,
       })),
       ...current
         .filter(
@@ -1203,24 +1178,41 @@ export default async function DashboardPage() {
             !["delivered", "completed"].includes(s.status),
         )
         .map((s) => ({
-          key: `delay-${s.id}`,
+          id: `delay-${s.id}`,
           title: `${s.load_number} is delayed`,
+          metric: "1",
+          metricKind: "count" as const,
+          metricUnit: "load",
           detail: "Expected delivery date has passed",
           href: `/shipments/${s.id}`,
+          tone: "error" as const,
+          cta: "Open",
+          score: 80_000,
         })),
       ...overdueMine.slice(0, 3).map((i) => ({
-        key: `overdue-${i.id}`,
+        id: `overdue-${i.id}`,
         title: `${i.invoice_number} is past due`,
-        detail: `Balance ${money(Number(i.total) - Number(i.amount_paid))}`,
+        metric: money(Number(i.total) - Number(i.amount_paid)),
+        metricKind: "money" as const,
+        detail: `Due ${i.due_date}`,
         href: "/invoices",
+        tone: "warning" as const,
+        cta: "Open",
+        score: 40_000 + (Number(i.total) - Number(i.amount_paid)),
       })),
       ...openDisputes.slice(0, 2).map((d) => ({
-        key: `dispute-${d.id}`,
+        id: `dispute-${d.id}`,
         title: "Open billing question",
+        metric: money(Number(d.amount_disputed)),
+        metricKind: "money" as const,
         detail: sanitizeDemoText(d.reason),
         href: "/support",
+        tone: "info" as const,
+        cta: "Open",
+        score: 25_000,
       })),
     ];
+    const shipperDecideNow = rankDecideNowItems(attentionItems, 5);
 
     return (
       <div className="space-y-6">
@@ -1238,7 +1230,7 @@ export default async function DashboardPage() {
             </div>
           }
         />
-        <div className="rounded-box border border-primary/20 bg-base-100 px-4 py-3 text-sm shadow-sm">
+        <div className="rounded-box border border-base-300 bg-base-100 px-4 py-3 text-sm shadow-sm">
           <p className="font-semibold">Need a carrier?</p>
           <p className="mt-1 opacity-80">
             Submit a coverage request with your lane and dates. Broker Operations books the load,
@@ -1273,26 +1265,13 @@ export default async function DashboardPage() {
           />
         </div>
 
-        {attention.length > 0 ? (
-          <Panel title="Needs your attention">
-            <ul className="space-y-2">
-              {attention.map((a) => (
-                <li
-                  key={a.key}
-                  className="flex flex-wrap items-center justify-between gap-2 rounded-box border border-warning/30 bg-warning/10 px-3 py-2"
-                >
-                  <div>
-                    <p className="text-sm font-medium">{a.title}</p>
-                    <p className="text-xs opacity-70">{a.detail}</p>
-                  </div>
-                  <Link href={a.href} className="btn btn-warning btn-xs">
-                    Open
-                  </Link>
-                </li>
-              ))}
-            </ul>
-          </Panel>
-        ) : null}
+        <DecideNowRail
+          items={shipperDecideNow}
+          title="Needs your attention"
+          subtitle="Delays, coverage, and billing items on your account."
+          emptyTitle="You're all caught up"
+          emptyDescription="No delayed loads, past-due invoices, or open billing questions."
+        />
 
         <div className="grid gap-4 lg:grid-cols-2">
           {statusCards.map(({ s, friendly }) => (
@@ -1301,7 +1280,9 @@ export default async function DashboardPage() {
                 <Link href={`/shipments/${s.id}`} className="link link-primary font-semibold">
                   {s.load_number}
                 </Link>
-                <span className={`badge badge-sm ${statusBadge(s.status)}`}>{s.status}</span>
+                <span className={`badge badge-sm ${statusBadge(s.status)}`}>
+                  {formatStatusLabel(s.status)}
+                </span>
               </div>
               <CustomerFriendlyStatusCard health={friendly} />
             </div>
@@ -1320,7 +1301,7 @@ export default async function DashboardPage() {
               headers={["Invoice", "Status", "Balance", "Due"]}
               rows={invList.slice(0, 8).map((i) => [
                 i.invoice_number,
-                i.status,
+                formatStatusLabel(i.status),
                 money(Number(i.total) - Number(i.amount_paid)),
                 i.due_date,
               ])}
@@ -1436,7 +1417,7 @@ export default async function DashboardPage() {
               {missingPod.map((s) => (
                 <li
                   key={s.id}
-                  className="flex flex-wrap items-center justify-between gap-2 rounded-box bg-warning/10 px-3 py-2"
+                  className="flex flex-wrap items-center justify-between gap-2 rounded-box border border-warning/30 bg-warning/10 px-3 py-2"
                 >
                   <span>{s.load_number} — upload POD</span>
                   <Link href={`/shipments/${s.id}`} className="btn btn-warning btn-xs">
@@ -1514,7 +1495,7 @@ function Stat({
 
 function Panel({ title, children }: { title: string; children: React.ReactNode }) {
   return (
-    <div className="card bg-base-100 shadow-sm">
+    <div className="card border border-base-300 bg-base-100 shadow-sm">
       <div className="card-body">
         <h3 className="card-title text-base">{title}</h3>
         {children}
@@ -1570,7 +1551,9 @@ function ShipmentList({
   }[];
   empty: string;
 }) {
-  if (!rows.length) return <p className="text-sm opacity-70">{empty}</p>;
+  if (!rows.length) {
+    return <EmptyState title={empty} />;
+  }
   return (
     <ul className="divide-y divide-base-200">
       {rows.map((s) => (
@@ -1584,7 +1567,9 @@ function ShipmentList({
               {(s.carriers as { name?: string } | null)?.name ?? "No carrier"}
             </p>
           </div>
-          <span className={`badge ${statusBadge(s.status)}`}>{s.status}</span>
+          <span className={`badge ${statusBadge(s.status)}`}>
+            {formatStatusLabel(s.status)}
+          </span>
         </li>
       ))}
     </ul>

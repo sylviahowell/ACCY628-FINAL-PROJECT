@@ -119,6 +119,7 @@ export function statusBadge(status: string) {
     completed: "badge-success",
     cancelled: "badge-error",
     pending: "badge-warning",
+    pending_accessorial: "badge-warning",
     partial: "badge-warning",
     paid: "badge-success",
     overdue: "badge-error",
@@ -131,4 +132,12 @@ export function statusBadge(status: string) {
     on_hold: "badge-warning",
   };
   return map[status] ?? "badge-ghost";
+}
+
+/** Human-readable status for badges and lists (e.g. in_transit → In Transit). */
+export function formatStatusLabel(status: string) {
+  if (!status) return "";
+  return status
+    .replace(/_/g, " ")
+    .replace(/\b\w/g, (c) => c.toUpperCase());
 }

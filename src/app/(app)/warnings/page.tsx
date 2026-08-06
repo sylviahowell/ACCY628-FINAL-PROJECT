@@ -20,6 +20,7 @@ export default async function WarningsPage() {
     { data: approvals },
     { data: coverageRequests },
     { data: supportTickets },
+    { data: statusUpdates },
   ] = await Promise.all([
     supabase
       .from("shipments")
@@ -100,6 +101,16 @@ export default async function WarningsPage() {
       .in("status", ["open", "pending"])
       .order("updated_at", { ascending: false })
       .limit(50),
+    profile.role === "manager" || profile.role === "broker"
+      ? supabase
+          .from("shipment_status_updates")
+          .select("shipment_id, note, created_at")
+          .ilike("note", "Carrier declined offer:%")
+          .order("created_at", { ascending: false })
+          .limit(200)
+      : Promise.resolve({
+          data: [] as { shipment_id: string; note: string | null; created_at: string | null }[],
+        }),
   ]);
 
   let shipRows = shipments ?? [];
@@ -137,6 +148,7 @@ export default async function WarningsPage() {
     approvals: approvals ?? [],
     coverageRequests: coverageRequests ?? [],
     supportTickets: supportRows,
+    statusUpdates: statusUpdates ?? [],
     today,
   });
   const alerts = filterAlertsForProfile(all, profile);

@@ -56,12 +56,8 @@ export async function updateSession(request: NextRequest) {
     );
     user = authUser;
   } catch {
-    // Hung / unreachable Auth — fail fast instead of ~25s retry stalls
-    if (!isPublic) {
-      const url = request.nextUrl.clone();
-      url.pathname = "/login";
-      return NextResponse.redirect(url);
-    }
+    // Hung / unreachable Auth — fail open so a slow network does not wipe the session
+    // mid-navigation. Page-level getCurrentProfile still enforces sign-in.
     return supabaseResponse;
   }
 

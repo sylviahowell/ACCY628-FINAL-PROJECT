@@ -1,13 +1,14 @@
 "use client";
 
 import Link from "next/link";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { createCoverageRequest } from "@/lib/actions/coverage";
 import {
   isDateOutsideContractWindow,
   suggestedRateFromText,
 } from "@/lib/contract-terms";
 import { calcLaneQuote } from "@/lib/contract-pricing";
+import { estimateLaneMiles } from "@/lib/geo";
 import { money } from "@/lib/types";
 import type { CoverageContractOption } from "@/components/BookCoverageForm";
 
@@ -19,6 +20,10 @@ export function CoverageRequestForm({ contracts }: Props) {
   const defaultId = contracts.length === 1 ? contracts[0].id : "";
   const [contractId, setContractId] = useState(defaultId);
   const [miles, setMiles] = useState("");
+  const [milesHint, setMilesHint] = useState<string | null>(null);
+  const milesAutoRef = useRef(false);
+  const [pickupLocation, setPickupLocation] = useState("");
+  const [deliveryLocation, setDeliveryLocation] = useState("");
   const [pickupDate, setPickupDate] = useState("");
   const [deliveryDate, setDeliveryDate] = useState("");
 
@@ -31,6 +36,31 @@ export function CoverageRequestForm({ contracts }: Props) {
     Boolean(selected) &&
     Number(selected!.customer_rate_per_mile) > 0 &&
     Number(selected!.carrier_rate_per_mile) > 0;
+
+  useEffect(() => {
+    const estimated = estimateLaneMiles(pickupLocation, deliveryLocation);
+    if (estimated != null && estimated > 0) {
+      setMiles(String(estimated));
+      milesAutoRef.current = true;
+      setMilesHint(`Estimated from ${pickupLocation.trim()} → ${deliveryLocation.trim()}`);
+      return;
+    }
+    if (pickupLocation.trim() && deliveryLocation.trim()) {
+      setMilesHint(
+        "Couldn’t match those cities — enter miles manually (try City, ST like Chicago, IL).",
+      );
+      if (milesAutoRef.current) {
+        setMiles("");
+        milesAutoRef.current = false;
+      }
+      return;
+    }
+    setMilesHint(null);
+    if (milesAutoRef.current) {
+      setMiles("");
+      milesAutoRef.current = false;
+    }
+  }, [pickupLocation, deliveryLocation]);
 
   const quote = selected && hasMileRates ? calcLaneQuote(Number(miles), selected) : null;
   const suggested = selected ? suggestedRateFromText(selected.shipping_rates) : null;
@@ -139,12 +169,16 @@ export function CoverageRequestForm({ contracts }: Props) {
         required
         placeholder="Pickup (City, ST)"
         className="input input-bordered"
+        value={pickupLocation}
+        onChange={(e) => setPickupLocation(e.target.value)}
       />
       <input
         name="delivery_location"
         required
         placeholder="Delivery (City, ST)"
         className="input input-bordered"
+        value={deliveryLocation}
+        onChange={(e) => setDeliveryLocation(e.target.value)}
       />
       <input
         name="pickup_date"
@@ -162,7 +196,7 @@ export function CoverageRequestForm({ contracts }: Props) {
       />
       {needsMiles ? (
         <label className="form-control w-full">
-          <span className="label-text text-sm">Miles (required for contract $/mi)</span>
+          <span className="label-text text-sm">Miles (auto from City, ST)</span>
           <input
             name="miles"
             type="number"
@@ -171,12 +205,17 @@ export function CoverageRequestForm({ contracts }: Props) {
             required
             className="input input-bordered"
             value={miles}
-            onChange={(e) => setMiles(e.target.value)}
+            onChange={(e) => {
+              setMiles(e.target.value);
+              milesAutoRef.current = false;
+              setMilesHint("Miles edited manually");
+            }}
             placeholder="e.g. 520"
           />
+          {milesHint ? <span className="label-text-alt opacity-60">{milesHint}</span> : null}
         </label>
       ) : (
-        <input type="hidden" name="miles" value="" />
+        <input type="hidden" name="miles" value={miles} />
       )}
       <input
         name="freight_type"
@@ -198,11 +237,13 @@ export function CoverageRequestForm({ contracts }: Props) {
         className="btn btn-primary md:col-span-2"
         disabled={!contractId || blockForMiles}
       >
-        {blockForMiles ? "Enter miles to apply contract rates" : "Send to Broker Operations"}
+        {blockForMiles
+          ? "Enter City, ST for pickup & delivery to estimate miles"
+          : "Send to Broker Operations"}
       </button>
       <p className="text-xs opacity-60 md:col-span-2">
-        Rates and downpayment come from your active contract. Broker Operations books the load and
-        assigns a carrier.
+        Miles are estimated from known demo cities (e.g. Chicago, IL → Dallas, TX). You can override
+        the miles field. Rates and downpayment come from your active contract.
       </p>
     </form>
   );

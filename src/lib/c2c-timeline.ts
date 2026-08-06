@@ -38,7 +38,9 @@ function eventAt(events: TimelineInput["statusEvents"], status: string) {
 
 export function buildC2CTimeline(input: TimelineInput): TimelineStep[] {
   const cancelled = input.status === "cancelled";
-  const hasCarrier = Boolean(input.carrier_id);
+  const offered = input.status === "offered";
+  const hasCarrier = Boolean(input.carrier_id) && !offered;
+  const carrierTendered = Boolean(input.carrier_id);
   const picked =
     ["picked_up", "in_transit", "delivered", "completed"].includes(input.status) ||
     Boolean(input.picked_up_at);
@@ -57,6 +59,7 @@ export function buildC2CTimeline(input: TimelineInput): TimelineStep[] {
     eventAt(input.statusEvents, "assigned") ||
     eventAt(input.statusEvents, "booked") ||
     (hasCarrier ? input.created_at : null);
+  const offeredAt = eventAt(input.statusEvents, "offered");
   const pickupAt =
     input.picked_up_at ||
     eventAt(input.statusEvents, "picked_up") ||
@@ -86,6 +89,7 @@ export function buildC2CTimeline(input: TimelineInput): TimelineStep[] {
   else if (inTransit) currentKey = "delivery";
   else if (picked) currentKey = "transit";
   else if (hasCarrier) currentKey = "pickup";
+  else if (offered) currentKey = "assign";
   else currentKey = "assign";
 
   const steps: Omit<TimelineStep, "state">[] = [
@@ -106,9 +110,15 @@ export function buildC2CTimeline(input: TimelineInput): TimelineStep[] {
     {
       key: "assign",
       label: "Carrier assigned",
-      at: assignedAt,
+      at: offered ? offeredAt : assignedAt,
       role: "Broker",
-      detail: hasCarrier ? "Carrier on the load" : "Awaiting carrier assignment",
+      detail: offered
+        ? "Offer sent — awaiting carrier acceptance"
+        : hasCarrier
+          ? "Carrier on the load"
+          : carrierTendered
+            ? "Carrier offered"
+            : "Awaiting carrier assignment",
     },
     {
       key: "pickup",

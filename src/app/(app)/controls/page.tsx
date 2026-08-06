@@ -256,12 +256,12 @@ export default async function ControlsPage({
         e.entity_type === "invoice"
           ? "/invoices"
           : e.entity_type === "payment"
-            ? "/payments"
+            ? "/ar?focus=record-payment"
             : "/disputes",
       hrefLabel:
         invNum ??
         (e.entity_type === "payment"
-          ? "Payments"
+          ? "Accounts Receivable"
           : e.entity_type === "dispute"
             ? "Disputes"
             : "Invoices"),

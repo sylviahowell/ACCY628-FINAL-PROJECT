@@ -96,6 +96,7 @@ function statusColor(status: string, delayed: boolean) {
   if (delayed) return "#ef4444";
   if (status === "in_transit" || status === "picked_up") return "#0284c7";
   if (status === "delivered" || status === "completed") return "#22c55e";
+  if (status === "offered") return "#f59e0b";
   if (status === "scheduled" || status === "assigned" || status === "booked") return "#eab308";
   return "#94a3b8";
 }

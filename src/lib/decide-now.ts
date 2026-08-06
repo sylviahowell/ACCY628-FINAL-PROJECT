@@ -122,7 +122,7 @@ export function buildDecideNowCandidates(input: {
       metricUnit: supportOpen === 1 ? "ticket" : "tickets",
       detail:
         supportHigh > 0
-          ? `${supportHigh} high priority · shipper/carrier replies waiting`
+          ? `${supportHigh} high priority · customer/carrier replies waiting`
           : "Open and pending tickets in the support inbox",
       href: input.supportFocusId
         ? `/support/${input.supportFocusId}`
@@ -140,7 +140,7 @@ export function buildDecideNowCandidates(input: {
       metric: String(input.coverageCount),
       metricKind: "count",
       metricUnit: input.coverageCount === 1 ? "request" : "requests",
-      detail: "Shippers waiting for ops to book a load, then assign a carrier",
+      detail: "Customers waiting for ops to book a load, then assign a carrier",
       href: input.coverageFocusId
         ? `/coverage#focus-${input.coverageFocusId}`
         : "/coverage",

@@ -380,7 +380,7 @@ export function buildBillingInsights(input: {
       observation: "No cash collected this month while overdue invoices remain open.",
       whyItMatters: "Collections activity may need a daily cadence.",
       action: "Log outreach notes and record any remittances received.",
-      href: "/payments",
+      href: "/ar?focus=record-payment",
     });
   }
 

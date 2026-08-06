@@ -6,13 +6,12 @@ import { DEMO_PASSWORD, type UserRole } from "@/lib/types";
 
 /**
  * Switch / enter a demo identity in the browser so auth cookies update reliably.
- * Server-action signIn+signOut often leaves a stale session with @supabase/ssr.
+ * Do not signOut first — that clears cookies and races middleware into /login.
+ * signInWithPassword replaces the session in place.
  */
 export async function clientSignInDemoRole(role: UserRole) {
   const demo = demoUserForRole(role);
   const supabase = createClient();
-
-  await supabase.auth.signOut();
 
   const { error } = await supabase.auth.signInWithPassword({
     email: demo.email,

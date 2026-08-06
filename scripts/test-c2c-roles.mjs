@@ -129,7 +129,7 @@ async function main() {
       : fail("Login: 5 portal cards");
 
     // ─── 1) SHIPPER: request coverage ─────────────────────────────
-    console.log("\n--- 1) Shipper: coverage request ---");
+    console.log("\n--- 1) Customer: coverage request ---");
     await enterDemo(page, 3, "Casey Customer");
     await visit(page, "/dashboard", "customer");
     const dash = await bodyText(page);
@@ -415,7 +415,7 @@ async function main() {
       ? ok("billing: AP hold controls present")
       : fail("billing: AP hold controls present");
 
-    await visit(page, "/payments", "billing");
+    await visit(page, "/ar", "billing");
     // Record customer payment if open invoice select exists
     const invSelect = page.locator('select[name="invoice_id"]');
     if (await invSelect.count()) {
@@ -450,7 +450,7 @@ async function main() {
     await switchRole(page, "manager", "Morgan Manager");
     await visit(page, "/dashboard", "manager");
     const mgrDash = await bodyText(page);
-    /Shipper coverage process|Decide now|Executive/i.test(mgrDash)
+    /Customer coverage process|Decide now|Executive/i.test(mgrDash)
       ? ok("manager: coverage process + decide now")
       : fail("manager: coverage process + decide now", mgrDash.slice(0, 200));
 
@@ -479,7 +479,7 @@ async function main() {
     await visit(page, "/shipments/new", "manager");
 
     // ─── 6) SHIPPER: cash / track / self-pay ───────────────────────
-    console.log("\n--- 6) Shipper: track + self-pay ---");
+    console.log("\n--- 6) Customer: track + self-pay ---");
     await switchRole(page, "customer", "Casey Customer");
     await visit(page, `/shipments/${shipmentId}`, "customer");
     const custShip = await bodyText(page);

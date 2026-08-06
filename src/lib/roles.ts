@@ -5,7 +5,7 @@ export const ROLE_LABELS: Record<UserRole, string> = {
   manager: "Executive / Manager",
   broker: "Broker Operations",
   billing: "Billing & Accounting",
-  customer: "Shipper",
+  customer: "Customer",
   carrier: "Carrier",
 };
 
@@ -14,7 +14,7 @@ export const ROLE_PORTAL_BLURB: Record<UserRole, string> = {
   broker: "Daily freight operations",
   billing: "Invoicing, AR, AP & collections",
   customer: "Your shipments & invoices",
-  carrier: "Assigned loads & delivery docs",
+  carrier: "Load offers & deliveries",
 };
 
 /**
@@ -90,6 +90,7 @@ export function allowedPaths(role: UserRole): string[] {
       return [
         "/dashboard",
         "/warnings",
+        "/offers",
         "/shipments",
         "/documents",
         "/support",

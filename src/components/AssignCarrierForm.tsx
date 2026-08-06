@@ -72,8 +72,8 @@ export function AssignCarrierForm({
       {returnTo ? <input type="hidden" name="return_to" value={returnTo} /> : null}
       <p className="text-xs opacity-60">
         {compact
-          ? "Expired insurance carriers are hidden and blocked. Prefer Preferred / Approved."
-          : "Match using scorecards → confirm insurance → assign. Prefer Preferred / Approved carriers."}
+          ? "Sends an offer to the carrier. They must accept before the load appears in My Deliveries. Expired insurance is blocked."
+          : "Match using scorecards → confirm insurance → send offer. Carrier must accept before pickup."}
       </p>
       {suggestedCarriers.length > 0 ? (
         <div className="rounded-box border border-primary/30 bg-primary/5 p-3">
@@ -138,8 +138,8 @@ export function AssignCarrierForm({
         {blockSubmit
           ? "Ask a manager — negative margin"
           : compact
-            ? "Assign carrier"
-            : "Save carrier assignment"}
+            ? "Send offer"
+            : "Send carrier offer"}
       </button>
     </form>
   );

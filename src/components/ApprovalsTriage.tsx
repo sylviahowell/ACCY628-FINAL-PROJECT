@@ -16,19 +16,27 @@ export type ApprovalRow = {
   created_at: string | null;
   loadNumber: string | null;
   shipmentHref: string | null;
+  /** Label for the related entity link button. */
+  openLabel?: string | null;
 };
 
-type TypeFilter = "all" | "accessorial" | "discount";
+type TypeFilter = "all" | "accessorial" | "discount" | "credit_hold";
 
 function initialType(param: string | null): TypeFilter {
-  if (param === "accessorial" || param === "discount") return param;
+  if (param === "accessorial" || param === "discount" || param === "credit_hold") return param;
   return "all";
 }
 
 function typeBadge(type: string) {
   if (type === "accessorial") return "badge-warning";
   if (type === "discount") return "badge-info";
+  if (type === "credit_hold" || type === "credit_override") return "badge-error";
   return "badge-ghost";
+}
+
+function typeLabel(type: string) {
+  if (type === "credit_hold" || type === "credit_override") return "Credit hold";
+  return type;
 }
 
 export function ApprovalsTriage({
@@ -57,11 +65,19 @@ function ApprovalsTriageInner({
 
   const accessorial = pending.filter((a) => a.request_type === "accessorial").length;
   const discount = pending.filter((a) => a.request_type === "discount").length;
+  const creditHold = pending.filter(
+    (a) => a.request_type === "credit_hold" || a.request_type === "credit_override",
+  ).length;
 
-  const visible = useMemo(
-    () => (filter === "all" ? pending : pending.filter((a) => a.request_type === filter)),
-    [pending, filter],
-  );
+  const visible = useMemo(() => {
+    if (filter === "all") return pending;
+    if (filter === "credit_hold") {
+      return pending.filter(
+        (a) => a.request_type === "credit_hold" || a.request_type === "credit_override",
+      );
+    }
+    return pending.filter((a) => a.request_type === filter);
+  }, [pending, filter]);
 
   return (
     <>
@@ -70,6 +86,7 @@ function ApprovalsTriageInner({
         {(
           [
             ["all", "All", pending.length],
+            ["credit_hold", "Credit hold", creditHold],
             ["accessorial", "Accessorial", accessorial],
             ["discount", "Discount", discount],
           ] as const
@@ -122,7 +139,7 @@ function ApprovalsBody({
             <div className="min-w-0 flex-1">
               <div className="flex flex-wrap items-center gap-2">
                 <span className={`badge badge-sm capitalize ${typeBadge(a.request_type)}`}>
-                  {a.request_type}
+                  {typeLabel(a.request_type)}
                 </span>
                 {a.loadNumber ? (
                   <span className="font-medium">{a.loadNumber}</span>
@@ -135,7 +152,7 @@ function ApprovalsBody({
                   href={a.shipmentHref}
                   className="btn btn-outline btn-primary btn-sm mt-2"
                 >
-                  Open load
+                  {a.openLabel ?? "Open load"}
                 </Link>
               ) : null}
             </div>
@@ -144,7 +161,11 @@ function ApprovalsBody({
                 <form action={reviewApproval}>
                   <input type="hidden" name="approval_id" value={a.id} />
                   <input type="hidden" name="decision" value="approved" />
-                  <button className="btn btn-success btn-sm">Approve</button>
+                  <button className="btn btn-success btn-sm">
+                    {a.request_type === "credit_hold" || a.request_type === "credit_override"
+                      ? "Authorize & open request"
+                      : "Approve"}
+                  </button>
                 </form>
                 <details className="w-full max-w-xs">
                   <summary className="btn btn-ghost btn-xs cursor-pointer">Reject…</summary>

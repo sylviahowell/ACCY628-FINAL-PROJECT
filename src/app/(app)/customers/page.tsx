@@ -46,7 +46,7 @@ export default async function CustomersPage({
       <div>
         <h1 className="text-2xl font-bold">Customers</h1>
         <p className="text-sm opacity-70">
-          Shippers you book. Create customers, then attach contracts and shipments. Credit hold
+          Customers you book. Create customers, then attach contracts and shipments. Credit hold
           flags when past-due AR reaches {money(PAST_DUE_CREDIT_HOLD_THRESHOLD)}.
         </p>
       </div>
@@ -89,7 +89,7 @@ export default async function CustomersPage({
             description={
               customerId
                 ? "Clear the filter to see all customers, or check the link from Risk."
-                : "Add a shipper to attach contracts and book loads."
+                : "Add a customer to attach contracts and book loads."
             }
           />
         ) : null}

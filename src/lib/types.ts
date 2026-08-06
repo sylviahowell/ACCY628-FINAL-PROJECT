@@ -3,6 +3,7 @@ export type UserRole = "manager" | "broker" | "billing" | "customer" | "carrier"
 export type ShipmentStatus =
   | "draft"
   | "scheduled"
+  | "offered"
   | "assigned"
   | "booked"
   | "picked_up"
@@ -70,8 +71,8 @@ export const DEMO_USERS: {
     email: "customer@rowanlane.example",
     full_name: "Casey Customer",
     role: "customer",
-    portal: "Shipper Portal",
-    portalAction: "Enter as shipper",
+    portal: "Customer Portal",
+    portalAction: "Enter as customer",
     customer_id: "11111111-1111-1111-1111-111111111101",
     description: "Track your freight, invoices, and open disputes",
   },
@@ -82,12 +83,13 @@ export const DEMO_USERS: {
     portal: "Carrier Portal",
     portalAction: "Enter as carrier",
     carrier_id: "22222222-2222-2222-2222-222222222201",
-    description: "Assigned loads, POD uploads, and delivery updates",
+    description: "Load offers, My Deliveries, POD uploads, and delivery updates",
   },
 ];
 
 export const SHIPMENT_FLOW: ShipmentStatus[] = [
   "scheduled",
+  "offered",
   "assigned",
   "picked_up",
   "in_transit",
@@ -112,7 +114,9 @@ export function isOperations(role: UserRole) {
 export function statusBadge(status: string) {
   const map: Record<string, string> = {
     scheduled: "badge-info",
+    offered: "badge-warning",
     assigned: "badge-primary",
+    booked: "badge-primary",
     picked_up: "badge-secondary",
     in_transit: "badge-warning",
     delivered: "badge-success",

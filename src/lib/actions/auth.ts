@@ -65,8 +65,22 @@ export const getCurrentProfile = cache(async (): Promise<Profile | null> => {
 
     return (data as Profile | null) ?? null;
   } catch {
-    // Auth/profile hangs should not crash app routes — treat as signed out.
-    return null;
+    // Transient Auth hangs: try local session so we do not bounce to /login mid-nav.
+    try {
+      const supabase = await createClient();
+      const {
+        data: { session },
+      } = await supabase.auth.getSession();
+      if (!session?.user) return null;
+      const { data } = await supabase
+        .from("profiles")
+        .select("id, email, full_name, role, customer_id, carrier_id")
+        .eq("id", session.user.id)
+        .maybeSingle();
+      return (data as Profile | null) ?? null;
+    } catch {
+      return null;
+    }
   }
 });
 
@@ -74,12 +88,7 @@ async function signInDemoAccount(role: UserRole) {
   const demo = demoUserForRole(role);
   const supabase = await createClient();
 
-  // Clear the previous session first — switching users without signOut
-  // often leaves stale auth cookies and the UI stays on the old portal.
-  await supabase.auth.signOut();
-
-  // Sign-in only — never signUp for demos. Client signUp triggers Supabase
-  // confirmation emails and quickly hits the free-tier email rate limit.
+  // Prefer replacing the session in place. Clearing first races middleware into /login.
   const { error: signInError } = await withTimeout(
     supabase.auth.signInWithPassword({
       email: demo.email,

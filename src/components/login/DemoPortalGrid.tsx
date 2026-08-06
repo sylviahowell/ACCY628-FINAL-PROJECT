@@ -1,7 +1,6 @@
 "use client";
 
-import { useState, useTransition } from "react";
-import { useRouter } from "next/navigation";
+import { useState } from "react";
 import {
   Briefcase,
   Building2,
@@ -40,7 +39,7 @@ const PORTALS: PortalCardVisual[] = [
   {
     role: "billing",
     titleLines: ["Billing &", "Accounting"],
-    description: "Invoices, payments, and collections",
+    description: "Invoices, AR collections, and AP",
     tint: "bg-[#F5F2FF]",
     iconWrap: "bg-white text-violet-600 shadow-sm ring-1 ring-violet-500/15",
     bar: "bg-violet-500",
@@ -48,7 +47,7 @@ const PORTALS: PortalCardVisual[] = [
   },
   {
     role: "customer",
-    titleLines: ["Shipper", "Portal"],
+    titleLines: ["Customer", "Portal"],
     description: "Track your shipments",
     tint: "bg-[#FFF6EE]",
     iconWrap: "bg-white text-orange-600 shadow-sm ring-1 ring-orange-500/15",
@@ -67,32 +66,30 @@ const PORTALS: PortalCardVisual[] = [
 ];
 
 export function DemoPortalGrid() {
-  const router = useRouter();
-  const [pending, startTransition] = useTransition();
+  const [pending, setPending] = useState(false);
   const [activeRole, setActiveRole] = useState<UserRole | null>(null);
   const [error, setError] = useState<string | null>(null);
 
-  function onSelect(role: UserRole) {
+  async function onSelect(role: UserRole) {
     if (pending) return;
     setError(null);
     setActiveRole(role);
+    setPending(true);
     try {
       sessionStorage.setItem(DEMO_MODE_STORAGE_KEY, "1");
       sessionStorage.setItem(DEMO_ROLE_STORAGE_KEY, role);
     } catch {
       /* ignore */
     }
-    startTransition(async () => {
-      try {
-        await clientSignInDemoRole(role);
-        await activateDemoModeSession();
-        router.replace(`/dashboard?portal=${encodeURIComponent(role)}`);
-        router.refresh();
-      } catch (e) {
-        setActiveRole(null);
-        setError(e instanceof Error ? e.message : "Demo sign-in failed");
-      }
-    });
+    try {
+      await clientSignInDemoRole(role);
+      await activateDemoModeSession();
+      window.location.assign(`/dashboard?portal=${encodeURIComponent(role)}`);
+    } catch (e) {
+      setActiveRole(null);
+      setPending(false);
+      setError(e instanceof Error ? e.message : "Demo sign-in failed");
+    }
   }
 
   return (
@@ -114,7 +111,9 @@ export function DemoPortalGrid() {
             visual={visual}
             disabled={pending}
             pending={pending && activeRole === visual.role}
-            onSelect={onSelect}
+            onSelect={(role) => {
+              void onSelect(role);
+            }}
           />
         ))}
       </div>

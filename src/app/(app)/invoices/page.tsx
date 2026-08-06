@@ -151,7 +151,7 @@ export default async function InvoicesPage({
                 <button className="btn btn-primary btn-sm">
                   Mark paid ({money(balance)})
                 </button>
-                <span className="self-center text-xs opacity-60">Demo shipper self-pay</span>
+                <span className="self-center text-xs opacity-60">Demo customer self-pay</span>
               </form>
             ) : null}
             {profile.role === "customer" ? (

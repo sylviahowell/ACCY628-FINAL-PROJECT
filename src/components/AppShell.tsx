@@ -225,17 +225,17 @@ function navFor(
             icon: i(<LineChart className="h-4 w-4" />),
             children: [
               {
-                href: "/profitability?band=unprofitable&dim=shipment&focus=margin-leaderboard",
+                href: "/profitability#customer-performance",
                 label: "Loss loads",
                 count: pr.losses,
               },
               {
-                href: "/profitability?band=low&dim=shipment&focus=margin-leaderboard",
+                href: "/profitability#customer-performance",
                 label: "Low margin",
                 count: pr.lowMargin,
               },
               {
-                href: "/profitability?focus=margin-leaderboard",
+                href: "/profitability#customer-performance",
                 label: "Overview",
               },
             ],

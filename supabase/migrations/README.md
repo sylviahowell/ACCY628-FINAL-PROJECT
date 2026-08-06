@@ -13,6 +13,7 @@
 -- disputes: customer insert/select; staff ALL
 -- support_tickets / support_ticket_messages: staff ALL; customer/carrier scoped by org; portal messages non-internal only
 -- approval_requests: staff ALL (carrier allowed in WITH CHECK for insert paths)
+-- vehicle_positions: staff SELECT (manager/broker/billing); carrier SELECT assigned; staff write manager/broker
 
 -- Rebuild notes:
 -- 1. Apply foundation schema (see supabase/README.md / MCP history)

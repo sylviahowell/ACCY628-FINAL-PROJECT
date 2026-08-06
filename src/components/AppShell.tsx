@@ -177,17 +177,7 @@ function navFor(
           { href: "/approvals", label: "Approvals", icon: i(<CheckSquare className="h-4 w-4" />) },
           { href: "/risk", label: "Risk & Credit", icon: i(<ShieldAlert className="h-4 w-4" />) },
           { href: "/controls", label: "Control activity", icon: i(<ScrollText className="h-4 w-4" />) },
-          {
-            href: "/profitability",
-            label: "Profitability",
-            icon: i(<LineChart className="h-4 w-4" />),
-            children: [
-              {
-                href: "/profitability#customer-performance",
-                label: "Partner explorer",
-              },
-            ],
-          },
+          { href: "/profitability", label: "Profitability", icon: i(<LineChart className="h-4 w-4" />) },
           settings,
         ],
         more: [
@@ -204,8 +194,6 @@ function navFor(
             icon: i(<Package className="h-4 w-4" />),
             children: [
               { href: "/shipments?status=delayed", label: "Delayed", count: c.delayed },
-              { href: "/assign?view=needs", label: "Needs carrier", count: c.unassigned },
-              { href: "/assign?view=awaiting", label: "Awaiting accept", count: c.offered },
               { href: "/shipments?status=ready", label: "Loads to invoice", count: c.ready },
               { href: "/shipments", label: "All loads" },
             ],
@@ -244,15 +232,8 @@ function navFor(
             label: "Assign carriers",
             icon: i(<UserCheck className="h-4 w-4" />),
             count: c.unassigned + c.offered > 0 ? c.unassigned + c.offered : undefined,
-            children: [
-              { href: "/assign?view=all", label: "All", count: c.unassigned + c.offered },
-              { href: "/assign?view=needs", label: "Needs assignment", count: c.unassigned },
-              { href: "/assign?view=awaiting", label: "Awaiting acceptance", count: c.offered },
-              { href: "/shipments?filter=needs-pod", label: "Needs POD", count: c.needsPod },
-              { href: "/shipments?status=delayed", label: "Delayed", count: c.delayed },
-              { href: "/shipments", label: "All loads" },
-            ],
           },
+          { href: "/shipments", label: "Shipments", icon: i(<Package className="h-4 w-4" />) },
           { href: "/risk", label: "Risk & Credit", icon: i(<ShieldAlert className="h-4 w-4" />) },
           { href: "/carriers", label: "Carriers", icon: i(<Truck className="h-4 w-4" />) },
           { href: "/customers", label: "Customers", icon: i(<Users className="h-4 w-4" />) },
@@ -306,11 +287,6 @@ function navFor(
             href: "/shipments",
             label: "My Deliveries",
             icon: i(<Truck className="h-4 w-4" />),
-            children: [
-              { href: "/shipments?filter=pickup-upcoming", label: "Upcoming pickups" },
-              { href: "/shipments?filter=delivery-due-today", label: "Due today" },
-              { href: "/shipments", label: "All deliveries" },
-            ],
           },
           { href: "/support", label: "Support", icon: i(<HelpCircle className="h-4 w-4" />) },
           settings,

@@ -4,8 +4,8 @@ import {
   AlertTriangle,
   Banknote,
   BarChart3,
-  Building2,
   CheckSquare,
+  Menu,
   ClipboardList,
   FileText,
   FolderOpen,
@@ -413,8 +413,12 @@ export function AppShell({
       <div className="drawer-content flex flex-col">
         <div className="navbar min-h-16 flex-wrap items-center gap-x-3 gap-y-3 border-b border-base-300 bg-base-100/95 px-3 py-2 backdrop-blur-sm sm:px-4">
           <div className="flex-none lg:hidden">
-            <label htmlFor="app-drawer" className="btn btn-square btn-ghost">
-              <Building2 className="h-5 w-5" />
+            <label
+              htmlFor="app-drawer"
+              className="btn btn-square btn-ghost"
+              aria-label="Open menu"
+            >
+              <Menu className="h-5 w-5" />
             </label>
           </div>
           <div className="flex min-w-0 flex-1 basis-[min(100%,18rem)] items-center gap-3 sm:gap-4">

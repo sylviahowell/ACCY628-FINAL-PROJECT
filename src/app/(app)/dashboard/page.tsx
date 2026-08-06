@@ -591,12 +591,12 @@ export default async function DashboardPage() {
             </Link>
           }
         />
-        <DecideNowRail items={decideNowItems} />
         <MorningBriefCard
           greeting={brief.greeting}
           yesterday={brief.yesterday}
           today={brief.today}
         />
+        <DecideNowRail items={decideNowItems} />
         <KpiRibbon items={kpis} />
         <div className="space-y-4">
           <div>

@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState, useTransition } from "react";
+import { useRouter } from "next/navigation";
 import { Beaker, LogOut } from "lucide-react";
 import { activateDemoModeSession, exitDemo } from "@/lib/actions/auth";
 import { clientSignInDemoRole } from "@/lib/demo-auth-client";
@@ -29,14 +30,8 @@ function clearDemoClientState() {
   }
 }
 
-function hardNavigateToPortal(role: UserRole) {
-  // Full document navigation so middleware + layout re-read the new auth cookies.
-  window.location.assign(
-    `/dashboard?portal=${encodeURIComponent(role)}&t=${Date.now()}`,
-  );
-}
-
 export function DemoRoleSelector({ activeRole }: { activeRole: UserRole }) {
+  const router = useRouter();
   const [pending, startTransition] = useTransition();
   const [error, setError] = useState<string | null>(null);
 
@@ -62,7 +57,9 @@ export function DemoRoleSelector({ activeRole }: { activeRole: UserRole }) {
       try {
         await clientSignInDemoRole(role);
         await activateDemoModeSession();
-        hardNavigateToPortal(role);
+        // Soft nav + refresh: keep SPA shell warm; cookies already updated client-side.
+        router.replace(`/dashboard?portal=${encodeURIComponent(role)}`);
+        router.refresh();
       } catch (e) {
         setError(e instanceof Error ? e.message : "Could not switch demo role");
       }

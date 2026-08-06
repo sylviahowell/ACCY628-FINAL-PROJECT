@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useTransition } from "react";
+import { useRouter } from "next/navigation";
 import {
   Briefcase,
   Building2,
@@ -66,6 +67,7 @@ const PORTALS: PortalCardVisual[] = [
 ];
 
 export function DemoPortalGrid() {
+  const router = useRouter();
   const [pending, startTransition] = useTransition();
   const [activeRole, setActiveRole] = useState<UserRole | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -84,9 +86,8 @@ export function DemoPortalGrid() {
       try {
         await clientSignInDemoRole(role);
         await activateDemoModeSession();
-        window.location.assign(
-          `/dashboard?portal=${encodeURIComponent(role)}&t=${Date.now()}`,
-        );
+        router.replace(`/dashboard?portal=${encodeURIComponent(role)}`);
+        router.refresh();
       } catch (e) {
         setActiveRole(null);
         setError(e instanceof Error ? e.message : "Demo sign-in failed");

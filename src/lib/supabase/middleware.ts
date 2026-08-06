@@ -5,12 +5,23 @@ import type { UserRole } from "@/lib/types";
 import { AUTH_FETCH_TIMEOUT_MS, withTimeout } from "@/lib/with-timeout";
 
 export async function updateSession(request: NextRequest) {
+  const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL?.trim();
+  const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY?.trim();
+
+  // Missing env crashes createServerClient on Edge → Vercel MIDDLEWARE_INVOCATION_FAILED.
+  // Fail soft: let public pages load; app layout still redirects unauthenticated users.
+  if (!supabaseUrl || !supabaseAnonKey) {
+    console.error(
+      "middleware: NEXT_PUBLIC_SUPABASE_URL / NEXT_PUBLIC_SUPABASE_ANON_KEY are not set",
+    );
+    return NextResponse.next({ request });
+  }
+
   let supabaseResponse = NextResponse.next({ request });
 
-  const supabase = createServerClient(
-    process.env.NEXT_PUBLIC_SUPABASE_URL!,
-    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
-    {
+  let supabase;
+  try {
+    supabase = createServerClient(supabaseUrl, supabaseAnonKey, {
       cookies: {
         getAll() {
           return request.cookies.getAll();
@@ -25,8 +36,11 @@ export async function updateSession(request: NextRequest) {
           );
         },
       },
-    },
-  );
+    });
+  } catch (err) {
+    console.error("middleware: failed to create Supabase client", err);
+    return NextResponse.next({ request });
+  }
 
   const path = request.nextUrl.pathname;
   const isStaticAsset =

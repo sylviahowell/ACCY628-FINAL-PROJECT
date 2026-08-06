@@ -37,10 +37,13 @@ export function RiskCreditWorkspace({
   customers,
   carriers,
   focusId = null,
+  showArLink = true,
 }: {
   customers: CustomerCreditRow[];
   carriers: CarrierRiskRow[];
   focusId?: string | null;
+  /** Hide AR deep-links for roles that cannot open /ar (e.g. broker). */
+  showArLink?: boolean;
 }) {
   const [creditFilter, setCreditFilter] = useState<CreditFilter>("all");
   const [carrierFilter, setCarrierFilter] = useState<CarrierFilter>("all");
@@ -278,12 +281,14 @@ export function RiskCreditWorkspace({
                       >
                         Open
                       </Link>
-                      <Link
-                        href={`/ar?customer=${encodeURIComponent(c.id)}`}
-                        className="btn btn-ghost btn-xs"
-                      >
-                        AR
-                      </Link>
+                      {showArLink ? (
+                        <Link
+                          href={`/ar?customer=${encodeURIComponent(c.id)}`}
+                          className="btn btn-ghost btn-xs"
+                        >
+                          AR
+                        </Link>
+                      ) : null}
                     </td>
                   </tr>
                 ))

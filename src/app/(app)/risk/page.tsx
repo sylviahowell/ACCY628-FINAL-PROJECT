@@ -148,6 +148,7 @@ export default async function RiskCreditPage({
         customers={customerRows}
         carriers={carrierRows}
         focusId={focusId}
+        showArLink={profile.role === "manager"}
       />
     </div>
   );

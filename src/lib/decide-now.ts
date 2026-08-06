@@ -75,11 +75,33 @@ export function buildDecideNowCandidates(input: {
   riskIssueCount: number;
   riskDetail: string;
   riskTone: DecideNowTone;
+  supportOpenCount?: number;
+  supportHighCount?: number;
   resolveLoadNumber: (entityType: string, entityId: string) => string | null;
   sanitize: (text: string) => string;
 }): DecideNowItem[] {
   const items: DecideNowItem[] = [];
   const { today } = input;
+
+  const supportOpen = input.supportOpenCount ?? 0;
+  const supportHigh = input.supportHighCount ?? 0;
+  if (supportOpen > 0) {
+    items.push({
+      id: "support-queue",
+      title: "Support tickets",
+      metric: String(supportOpen),
+      metricKind: "count",
+      metricUnit: supportOpen === 1 ? "ticket" : "tickets",
+      detail:
+        supportHigh > 0
+          ? `${supportHigh} high priority · shipper/carrier replies waiting`
+          : "Open and pending tickets in the support inbox",
+      href: "/support",
+      tone: supportHigh > 0 ? "warning" : "info",
+      cta: "Review",
+      score: supportOpen * 25_000 + supportHigh * 40_000,
+    });
+  }
 
   if (input.coverageCount > 0) {
     items.push({

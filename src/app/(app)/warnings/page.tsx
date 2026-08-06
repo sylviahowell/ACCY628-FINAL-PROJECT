@@ -19,6 +19,7 @@ export default async function WarningsPage() {
     { data: disputes },
     { data: approvals },
     { data: coverageRequests },
+    { data: supportTickets },
   ] = await Promise.all([
     supabase
       .from("shipments")
@@ -93,6 +94,12 @@ export default async function WarningsPage() {
             customers?: { name?: string } | null;
           }[],
         }),
+    supabase
+      .from("support_tickets")
+      .select("id, ticket_number, subject, status, priority, customer_id, carrier_id")
+      .in("status", ["open", "pending"])
+      .order("updated_at", { ascending: false })
+      .limit(50),
   ]);
 
   let shipRows = shipments ?? [];
@@ -100,6 +107,7 @@ export default async function WarningsPage() {
   let disputeRows = disputes ?? [];
   let podRows = pods ?? [];
   let chargeRows = charges ?? [];
+  let supportRows = supportTickets ?? [];
 
   if (profile.role === "customer" && profile.customer_id) {
     const cid = profile.customer_id;
@@ -108,12 +116,14 @@ export default async function WarningsPage() {
     disputeRows = disputeRows.filter((d) => d.customer_id === cid);
     const ids = new Set(shipRows.map((s) => s.id));
     podRows = podRows.filter((p) => ids.has(p.shipment_id));
+    supportRows = supportRows.filter((t) => t.customer_id === cid);
   } else if (profile.role === "carrier" && profile.carrier_id) {
     const carId = profile.carrier_id;
     shipRows = shipRows.filter((s) => s.carrier_id === carId);
     const ids = new Set(shipRows.map((s) => s.id));
     podRows = podRows.filter((p) => ids.has(p.shipment_id));
     chargeRows = chargeRows.filter((c) => ids.has(c.shipment_id));
+    supportRows = supportRows.filter((t) => t.carrier_id === carId);
   }
 
   const all = buildAlerts({
@@ -126,6 +136,7 @@ export default async function WarningsPage() {
     disputes: disputeRows,
     approvals: approvals ?? [],
     coverageRequests: coverageRequests ?? [],
+    supportTickets: supportRows,
     today,
   });
   const alerts = filterAlertsForProfile(all, profile);

@@ -39,7 +39,16 @@ async function nextTicketNumber(supabase: Awaited<ReturnType<typeof createClient
 
 function revalidateSupport(ticketId?: string) {
   revalidatePath("/support");
+  revalidatePath("/warnings");
+  revalidatePath("/dashboard");
   if (ticketId) revalidatePath(`/support/${ticketId}`);
+}
+
+function authorFields(profile: { full_name: string | null; role: string }) {
+  return {
+    author_display_name: profile.full_name?.trim() || "RowanLane Support",
+    author_role: profile.role,
+  };
 }
 
 export async function createSupportTicket(formData: FormData) {
@@ -140,6 +149,7 @@ export async function createSupportTicket(formData: FormData) {
     author_id: profile.id,
     body: input.body,
     is_internal: false,
+    ...authorFields(profile),
   });
   if (msgErr) {
     redirect(toastErrorPath(`/support/${ticket.id}`, msgErr.message));
@@ -188,6 +198,7 @@ export async function replySupportTicket(formData: FormData) {
     author_id: profile.id,
     body,
     is_internal: false,
+    ...authorFields(profile),
   });
   if (error) redirect(toastErrorPath(`/support/${ticketId}`, error.message));
 
@@ -252,6 +263,7 @@ export async function addInternalNote(formData: FormData) {
     author_id: profile.id,
     body,
     is_internal: true,
+    ...authorFields(profile),
   });
   if (error) redirect(toastErrorPath(`/support/${ticketId}`, error.message));
 

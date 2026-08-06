@@ -39,7 +39,9 @@ export default async function SupportTicketPage({
 
   let messagesQuery = supabase
     .from("support_ticket_messages")
-    .select("id, body, is_internal, created_at, author_id, profiles(full_name, role)")
+    .select(
+      "id, body, is_internal, created_at, author_id, author_display_name, author_role",
+    )
     .eq("ticket_id", id)
     .order("created_at", { ascending: true });
 
@@ -133,13 +135,8 @@ export default async function SupportTicketPage({
         ) : (
           <ul className="space-y-3">
             {(messages ?? []).map((m) => {
-              const author = m.profiles as { full_name?: string; role?: string } | null;
-              // Portals cannot SELECT other profiles (RLS) — fall back so staff replies aren't "User".
-              const authorName =
-                author?.full_name ??
-                (m.author_id === profile.id ? profile.full_name : "RowanLane Support");
-              const authorRole =
-                author?.role ?? (m.author_id === profile.id ? profile.role : "staff");
+              const authorName = m.author_display_name || "RowanLane Support";
+              const authorRole = m.author_role || null;
               return (
                 <li
                   key={m.id}

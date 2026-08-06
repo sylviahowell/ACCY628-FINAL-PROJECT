@@ -75,6 +75,7 @@ export default async function DashboardPage() {
     { data: collectionNotes },
     { data: carrierBills },
     { data: coverageRequests },
+    { data: supportTickets },
   ] = await Promise.all([
     supabase
       .from("shipments")
@@ -136,10 +137,17 @@ export default async function DashboardPage() {
           return q;
         })()
       : Promise.resolve({ data: [] as never[] }),
+    supabase
+      .from("support_tickets")
+      .select("id, status, priority")
+      .in("status", ["open", "pending"]),
   ]);
 
   const pendingCoverage = coverageRequests ?? [];
   const pendingCoverageCount = pendingCoverage.length;
+  const supportOpenList = supportTickets ?? [];
+  const supportOpenCount = supportOpenList.length;
+  const supportHighCount = supportOpenList.filter((t) => t.priority === "high").length;
   const customerName = new Map((customers ?? []).map((c) => [c.id, c.name]));
   let shipList = shipments ?? [];
   let invList = invoices ?? [];
@@ -564,6 +572,8 @@ export default async function DashboardPage() {
         riskDetail: riskDetailParts.join(" · "),
         riskTone:
           insuranceExpired > 0 || customersOverCredit > 0 ? "error" : "warning",
+        supportOpenCount,
+        supportHighCount,
         resolveLoadNumber,
         sanitize: sanitizeDemoText,
       }),

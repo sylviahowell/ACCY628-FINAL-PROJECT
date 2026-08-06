@@ -32,7 +32,7 @@ export default async function SupportPage({
   let ticketQuery = supabase
     .from("support_tickets")
     .select(
-      "id, ticket_number, subject, category, priority, status, created_at, updated_at, customer_id, carrier_id, customers(name), carriers(name)",
+      "id, ticket_number, subject, category, priority, status, created_at, updated_at, customer_id, carrier_id, shipment_id, customers(name), carriers(name), shipments(load_number)",
     )
     .order("updated_at", { ascending: false });
 
@@ -57,6 +57,8 @@ export default async function SupportPage({
   let overdue: { id: string; invoice_number: string; total: number; amount_paid: number }[] = [];
   let delayed: { id: string; load_number: string }[] = [];
   let openDisputes: { id: string; reason: string; amount_disputed: number }[] = [];
+  let linkShipments: { id: string; load_number: string; status: string }[] = [];
+  let linkInvoices: { id: string; invoice_number: string; status: string }[] = [];
 
   if (profile.role === "customer" && profile.customer_id) {
     const [{ data: invoices }, { data: disputes }, { data: shipments }] = await Promise.all([
@@ -74,8 +76,21 @@ export default async function SupportPage({
         .from("shipments")
         .select("id, load_number, status, promised_delivery_date")
         .eq("customer_id", profile.customer_id)
-        .not("status", "in", '("completed","cancelled")'),
+        .order("created_at", { ascending: false })
+        .limit(40),
     ]);
+    linkShipments = (shipments ?? []).map((s) => ({
+      id: s.id,
+      load_number: s.load_number,
+      status: s.status,
+    }));
+    linkInvoices = (invoices ?? [])
+      .filter((i) => !["cancelled"].includes(i.status))
+      .map((i) => ({
+        id: i.id,
+        invoice_number: i.invoice_number,
+        status: i.status,
+      }));
     overdue = (invoices ?? []).filter((i) => {
       const bal = Number(i.total) - Number(i.amount_paid);
       return bal > 0 && i.due_date < today && !["paid", "cancelled"].includes(i.status);
@@ -84,9 +99,17 @@ export default async function SupportPage({
       (s) =>
         s.promised_delivery_date &&
         s.promised_delivery_date < today &&
-        !["delivered", "completed"].includes(s.status),
+        !["delivered", "completed", "cancelled"].includes(s.status),
     );
     openDisputes = disputes ?? [];
+  } else if (profile.role === "carrier" && profile.carrier_id) {
+    const { data: shipments } = await supabase
+      .from("shipments")
+      .select("id, load_number, status")
+      .eq("carrier_id", profile.carrier_id)
+      .order("created_at", { ascending: false })
+      .limit(40);
+    linkShipments = shipments ?? [];
   }
 
   return (
@@ -158,6 +181,32 @@ export default async function SupportPage({
                   <option value="high">High</option>
                 </select>
               </label>
+              <label className="form-control">
+                <span className="label-text text-sm">Related load (optional)</span>
+                <select name="shipment_id" className="select select-bordered select-sm" defaultValue="">
+                  <option value="">None</option>
+                  {linkShipments.map((s) => (
+                    <option key={s.id} value={s.id}>
+                      {s.load_number} · {s.status}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              {profile.role === "customer" ? (
+                <label className="form-control">
+                  <span className="label-text text-sm">Related invoice (optional)</span>
+                  <select name="invoice_id" className="select select-bordered select-sm" defaultValue="">
+                    <option value="">None</option>
+                    {linkInvoices.map((i) => (
+                      <option key={i.id} value={i.id}>
+                        {i.invoice_number} · {i.status}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+              ) : (
+                <div className="hidden md:block" />
+              )}
               <label className="form-control md:col-span-2">
                 <span className="label-text text-sm">Message</span>
                 <textarea
@@ -194,6 +243,7 @@ export default async function SupportPage({
                 <tr>
                   <th>Ticket</th>
                   <th>Subject</th>
+                  <th>Load</th>
                   <th>Category</th>
                   {staff ? <th>Requester</th> : null}
                   <th>Age</th>
@@ -204,6 +254,7 @@ export default async function SupportPage({
                 {visibleTickets.map((t) => {
                   const customerName = (t.customers as { name?: string } | null)?.name;
                   const carrierName = (t.carriers as { name?: string } | null)?.name;
+                  const loadNumber = (t.shipments as { load_number?: string } | null)?.load_number;
                   const requester = customerName ?? carrierName ?? "—";
                   return (
                     <tr key={t.id} className="hover">
@@ -216,6 +267,15 @@ export default async function SupportPage({
                         <Link href={`/support/${t.id}`} className="link link-hover font-medium">
                           {sanitizeDemoText(t.subject)}
                         </Link>
+                      </td>
+                      <td className="font-mono text-xs">
+                        {loadNumber && t.shipment_id ? (
+                          <Link className="link link-hover" href={`/shipments/${t.shipment_id}`}>
+                            {loadNumber}
+                          </Link>
+                        ) : (
+                          <span className="opacity-40">—</span>
+                        )}
                       </td>
                       <td className="capitalize">{t.category}</td>
                       {staff ? <td>{sanitizeDemoText(requester)}</td> : null}

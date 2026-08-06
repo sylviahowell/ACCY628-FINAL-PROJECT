@@ -77,43 +77,54 @@ export function CustomerFriendlyStatusCard({
 export function ShipmentHealthCard({
   health,
   audience = "internal",
+  embedded = false,
 }: {
   health: HealthResult;
   audience?: "internal" | "carrier";
+  /** Drop outer card chrome when nested inside a parent section. */
+  embedded?: boolean;
 }) {
+  const body = (
+    <>
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <h2 className={embedded ? "text-sm font-semibold" : "card-title text-base"}>
+          {audience === "carrier" ? "Load readiness" : "Shipment health"}
+        </h2>
+        <span className={`badge ${categoryBadgeClass(health.category)}`}>
+          {health.score} — {health.category}
+        </span>
+      </div>
+      <progress
+        className={`progress w-full ${
+          health.category === "Healthy"
+            ? "progress-success"
+            : health.category === "At Risk"
+              ? "progress-warning"
+              : "progress-error"
+        }`}
+        value={health.score}
+        max={100}
+      />
+      <p className="text-xs opacity-60">
+        {audience === "carrier"
+          ? "Based on timing, documentation, and assignment — not brokerage margin."
+          : "Rule-based score (not AI). Starts at 100; penalties for delay, missing carrier/POD, negative margin, pending charges, billing lag, disputes."}
+      </p>
+      <ul className="mt-1 list-disc space-y-1 pl-5 text-sm">
+        {health.reasons.map((r) => (
+          <li key={r}>{r}</li>
+        ))}
+      </ul>
+    </>
+  );
+
+  if (embedded) {
+    return <div className="flex flex-col gap-2">{body}</div>;
+  }
+
   return (
     <div className="card border border-base-300 bg-base-100 shadow-sm">
-      <div className="card-body gap-2">
-        <div className="flex flex-wrap items-center justify-between gap-2">
-          <h2 className="card-title text-base">
-            {audience === "carrier" ? "Load readiness" : "Shipment health"}
-          </h2>
-          <span className={`badge ${categoryBadgeClass(health.category)}`}>
-            {health.score} — {health.category}
-          </span>
-        </div>
-        <progress
-          className={`progress w-full ${
-            health.category === "Healthy"
-              ? "progress-success"
-              : health.category === "At Risk"
-                ? "progress-warning"
-                : "progress-error"
-          }`}
-          value={health.score}
-          max={100}
-        />
-        <p className="text-xs opacity-60">
-          {audience === "carrier"
-            ? "Based on timing, documentation, and assignment — not brokerage margin."
-            : "Rule-based score (not AI). Starts at 100; penalties for delay, missing carrier/POD, negative margin, pending charges, billing lag, disputes."}
-        </p>
-        <ul className="mt-1 list-disc space-y-1 pl-5 text-sm">
-          {health.reasons.map((r) => (
-            <li key={r}>{r}</li>
-          ))}
-        </ul>
-      </div>
+      <div className="card-body gap-2">{body}</div>
     </div>
   );
 }

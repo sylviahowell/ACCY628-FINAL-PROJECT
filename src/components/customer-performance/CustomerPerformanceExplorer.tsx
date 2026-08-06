@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState, useTransition } from "react";
+import { useMemo, useState, useTransition } from "react";
 import {
   DollarSign,
   Package,
@@ -109,16 +109,17 @@ export function CustomerPerformanceExplorer({
   const [pending, startTransition] = useTransition();
   const [switching, setSwitching] = useState(false);
 
-  useEffect(() => {
-    const nextMode = initialMode;
-    const list = nextMode === "carrier" ? carrierList : shippers;
-    const nextPartner = resolvePartnerId(
-      initialPartnerId ?? (nextMode === "shipper" ? initialCustomerId : null),
-      list,
-    );
-    setMode(nextMode);
+  const nextPartner = resolvePartnerId(
+    initialPartnerId ?? (initialMode === "shipper" ? initialCustomerId : null),
+    initialMode === "carrier" ? carrierList : shippers,
+  );
+  const propSyncKey = `${initialMode}|${nextPartner}|${shippers.length}|${carrierList.length}`;
+  const [appliedPropSyncKey, setAppliedPropSyncKey] = useState(propSyncKey);
+  if (propSyncKey !== appliedPropSyncKey) {
+    setAppliedPropSyncKey(propSyncKey);
+    setMode(initialMode);
     setPartnerId(nextPartner);
-  }, [initialMode, initialPartnerId, initialCustomerId, shippers, carrierList]);
+  }
 
   const activeList = mode === "carrier" ? carrierList : shippers;
 

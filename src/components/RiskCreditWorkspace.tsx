@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useMemo, useState } from "react";
+import { useMemo, useState } from "react";
 import {
   type CarrierRiskRow,
   type CreditStatus,
@@ -48,23 +48,27 @@ export function RiskCreditWorkspace({
   const [carrierSort, setCarrierSort] = useState<CarrierSort>("risk");
   const [creditQuery, setCreditQuery] = useState("");
   const [carrierQuery, setCarrierQuery] = useState("");
+  const [appliedFocusId, setAppliedFocusId] = useState(focusId);
 
-  useEffect(() => {
-    if (!focusId) return;
-    const customer = customers.find((c) => c.id === focusId);
-    if (customer) {
-      setCreditFilter(
-        customer.onCreditHold ? "hold" : customer.status === "ok" ? "all" : customer.status,
-      );
-      setCreditQuery("");
-      return;
+  // Adjust filters when deep-link focus changes (render-time sync, not an effect).
+  if (focusId !== appliedFocusId) {
+    setAppliedFocusId(focusId);
+    if (focusId) {
+      const customer = customers.find((c) => c.id === focusId);
+      if (customer) {
+        setCreditFilter(
+          customer.onCreditHold ? "hold" : customer.status === "ok" ? "all" : customer.status,
+        );
+        setCreditQuery("");
+      } else {
+        const carrier = carriers.find((c) => c.id === focusId);
+        if (carrier) {
+          setCarrierFilter(carrier.status === "current" ? "all" : carrier.status);
+          setCarrierQuery("");
+        }
+      }
     }
-    const carrier = carriers.find((c) => c.id === focusId);
-    if (carrier) {
-      setCarrierFilter(carrier.status === "current" ? "all" : carrier.status);
-      setCarrierQuery("");
-    }
-  }, [focusId, customers, carriers]);
+  }
 
   const creditCounts = useMemo(() => {
     const counts = {

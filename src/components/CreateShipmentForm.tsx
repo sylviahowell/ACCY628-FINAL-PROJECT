@@ -62,6 +62,7 @@ export function CreateShipmentForm({
   const quote = selected ? calcLaneQuote(Number(miles), selected) : null;
 
   const rateNum = Number(customerRate) || 0;
+  const costNum = Number(carrierCost) || 0;
   const projected = customer ? customer.openAr + rateNum : 0;
   const overCredit =
     Boolean(customer) &&
@@ -69,7 +70,9 @@ export function CreateShipmentForm({
     rateNum > 0 &&
     projected > customer!.creditLimit;
   const onHold = Boolean(customer?.onCreditHold);
-  const blockSubmit = (overCredit || onHold) && !isManager;
+  const negativeMargin = costNum > 0 && costNum > rateNum;
+  const blockSubmit = (overCredit || onHold || negativeMargin) && !isManager;
+  const estMargin = rateNum - costNum;
 
   function applyQuoteFromContract(contract: ContractTermsInfo, mileStr: string) {
     const q = calcLaneQuote(Number(mileStr), contract);
@@ -337,21 +340,36 @@ export function CreateShipmentForm({
           placeholder="Discount (needs manager approval)"
           className="input input-bordered"
         />
+        {(rateNum > 0 || costNum > 0) && (
+          <p
+            className={`md:col-span-2 text-sm ${
+              negativeMargin ? "font-medium text-error" : "opacity-70"
+            }`}
+          >
+            Estimated margin {money(estMargin)}
+            {negativeMargin
+              ? " — loss load. Brokers cannot book; managers may override (logged)."
+              : null}
+          </p>
+        )}
         {isManager ? (
           <p className="md:col-span-2 text-xs opacity-60">
-            Managers may override credit limit and past-due credit holds; overrides are logged.
+            Managers may override credit limit, past-due credit holds, and negative margin; overrides
+            are logged.
           </p>
         ) : (
           <p className="md:col-span-2 text-xs opacity-60">
-            Booking is blocked if open AR + this rate exceeds the credit limit, or if past-due AR
-            meets the credit-hold threshold.
+            Booking is blocked if open AR + this rate exceeds the credit limit, past-due AR meets the
+            credit-hold threshold, or carrier cost exceeds customer rate.
           </p>
         )}
         <button className="btn btn-primary md:col-span-2" disabled={blockSubmit}>
           {blockSubmit
             ? onHold
               ? "Ask a manager — credit hold"
-              : "Ask a manager — over credit limit"
+              : negativeMargin
+                ? "Ask a manager — negative margin"
+                : "Ask a manager — over credit limit"
             : "Create shipment"}
         </button>
       </div>

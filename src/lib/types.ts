@@ -126,6 +126,7 @@ export function statusBadge(status: string) {
     sent: "badge-info",
     open: "badge-warning",
     resolved: "badge-success",
+    closed: "badge-ghost",
     rejected: "badge-error",
     on_hold: "badge-warning",
   };

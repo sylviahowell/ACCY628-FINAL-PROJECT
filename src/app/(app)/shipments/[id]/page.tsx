@@ -1,5 +1,6 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
+import { AssignCarrierForm } from "@/components/AssignCarrierForm";
 import { C2CTimeline } from "@/components/C2CTimeline";
 import {
   CustomerFriendlyStatusCard,
@@ -16,6 +17,11 @@ import {
   updateShipmentStatus,
 } from "@/lib/actions/freight";
 import { PodUploadForm } from "@/components/PodUploadForm";
+import { ShipmentJournalStrip } from "@/components/ShipmentJournalStrip";
+import {
+  buildAccountingEntries,
+  filterEntriesForShipment,
+} from "@/lib/accounting-entries";
 import { buildC2CTimeline } from "@/lib/c2c-timeline";
 import { normalizePodUrl, sanitizeDemoText } from "@/lib/display-text";
 import { isActiveFinalInvoice, isDepositInvoice } from "@/lib/invoice-helpers";
@@ -77,16 +83,59 @@ export default async function ShipmentDetailPage({
     .order("created_at", { ascending: false });
   const { data: invoices } =
     isCarrier
-      ? { data: [] as { id: string; invoice_number: string; status: string; amount_paid: number; total: number; created_at: string; due_date: string }[] }
+      ? { data: [] as {
+          id: string;
+          invoice_number: string;
+          status: string;
+          amount_paid: number;
+          total: number;
+          created_at: string;
+          due_date: string;
+          issue_date?: string;
+          shipment_id?: string | null;
+          customer_id?: string;
+        }[] }
       : await supabase.from("invoices").select("*").eq("shipment_id", id);
-  const { data: carrierBills } = canManageBilling(profile.role)
-    ? await supabase
-        .from("carrier_bills")
-        .select("id, bill_number, status")
-        .eq("shipment_id", id)
-        .neq("status", "cancelled")
-    : { data: [] as { id: string; bill_number: string; status: string }[] };
+  const { data: carrierBills } =
+    showInternalFinance || canManageBilling(profile.role)
+      ? await supabase
+          .from("carrier_bills")
+          .select(
+            "id, bill_number, status, total, issue_date, shipment_id, carriers(name), shipments(load_number)",
+          )
+          .eq("shipment_id", id)
+      : {
+          data: [] as {
+            id: string;
+            bill_number: string;
+            status: string;
+            total?: number;
+            issue_date?: string;
+            shipment_id?: string;
+            carriers?: { name?: string } | null;
+            shipments?: { load_number?: string } | null;
+          }[],
+        };
   const invoiceIds = (invoices ?? []).map((inv) => inv.id);
+  const { data: loadPayments } =
+    invoiceIds.length > 0 && (showInternalFinance || canManageBilling(profile.role))
+      ? await supabase
+          .from("payments")
+          .select(
+            "id, invoice_id, amount, payment_date, method, invoices(invoice_number, shipment_id, customers(name))",
+          )
+          .in("invoice_id", invoiceIds)
+      : { data: [] as never[] };
+  const carrierBillIds = (carrierBills ?? []).map((b) => b.id);
+  const { data: loadCarrierPayments } =
+    carrierBillIds.length > 0 && (showInternalFinance || canManageBilling(profile.role))
+      ? await supabase
+          .from("carrier_payments")
+          .select(
+            "id, carrier_bill_id, amount, payment_date, carrier_bills(bill_number, shipment_id, shipments(load_number))",
+          )
+          .in("carrier_bill_id", carrierBillIds)
+      : { data: [] as never[] };
   const { data: disputes } =
     invoiceIds.length > 0
       ? await supabase
@@ -145,7 +194,7 @@ export default async function ShipmentDetailPage({
   );
   const primaryInvoice = finalInvoices[0] ?? depositInvoices[0] ?? null;
   const billed = finalInvoices.length > 0;
-  const hasCarrierBill = (carrierBills ?? []).length > 0;
+  const hasCarrierBill = (carrierBills ?? []).some((b) => b.status !== "cancelled");
   let daysSinceDeliveryUnbilled: number | null = null;
   if (["delivered", "completed"].includes(s.status) && !billed && s.delivery_date) {
     daysSinceDeliveryUnbilled = Math.floor(
@@ -216,6 +265,119 @@ export default async function ShipmentDetailPage({
     isOperations(profile.role) ||
     (profile.role === "carrier" && profile.carrier_id === s.carrier_id);
   const canBill = canManageBilling(profile.role);
+  const showLoadJournals = showInternalFinance || canBill;
+  const loadJournalEntries = showLoadJournals
+    ? filterEntriesForShipment(
+        buildAccountingEntries({
+          shipments: [
+            {
+              id: s.id,
+              load_number: s.load_number,
+              status: s.status,
+              customer_rate: s.customer_rate,
+              carrier_cost: s.carrier_cost,
+              carrier_id: s.carrier_id,
+              discount_amount: s.discount_amount,
+              discount_approved: s.discount_approved,
+              delivery_date: s.delivery_date,
+              customers: (Array.isArray(s.customers) ? s.customers[0] : s.customers) as {
+                name?: string;
+              } | null,
+            },
+          ],
+          charges: (charges ?? []).map((c) => ({
+            shipment_id: c.shipment_id,
+            amount: c.amount,
+            billable_to_customer: c.billable_to_customer,
+            payable_to_carrier: c.payable_to_carrier,
+            approval_status: c.approval_status,
+          })),
+          pods: (pods ?? []).map((p) => ({
+            shipment_id: p.shipment_id,
+            delivered_at: p.delivered_at,
+          })),
+          invoices: (invoices ?? []).map((inv) => ({
+            id: inv.id,
+            shipment_id: inv.shipment_id ?? id,
+            invoice_number: inv.invoice_number,
+            status: inv.status,
+            total: inv.total,
+            issue_date: inv.issue_date ?? inv.created_at?.slice(0, 10) ?? today,
+            customers: (Array.isArray(s.customers) ? s.customers[0] : s.customers) as {
+              name?: string;
+            } | null,
+          })),
+          payments: (loadPayments ?? []).map((p) => {
+            const inv = (Array.isArray(p.invoices) ? p.invoices[0] : p.invoices) as {
+              invoice_number?: string;
+              shipment_id?: string | null;
+              customers?: { name?: string } | { name?: string }[] | null;
+            } | null;
+            const cust = inv?.customers
+              ? Array.isArray(inv.customers)
+                ? inv.customers[0]
+                : inv.customers
+              : null;
+            return {
+              id: p.id,
+              invoice_id: p.invoice_id,
+              amount: p.amount,
+              payment_date: p.payment_date,
+              method: p.method,
+              invoices: inv
+                ? {
+                    invoice_number: inv.invoice_number,
+                    shipment_id: inv.shipment_id ?? id,
+                    customers: cust,
+                  }
+                : null,
+            };
+          }),
+          carrierBills: (carrierBills ?? []).map((b) => ({
+            id: b.id,
+            bill_number: b.bill_number,
+            status: b.status,
+            total: b.total ?? 0,
+            issue_date: b.issue_date ?? today,
+            shipment_id: b.shipment_id ?? id,
+            carriers: (Array.isArray(b.carriers) ? b.carriers[0] : b.carriers) as {
+              name?: string;
+            } | null,
+            shipments: (Array.isArray(b.shipments) ? b.shipments[0] : b.shipments) as {
+              load_number?: string;
+            } | null,
+          })),
+          carrierPayments: (loadCarrierPayments ?? []).map((p) => {
+            const bill = (Array.isArray(p.carrier_bills)
+              ? p.carrier_bills[0]
+              : p.carrier_bills) as {
+              bill_number?: string;
+              shipment_id?: string;
+              shipments?: { load_number?: string } | { load_number?: string }[] | null;
+            } | null;
+            const ship = bill?.shipments
+              ? Array.isArray(bill.shipments)
+                ? bill.shipments[0]
+                : bill.shipments
+              : null;
+            return {
+              id: p.id,
+              carrier_bill_id: p.carrier_bill_id,
+              amount: p.amount,
+              payment_date: p.payment_date,
+              carrier_bills: bill
+                ? {
+                    bill_number: bill.bill_number,
+                    shipment_id: bill.shipment_id ?? id,
+                    shipments: ship,
+                  }
+                : null,
+            };
+          }),
+        }),
+        id,
+      )
+    : [];
   const canAssign =
     isOperations(profile.role) &&
     !["delivered", "completed", "cancelled"].includes(s.status);
@@ -509,6 +671,8 @@ export default async function ShipmentDetailPage({
         <C2CTimeline steps={c2cSteps} />
       </div>
 
+      {showLoadJournals ? <ShipmentJournalStrip entries={loadJournalEntries} /> : null}
+
       {showInternalFinance ? (
         <>
           <div className="grid gap-4 md:grid-cols-3">
@@ -619,85 +783,42 @@ export default async function ShipmentDetailPage({
               </li>
             </ul>
             {canAssign ? (
-              <form
-                id="assign-carrier"
+              <AssignCarrierForm
+                shipmentId={id}
+                customerRate={Number(s.customer_rate) || 0}
+                defaultCarrierCost={s.carrier_cost ?? ""}
+                defaultCarrierId={currentCarrierExpired ? "" : (s.carrier_id ?? "")}
+                isManager={profile.role === "manager"}
                 action={assignCarrier}
-                className="mt-4 grid gap-2 border-t border-base-200 pt-3"
-              >
-                <input type="hidden" name="shipment_id" value={id} />
-                <p className="text-xs opacity-60">
-                  Match using scorecards → confirm insurance → assign → book rate. Prefer
-                  Preferred / Approved carriers.
-                </p>
-                {suggestedCarriers.length > 0 ? (
-                  <div className="rounded-box border border-primary/30 bg-primary/5 p-3">
-                    <p className="text-xs font-semibold uppercase tracking-wide text-primary">
-                      Suggested for this load
-                    </p>
-                    <ul className="mt-2 space-y-1.5 text-sm">
-                      {suggestedCarriers.map((c) => (
-                        <li key={c.carrierId} className="flex flex-wrap items-center gap-2">
-                          <span className={`badge badge-sm ${tierBadge(c.tier)}`}>{c.tier}</span>
-                          <span className="font-medium">{c.name}</span>
-                          <span className="text-xs opacity-60">
-                            OTD {c.onTimeDeliveryPct ?? "—"}%
-                            {c.avgCarrierCost != null ? ` · avg cost ${money(c.avgCarrierCost)}` : ""}
-                            {c.insuranceExpiration ? ` · insured thru ${c.insuranceExpiration}` : ""}
-                          </span>
-                        </li>
-                      ))}
-                    </ul>
-                  </div>
-                ) : null}
-                <label className="form-control w-full">
-                  <span className="label-text text-xs">Assign / reassign carrier</span>
-                  <select
-                    name="carrier_id"
-                    className="select select-bordered select-sm"
-                    defaultValue={currentCarrierExpired ? "" : (s.carrier_id ?? "")}
-                  >
-                    <option value="">Unassigned</option>
-                    {assignableCarriers
-                      .filter(
-                        (c) =>
-                          c.id !== s.carrier_id ||
-                          insuranceRiskStatus(c.insurance_expiration ?? null, today).status !==
-                            "expired",
-                      )
-                      .map((c) => {
-                        const risk = insuranceRiskStatus(c.insurance_expiration ?? null, today);
-                        const insuranceLabel =
-                          risk.status === "expiring"
-                            ? ` · insurance ${c.insurance_expiration} (≤30d)`
-                            : risk.status === "unknown"
-                              ? " · insurance unknown"
-                              : c.insurance_expiration
-                                ? ` · insured thru ${c.insurance_expiration}`
-                                : "";
-                        return (
-                          <option key={c.id} value={c.id}>
-                            {c.name}
-                            {insuranceLabel}
-                          </option>
-                        );
-                      })}
-                  </select>
-                  <span className="label-text-alt opacity-60">
-                    Suspended carriers (expired insurance) are hidden and blocked server-side.
-                  </span>
-                </label>
-                <label className="form-control w-full">
-                  <span className="label-text text-xs">Carrier cost (optional update)</span>
-                  <input
-                    name="carrier_cost"
-                    type="number"
-                    step="0.01"
-                    defaultValue={s.carrier_cost ?? ""}
-                    className="input input-bordered input-sm"
-                  />
-                </label>
-                <button className="btn btn-primary btn-sm">Save carrier assignment</button>
-              </form>
+                suggestedCarriers={suggestedCarriers.map((c) => ({
+                  carrierId: c.carrierId,
+                  name: c.name,
+                  tier: c.tier,
+                  onTimeDeliveryPct: c.onTimeDeliveryPct,
+                  avgCarrierCost: c.avgCarrierCost,
+                  insuranceExpiration: c.insuranceExpiration,
+                  tierBadgeClass: tierBadge(c.tier),
+                }))}
+                carriers={assignableCarriers
+                  .filter(
+                    (c) =>
+                      c.id !== s.carrier_id ||
+                      insuranceRiskStatus(c.insurance_expiration ?? null, today).status !==
+                        "expired",
+                  )
+                  .map((c) => {
+                    const risk = insuranceRiskStatus(c.insurance_expiration ?? null, today);
+                    const insuranceLabel =
+                      risk.status === "expiring"
+                        ? ` · insurance ${c.insurance_expiration} (≤30d)`
+                        : risk.status === "unknown"
+                          ? " · insurance unknown"
+                          : c.insurance_expiration
+                            ? ` · insured thru ${c.insurance_expiration}`
+                            : "";
+                    return { id: c.id, name: c.name, insuranceLabel };
+                  })}
+              />
             ) : null}
           </div>
         </div>

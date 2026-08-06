@@ -4,6 +4,7 @@ export type AccountingEntryType =
   | "recognize"
   | "bill"
   | "collect"
+  | "write_off"
   | "accrue_ap"
   | "pay_carrier";
 
@@ -20,6 +21,7 @@ export type AccountingEntry = {
   memo: string;
   refLabel: string;
   refHref?: string;
+  shipmentId?: string | null;
   lines: JournalLine[];
 };
 
@@ -27,6 +29,7 @@ export const ENTRY_TYPE_LABEL: Record<AccountingEntryType, string> = {
   recognize: "Recognize revenue",
   bill: "Bill customer",
   collect: "Collect cash",
+  write_off: "Write off AR",
   accrue_ap: "Record carrier bill",
   pay_carrier: "Pay carrier",
 };
@@ -72,6 +75,7 @@ type PaymentRow = {
   invoice_id: string;
   amount: number | string;
   payment_date: string;
+  method?: string | null;
   invoices: {
     invoice_number?: string;
     shipment_id?: string | null;
@@ -200,6 +204,7 @@ export function buildAccountingEntries(input: {
       memo: `Performance complete — ${s.load_number} · ${customer}`,
       refLabel: s.load_number,
       refHref: `/shipments/${shipmentId}`,
+      shipmentId,
       lines,
     });
   }
@@ -217,7 +222,8 @@ export function buildAccountingEntries(input: {
       type: "bill",
       memo: `Invoice ${inv.invoice_number} · ${customer}`,
       refLabel: inv.invoice_number,
-      refHref: "/invoices",
+      refHref: `/invoices/${inv.id}`,
+      shipmentId: inv.shipment_id,
       lines: [
         { account: "Accounts receivable", debit: total, credit: 0 },
         { account: "Contract asset (unbilled earned)", debit: 0, credit: total },
@@ -230,6 +236,24 @@ export function buildAccountingEntries(input: {
     if (amount <= 0) continue;
     const invNo = pay.invoices?.invoice_number ?? "invoice";
     const customer = pay.invoices?.customers?.name ?? "customer";
+    const isWriteOff = (pay.method ?? "").toLowerCase().includes("write_off");
+
+    if (isWriteOff) {
+      entries.push({
+        id: `write_off-${pay.id}`,
+        date: dateOnly(pay.payment_date),
+        type: "write_off",
+        memo: `Bad debt write-off · ${invNo} · ${customer}`,
+        refLabel: invNo,
+        refHref: `/invoices/${pay.invoice_id}`,
+        shipmentId: pay.invoices?.shipment_id ?? null,
+        lines: [
+          { account: "Bad debt expense", debit: amount, credit: 0 },
+          { account: "Accounts receivable", debit: 0, credit: amount },
+        ],
+      });
+      continue;
+    }
 
     entries.push({
       id: `collect-${pay.id}`,
@@ -237,7 +261,8 @@ export function buildAccountingEntries(input: {
       type: "collect",
       memo: `Cash application · ${invNo} · ${customer}`,
       refLabel: invNo,
-      refHref: "/payments",
+      refHref: `/invoices/${pay.invoice_id}`,
+      shipmentId: pay.invoices?.shipment_id ?? null,
       lines: [
         { account: "Cash", debit: amount, credit: 0 },
         { account: "Accounts receivable", debit: 0, credit: amount },
@@ -260,6 +285,7 @@ export function buildAccountingEntries(input: {
       memo: `Carrier bill ${bill.bill_number} · ${loadNo} · ${carrier}`,
       refLabel: bill.bill_number,
       refHref: "/ap",
+      shipmentId: bill.shipment_id,
       lines: [
         { account: "Accrued carrier payable", debit: total, credit: 0 },
         { account: "Accounts payable", debit: 0, credit: total },
@@ -280,6 +306,7 @@ export function buildAccountingEntries(input: {
       memo: `Carrier remittance · ${billNo}${loadNo ? ` · ${loadNo}` : ""}`,
       refLabel: billNo,
       refHref: "/ap",
+      shipmentId: pay.carrier_bills?.shipment_id ?? null,
       lines: [
         { account: "Accounts payable", debit: amount, credit: 0 },
         { account: "Cash", debit: 0, credit: amount },
@@ -291,6 +318,13 @@ export function buildAccountingEntries(input: {
     if (a.date !== b.date) return b.date.localeCompare(a.date);
     return a.refLabel.localeCompare(b.refLabel);
   });
+}
+
+export function filterEntriesForShipment(
+  entries: AccountingEntry[],
+  shipmentId: string,
+): AccountingEntry[] {
+  return entries.filter((e) => e.shipmentId === shipmentId);
 }
 
 export function entryTotals(entry: AccountingEntry) {

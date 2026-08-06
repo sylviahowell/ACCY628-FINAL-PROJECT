@@ -19,6 +19,9 @@ function paymentMethodLabel(method: string | null | undefined) {
     case "check_simulated":
     case "check":
       return "Check";
+    case "write_off_simulated":
+    case "write_off":
+      return "Write-off";
     default:
       return method?.replace(/_simulated$/i, "").toUpperCase() || "—";
   }
@@ -36,6 +39,7 @@ export default async function PaymentsPage({
 
   const params = await resolveSearchParams(searchParams);
   const filter = params.filter;
+  const preselectedInvoiceId = params.invoice_id;
   const today = new Date().toISOString().slice(0, 10);
   const monthPrefix = today.slice(0, 7);
 
@@ -48,6 +52,11 @@ export default async function PaymentsPage({
     .from("invoices")
     .select("id, invoice_number, total, amount_paid, status, customers(name)")
     .in("status", ["pending", "sent", "partial", "overdue"]);
+
+  const preselected = (openInvoices ?? []).find((i) => i.id === preselectedInvoiceId);
+  const defaultAmount = preselected
+    ? Math.max(0, Number(preselected.total) - Number(preselected.amount_paid))
+    : undefined;
 
   const recorderIds = [
     ...new Set((payments ?? []).map((p) => p.recorded_by).filter(Boolean) as string[]),
@@ -83,11 +92,22 @@ export default async function PaymentsPage({
       {filterLabel ? <FilterBanner label={filterLabel} clearHref="/payments" /> : null}
 
       {canManageBilling(profile.role) ? (
-        <div className="card bg-base-100 shadow-sm">
+        <div id="record-payment" className="card bg-base-100 shadow-sm">
           <div className="card-body">
             <h2 className="card-title text-base">Record payment</h2>
+            {preselected ? (
+              <p className="text-sm opacity-70">
+                Prefilling {preselected.invoice_number} · balance{" "}
+                {money(Number(preselected.total) - Number(preselected.amount_paid))}.
+              </p>
+            ) : null}
             <form action={recordPayment} className="grid gap-3 md:grid-cols-2">
-              <select name="invoice_id" required className="select select-bordered md:col-span-2">
+              <select
+                name="invoice_id"
+                required
+                className="select select-bordered md:col-span-2"
+                defaultValue={preselected?.id ?? ""}
+              >
                 <option value="">Open invoice…</option>
                 {(openInvoices ?? []).map((inv) => (
                   <option key={inv.id} value={inv.id}>
@@ -97,7 +117,15 @@ export default async function PaymentsPage({
                 ))}
               </select>
               <input name="payment_date" type="date" defaultValue={new Date().toISOString().slice(0, 10)} className="input input-bordered" />
-              <input name="amount" type="number" step="0.01" required placeholder="Amount" className="input input-bordered" />
+              <input
+                name="amount"
+                type="number"
+                step="0.01"
+                required
+                placeholder="Amount"
+                className="input input-bordered"
+                defaultValue={defaultAmount != null && defaultAmount > 0 ? defaultAmount : undefined}
+              />
               <select name="method" className="select select-bordered">
                 <option value="ach_simulated">ACH</option>
                 <option value="wire_simulated">Wire</option>

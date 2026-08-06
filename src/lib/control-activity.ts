@@ -6,6 +6,7 @@ export function isControlOverrideNote(note: string | null | undefined): boolean 
     n.includes("override") ||
     n.includes("credit override") ||
     n.includes("credit hold") ||
+    n.includes("margin override") ||
     n.includes("discount") ||
     n.includes("outside the contract")
   );

@@ -125,6 +125,7 @@ export const ROWANLANE_CHART_OF_ACCOUNTS: ChartAccount[] = [
     name: "Bad debt expense",
     type: "expense",
     use: "Write-offs when collections fail on past-due customer AR (manual / control story).",
+    journalLabel: "Bad debt expense",
   },
   {
     number: "6100",

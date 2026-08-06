@@ -16,6 +16,7 @@ const ENTRY_FILTERS = new Set<AccountingEntryType>([
   "recognize",
   "bill",
   "collect",
+  "write_off",
   "accrue_ap",
   "pay_carrier",
 ]);
@@ -54,7 +55,7 @@ export default async function AccountingPage({
     .select("shipment_id, delivered_at");
   const { data: payments } = await supabase
     .from("payments")
-    .select("id, invoice_id, amount, payment_date, invoices(invoice_number, shipment_id, customers(name))");
+    .select("id, invoice_id, amount, payment_date, method, invoices(invoice_number, shipment_id, customers(name))");
   const { data: carrierBills } = await supabase
     .from("carrier_bills")
     .select(
@@ -97,6 +98,7 @@ export default async function AccountingPage({
         invoice_id: p.invoice_id,
         amount: p.amount,
         payment_date: p.payment_date,
+        method: p.method,
         invoices: inv
           ? {
               invoice_number: inv.invoice_number,

@@ -151,17 +151,33 @@ async function loadManagerProfitCounts(): Promise<ProfitNavCounts> {
   return { losses, lowMargin };
 }
 
+async function loadOpenSupportTicketCount(): Promise<number> {
+  const supabase = await createClient();
+  const { count } = await supabase
+    .from("support_tickets")
+    .select("id", { count: "exact", head: true })
+    .in("status", ["open", "pending"]);
+  return count ?? 0;
+}
+
 function navFor(
   role: Profile["role"],
   shipCounts?: ShipNavCounts | null,
   invCounts?: InvoiceNavCounts | null,
   profitCounts?: ProfitNavCounts | null,
+  supportOpenCount = 0,
 ): { primary: ShellNavItem[]; more: ShellNavItem[] } {
   const i = (node: ReactNode) => node;
   const settings: ShellNavItem = {
     href: "/settings",
     label: "Settings",
     icon: i(<Settings className="h-4 w-4" />),
+  };
+  const supportStaff: ShellNavItem = {
+    href: "/support",
+    label: "Support",
+    icon: i(<HelpCircle className="h-4 w-4" />),
+    count: supportOpenCount > 0 ? supportOpenCount : undefined,
   };
 
   switch (role) {
@@ -202,6 +218,7 @@ function navFor(
           { href: "/ar", label: "Accounts Receivable", icon: i(<BarChart3 className="h-4 w-4" />) },
           { href: "/ap", label: "Accounts Payable", icon: i(<Banknote className="h-4 w-4" />) },
           { href: "/disputes", label: "Disputes", icon: i(<AlertTriangle className="h-4 w-4" />) },
+          supportStaff,
           {
             href: "/profitability",
             label: "Profitability",
@@ -256,6 +273,7 @@ function navFor(
           { href: "/carriers", label: "Carriers", icon: i(<Truck className="h-4 w-4" />) },
           { href: "/customers", label: "Customers", icon: i(<Users className="h-4 w-4" />) },
           { href: "/contracts", label: "Contracts", icon: i(<ClipboardList className="h-4 w-4" />) },
+          supportStaff,
           settings,
         ],
         more: [],
@@ -272,6 +290,7 @@ function navFor(
           { href: "/ap", label: "Accounts Payable", icon: i(<Banknote className="h-4 w-4" />) },
           { href: "/payments", label: "Payments", icon: i(<Wallet className="h-4 w-4" />) },
           { href: "/disputes", label: "Disputes", icon: i(<AlertTriangle className="h-4 w-4" />) },
+          supportStaff,
           { href: "/accounting", label: "Accounting", icon: i(<ClipboardList className="h-4 w-4" />) },
           { href: "/profitability", label: "Profitability", icon: i(<LineChart className="h-4 w-4" />) },
           settings,
@@ -298,6 +317,7 @@ function navFor(
           { href: "/warnings", label: "Alerts", icon: i(<AlertTriangle className="h-4 w-4" />) },
           { href: "/shipments", label: "My Deliveries", icon: i(<Truck className="h-4 w-4" />) },
           { href: "/documents", label: "Documents", icon: i(<FolderOpen className="h-4 w-4" />) },
+          { href: "/support", label: "Support", icon: i(<HelpCircle className="h-4 w-4" />) },
           settings,
         ],
         more: [],
@@ -324,17 +344,24 @@ export async function AppShell({
 }) {
   const isManager = profile.role === "manager";
   const isBroker = profile.role === "broker";
-  const [shipCounts, profitCounts] = isManager || isBroker
-    ? await Promise.all([
-        loadManagerShipCounts(),
-        isManager ? loadManagerProfitCounts() : Promise.resolve(null),
-      ])
-    : [null, null];
+  const isBilling = profile.role === "billing";
+  const loadSupportCount = isManager || isBroker || isBilling;
+  const [shipCounts, profitCounts, supportOpenCount] = await Promise.all([
+    isManager || isBroker ? loadManagerShipCounts() : Promise.resolve(null),
+    isManager ? loadManagerProfitCounts() : Promise.resolve(null),
+    loadSupportCount ? loadOpenSupportTicketCount() : Promise.resolve(0),
+  ]);
   const invCounts =
     isManager && shipCounts
       ? await loadManagerInvoiceCounts(shipCounts.ready)
       : null;
-  const { primary, more } = navFor(profile.role, shipCounts, invCounts, profitCounts);
+  const { primary, more } = navFor(
+    profile.role,
+    shipCounts,
+    invCounts,
+    profitCounts,
+    supportOpenCount,
+  );
   const showDemoSelector = isDemoMode;
   const roleDisplay = showDemoSelector
     ? demoRoleLabel(profile.role)

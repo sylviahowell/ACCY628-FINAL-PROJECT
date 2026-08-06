@@ -7,6 +7,17 @@ import { formString, nonEmptyString, parseForm, uuidSchema } from "@/lib/action-
 import { isDateOutsideContractWindow } from "@/lib/contract-terms";
 import { depositAmountDue } from "@/lib/invoice-helpers";
 import { expirePastEndContracts } from "@/lib/actions/contracts-lifecycle";
+import {
+  creditHoldMessage,
+  creditHoldOverrideNote,
+  isOnCreditHold,
+  pastDueBalanceFromInvoices,
+} from "@/lib/credit-hold";
+import {
+  isNegativeMargin,
+  negativeMarginMessage,
+  negativeMarginOverrideNote,
+} from "@/lib/margin-gate";
 import { isOperations } from "@/lib/types";
 import { createClient } from "@/lib/supabase/server";
 import { z } from "zod";
@@ -14,6 +25,11 @@ import { z } from "zod";
 function toastPath(path: string, message: string) {
   const join = path.includes("?") ? "&" : "?";
   return `${path}${join}toast=${encodeURIComponent(message)}`;
+}
+
+function toastErrorPath(path: string, message: string) {
+  const join = path.includes("?") ? "&" : "?";
+  return `${path}${join}toastError=${encodeURIComponent(message)}`;
 }
 
 async function logStatus(
@@ -187,23 +203,37 @@ export async function acceptCoverageRequest(formData: FormData) {
     .single();
   if (!customer) throw new Error("Customer not found.");
 
+  const today = new Date().toISOString().slice(0, 10);
   const { data: openInvoices } = await supabase
     .from("invoices")
-    .select("total, amount_paid, status")
+    .select("total, amount_paid, status, due_date")
     .eq("customer_id", req.customer_id)
     .neq("status", "cancelled");
   const openAr = (openInvoices ?? []).reduce((sum, inv) => {
     if (["paid", "cancelled"].includes(inv.status)) return sum;
     return sum + Math.max(0, Number(inv.total) - Number(inv.amount_paid));
   }, 0);
+  const pastDue = pastDueBalanceFromInvoices(openInvoices ?? [], today);
+  const onCreditHold = isOnCreditHold(pastDue);
+  if (onCreditHold && profile.role !== "manager") {
+    redirect(toastErrorPath("/coverage", creditHoldMessage(customer.name, pastDue)));
+  }
+
   const creditLimit = Number(customer.credit_limit ?? 0);
   const projected = openAr + customerRate;
-  if (creditLimit > 0 && projected > creditLimit) {
-    if (profile.role !== "manager") {
-      throw new Error(
+  const overCredit = creditLimit > 0 && projected > creditLimit;
+  if (overCredit && profile.role !== "manager") {
+    redirect(
+      toastErrorPath(
+        "/coverage",
         `Credit limit exceeded for ${customer.name}: open AR ${openAr.toFixed(0)} + rate ${customerRate.toFixed(0)} > limit ${creditLimit.toFixed(0)}. Ask a manager to book.`,
-      );
-    }
+      ),
+    );
+  }
+
+  const lossLoad = isNegativeMargin(customerRate, carrierCost);
+  if (lossLoad && profile.role !== "manager") {
+    redirect(toastErrorPath("/coverage", negativeMarginMessage(customerRate, carrierCost)));
   }
 
   const pickup = String(req.pickup_location || "").trim();
@@ -241,17 +271,37 @@ export async function acceptCoverageRequest(formData: FormData) {
     .single();
   if (shipErr) throw new Error(shipErr.message);
 
-  const creditNote =
-    creditLimit > 0 && projected > creditLimit && profile.role === "manager"
-      ? ` Credit override: AR ${openAr.toFixed(0)} + rate ${customerRate.toFixed(0)} > limit ${creditLimit.toFixed(0)}.`
-      : "";
   await logStatus(
     ship.id,
     null,
     "scheduled",
     profile.id,
-    `Created from customer coverage request${req.notes ? `: ${req.notes}` : ""}.${creditNote}`,
+    `Created from customer coverage request${req.notes ? `: ${req.notes}` : ""}.`,
   );
+
+  if (profile.role === "manager") {
+    if (onCreditHold) {
+      await logStatus(ship.id, null, "scheduled", profile.id, creditHoldOverrideNote(pastDue));
+    }
+    if (overCredit) {
+      await logStatus(
+        ship.id,
+        null,
+        "scheduled",
+        profile.id,
+        `Credit override: AR ${openAr.toFixed(0)} + rate ${customerRate.toFixed(0)} > limit ${creditLimit.toFixed(0)}`,
+      );
+    }
+    if (lossLoad) {
+      await logStatus(
+        ship.id,
+        null,
+        "scheduled",
+        profile.id,
+        negativeMarginOverrideNote(customerRate, carrierCost),
+      );
+    }
+  }
 
   const depositAmt = depositAmountDue(customerRate, Number(contract.downpayment_pct ?? 0));
   if (depositAmt > 0) {

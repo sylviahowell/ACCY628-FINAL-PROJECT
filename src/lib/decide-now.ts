@@ -251,7 +251,7 @@ export function buildDecideNowCandidates(input: {
       detail: `${input.unbilledShipments.length} load${
         input.unbilledShipments.length === 1 ? "" : "s"
       } with POD · top ${top.load_number}`,
-      href: "/shipments?filter=ready-to-bill",
+      href: "/shipments?status=ready",
       tone: "warning",
       cta: "Review",
       // Revenue waiting — important, but below service / credit failures.

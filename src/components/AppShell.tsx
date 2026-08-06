@@ -48,11 +48,6 @@ type InvoiceNavCounts = {
   open: number;
 };
 
-type ProfitNavCounts = {
-  losses: number;
-  lowMargin: number;
-};
-
 async function loadManagerShipCounts(): Promise<ShipNavCounts> {
   const supabase = await createClient();
   const today = new Date().toISOString().slice(0, 10);
@@ -127,31 +122,6 @@ async function loadManagerInvoiceCounts(readyFromShips: number): Promise<Invoice
   };
 }
 
-async function loadManagerProfitCounts(): Promise<ProfitNavCounts> {
-  const supabase = await createClient();
-  // View columns only — avoid select("*") on every shell render.
-  const { data } = await supabase
-    .from("shipment_profitability")
-    .select("margin, customer_rate, billable_accessorials, discount_amount");
-
-  let losses = 0;
-  let lowMargin = 0;
-  for (const p of data ?? []) {
-    const billable = Number(p.billable_accessorials);
-    const discount = Number(p.discount_amount || 0);
-    const revenue = Number(p.customer_rate) + billable - discount;
-    const margin = Number(p.margin);
-    if (margin < 0 || revenue <= 0) {
-      losses += 1;
-      continue;
-    }
-    const pct = (margin / revenue) * 100;
-    if (pct >= 0 && pct < 12) lowMargin += 1;
-  }
-
-  return { losses, lowMargin };
-}
-
 async function loadOpenSupportTicketCount(): Promise<number> {
   const supabase = await createClient();
   const { count } = await supabase
@@ -165,7 +135,6 @@ function navFor(
   role: Profile["role"],
   shipCounts?: ShipNavCounts | null,
   invCounts?: InvoiceNavCounts | null,
-  profitCounts?: ProfitNavCounts | null,
   supportOpenCount = 0,
 ): { primary: ShellNavItem[]; more: ShellNavItem[] } {
   const i = (node: ReactNode) => node;
@@ -185,7 +154,6 @@ function navFor(
     case "manager": {
       const c = shipCounts ?? { delayed: 0, unassigned: 0, ready: 0, needsPod: 0 };
       const inv = invCounts ?? { ready: 0, overdue: 0, open: 0 };
-      const pr = profitCounts ?? { losses: 0, lowMargin: 0 };
       return {
         primary: [
           { href: "/dashboard", label: "Executive Dashboard", icon: i(<LayoutDashboard className="h-4 w-4" />) },
@@ -201,7 +169,7 @@ function navFor(
             children: [
               { href: "/shipments?status=delayed", label: "Delayed", count: c.delayed },
               { href: "/shipments?status=unassigned", label: "Needs coverage", count: c.unassigned },
-              { href: "/shipments?status=ready", label: "Ready to bill", count: c.ready },
+              { href: "/shipments?status=ready", label: "Loads to invoice", count: c.ready },
               { href: "/shipments", label: "All loads" },
             ],
           },
@@ -227,17 +195,7 @@ function navFor(
             children: [
               {
                 href: "/profitability#customer-performance",
-                label: "Loss loads",
-                count: pr.losses,
-              },
-              {
-                href: "/profitability#customer-performance",
-                label: "Low margin",
-                count: pr.lowMargin,
-              },
-              {
-                href: "/profitability#customer-performance",
-                label: "Overview",
+                label: "Partner explorer",
               },
             ],
           },
@@ -340,9 +298,8 @@ async function AppShellNav({ profile }: { profile: Profile }) {
   const isBilling = profile.role === "billing";
   const loadSupportCount = isManager || isBroker || isBilling;
 
-  const [shipCounts, profitCounts, supportOpenCount, invBase] = await Promise.all([
+  const [shipCounts, supportOpenCount, invBase] = await Promise.all([
     isManager || isBroker ? loadManagerShipCounts() : Promise.resolve(null),
-    isManager ? loadManagerProfitCounts() : Promise.resolve(null),
     loadSupportCount ? loadOpenSupportTicketCount() : Promise.resolve(0),
     isManager ? loadManagerInvoiceCounts(0) : Promise.resolve(null),
   ]);
@@ -354,7 +311,6 @@ async function AppShellNav({ profile }: { profile: Profile }) {
     profile.role,
     shipCounts,
     invCounts,
-    profitCounts,
     supportOpenCount,
   );
 
@@ -375,7 +331,7 @@ async function AppShellNav({ profile }: { profile: Profile }) {
 }
 
 function AppShellNavFallback({ profile }: { profile: Profile }) {
-  const { primary, more } = navFor(profile.role, null, null, null, 0);
+  const { primary, more } = navFor(profile.role, null, null, 0);
   return (
     <>
       <AppNavLinks links={primary} />

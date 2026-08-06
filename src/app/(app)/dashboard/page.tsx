@@ -827,12 +827,12 @@ export default async function DashboardPage() {
         ? [
             {
               id: "broker-unassigned",
-              title: `${stats.unassigned} unassigned load(s)`,
+              title: `${stats.unassigned} load(s) need coverage`,
               metric: String(stats.unassigned),
               metricKind: "count" as const,
               metricUnit: stats.unassigned === 1 ? "load" : "loads",
               detail: "Cover with a Preferred / Approved carrier from scorecards",
-              href: "/shipments?filter=unassigned",
+              href: "/shipments?status=unassigned",
               tone: "warning" as const,
               cta: "Open",
               score: stats.unassigned * 60_000,
@@ -935,13 +935,13 @@ export default async function DashboardPage() {
             href="/shipments?filter=delivery-today"
           />
           <DashboardStatCard
-            title="Awaiting carrier"
+            title="Needs coverage"
             value={String(stats.unassigned)}
             icon={Truck}
             warn={stats.unassigned > 0}
             meter={stats.unassigned / brokerScale}
             meterLabel="Share of today's broker load"
-            href="/shipments?filter=unassigned"
+            href="/shipments?status=unassigned"
           />
           <DashboardStatCard
             title="Delayed loads"
@@ -1084,7 +1084,7 @@ export default async function DashboardPage() {
           subtitle="AR aging, AP payables, unbilled queues, disputes, and collection actions"
           action={
             <div className="flex flex-wrap gap-2">
-              <Link href="/invoices" className="btn btn-outline btn-sm">
+              <Link href="/invoices?status=ready" className="btn btn-outline btn-sm">
                 Ready to bill
               </Link>
               <Link href="/ap" className="btn btn-outline btn-sm">
@@ -1108,7 +1108,7 @@ export default async function DashboardPage() {
                 ? `${ready.length} of ${ready.length + awaitingDocs.length} unbilled loads are ready`
                 : "No unbilled queue"
             }
-            href="/shipments?filter=ready-to-bill"
+            href="/shipments?status=ready"
           />
           <DashboardStatCard
             title="Total AR"
@@ -1332,11 +1332,12 @@ export default async function DashboardPage() {
           <p className="font-semibold">Need a carrier?</p>
           <p className="mt-1 opacity-80">
             Submit a coverage request with your lane and dates. Broker Operations books the load,
-            assigns a carrier, then you track it on My Shipments.
+            assigns a carrier, then you track it on My Shipments. Use{" "}
+            <Link href="/coverage" className="link link-primary font-medium">
+              Request coverage
+            </Link>{" "}
+            above to open the form.
           </p>
-          <Link href="/coverage" className="btn btn-primary btn-sm mt-3">
-            Open request form
-          </Link>
         </div>
         <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
           <DashboardStatCard

@@ -140,13 +140,16 @@ export default async function WarningsPage() {
     today,
   });
   const alerts = filterAlertsForProfile(all, profile);
+  const isPortalAlerts = profile.role === "customer" || profile.role === "carrier";
 
   return (
     <div className="space-y-6">
       <div>
-        <h1 className="text-2xl font-bold">Warning Center</h1>
+        <h1 className="text-2xl font-bold">{isPortalAlerts ? "Alerts" : "Warning Center"}</h1>
         <p className="text-sm opacity-70">
-          Live exceptions for your role — critical first. Use filters to triage, then Resolve.
+          {isPortalAlerts
+            ? "Items that need your attention — critical first. Open a row to review or resolve."
+            : "Live exceptions for your role — critical first. Use filters to triage, then Resolve."}
         </p>
       </div>
 

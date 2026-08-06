@@ -4,8 +4,8 @@ import {
   AlertTriangle,
   Banknote,
   BarChart3,
-  Building2,
   CheckSquare,
+  Menu,
   ClipboardList,
   FileText,
   FolderOpen,
@@ -46,11 +46,6 @@ type InvoiceNavCounts = {
   ready: number;
   overdue: number;
   open: number;
-};
-
-type ProfitNavCounts = {
-  losses: number;
-  lowMargin: number;
 };
 
 async function loadManagerShipCounts(): Promise<ShipNavCounts> {
@@ -127,31 +122,6 @@ async function loadManagerInvoiceCounts(readyFromShips: number): Promise<Invoice
   };
 }
 
-async function loadManagerProfitCounts(): Promise<ProfitNavCounts> {
-  const supabase = await createClient();
-  // View columns only — avoid select("*") on every shell render.
-  const { data } = await supabase
-    .from("shipment_profitability")
-    .select("margin, customer_rate, billable_accessorials, discount_amount");
-
-  let losses = 0;
-  let lowMargin = 0;
-  for (const p of data ?? []) {
-    const billable = Number(p.billable_accessorials);
-    const discount = Number(p.discount_amount || 0);
-    const revenue = Number(p.customer_rate) + billable - discount;
-    const margin = Number(p.margin);
-    if (margin < 0 || revenue <= 0) {
-      losses += 1;
-      continue;
-    }
-    const pct = (margin / revenue) * 100;
-    if (pct >= 0 && pct < 12) lowMargin += 1;
-  }
-
-  return { losses, lowMargin };
-}
-
 async function loadOpenSupportTicketCount(): Promise<number> {
   const supabase = await createClient();
   const { count } = await supabase
@@ -165,7 +135,6 @@ function navFor(
   role: Profile["role"],
   shipCounts?: ShipNavCounts | null,
   invCounts?: InvoiceNavCounts | null,
-  profitCounts?: ProfitNavCounts | null,
   supportOpenCount = 0,
 ): { primary: ShellNavItem[]; more: ShellNavItem[] } {
   const i = (node: ReactNode) => node;
@@ -185,7 +154,6 @@ function navFor(
     case "manager": {
       const c = shipCounts ?? { delayed: 0, unassigned: 0, ready: 0, needsPod: 0 };
       const inv = invCounts ?? { ready: 0, overdue: 0, open: 0 };
-      const pr = profitCounts ?? { losses: 0, lowMargin: 0 };
       return {
         primary: [
           { href: "/dashboard", label: "Executive Dashboard", icon: i(<LayoutDashboard className="h-4 w-4" />) },
@@ -201,7 +169,7 @@ function navFor(
             children: [
               { href: "/shipments?status=delayed", label: "Delayed", count: c.delayed },
               { href: "/shipments?status=unassigned", label: "Needs coverage", count: c.unassigned },
-              { href: "/shipments?status=ready", label: "Ready to bill", count: c.ready },
+              { href: "/shipments?status=ready", label: "Loads to invoice", count: c.ready },
               { href: "/shipments", label: "All loads" },
             ],
           },
@@ -227,17 +195,7 @@ function navFor(
             children: [
               {
                 href: "/profitability#customer-performance",
-                label: "Loss loads",
-                count: pr.losses,
-              },
-              {
-                href: "/profitability#customer-performance",
-                label: "Low margin",
-                count: pr.lowMargin,
-              },
-              {
-                href: "/profitability#customer-performance",
-                label: "Overview",
+                label: "Partner explorer",
               },
             ],
           },
@@ -340,9 +298,8 @@ async function AppShellNav({ profile }: { profile: Profile }) {
   const isBilling = profile.role === "billing";
   const loadSupportCount = isManager || isBroker || isBilling;
 
-  const [shipCounts, profitCounts, supportOpenCount, invBase] = await Promise.all([
+  const [shipCounts, supportOpenCount, invBase] = await Promise.all([
     isManager || isBroker ? loadManagerShipCounts() : Promise.resolve(null),
-    isManager ? loadManagerProfitCounts() : Promise.resolve(null),
     loadSupportCount ? loadOpenSupportTicketCount() : Promise.resolve(0),
     isManager ? loadManagerInvoiceCounts(0) : Promise.resolve(null),
   ]);
@@ -354,7 +311,6 @@ async function AppShellNav({ profile }: { profile: Profile }) {
     profile.role,
     shipCounts,
     invCounts,
-    profitCounts,
     supportOpenCount,
   );
 
@@ -375,7 +331,7 @@ async function AppShellNav({ profile }: { profile: Profile }) {
 }
 
 function AppShellNavFallback({ profile }: { profile: Profile }) {
-  const { primary, more } = navFor(profile.role, null, null, null, 0);
+  const { primary, more } = navFor(profile.role, null, null, 0);
   return (
     <>
       <AppNavLinks links={primary} />
@@ -413,8 +369,12 @@ export function AppShell({
       <div className="drawer-content flex flex-col">
         <div className="navbar min-h-16 flex-wrap items-center gap-x-3 gap-y-3 border-b border-base-300 bg-base-100/95 px-3 py-2 backdrop-blur-sm sm:px-4">
           <div className="flex-none lg:hidden">
-            <label htmlFor="app-drawer" className="btn btn-square btn-ghost">
-              <Building2 className="h-5 w-5" />
+            <label
+              htmlFor="app-drawer"
+              className="btn btn-square btn-ghost"
+              aria-label="Open menu"
+            >
+              <Menu className="h-5 w-5" />
             </label>
           </div>
           <div className="flex min-w-0 flex-1 basis-[min(100%,18rem)] items-center gap-3 sm:gap-4">
@@ -425,10 +385,7 @@ export function AppShell({
             >
               <RowanLaneMark size={42} />
               <div className="min-w-0">
-                <p className="text-xl font-bold tracking-tight text-primary">RowanLane</p>
-                <p className="hidden text-xs font-medium tracking-wide text-base-content/50 sm:block">
-                  Contract to cash
-                </p>
+                <p className="font-brand text-xl font-bold text-primary">RowanLane</p>
               </div>
             </Link>
             <GlobalSearch placeholder={searchPlaceholderForRole(profile.role)} />
@@ -467,10 +424,10 @@ export function AppShell({
         </main>
       </div>
 
-      <div className="drawer-side z-40">
+      <div className="drawer-side z-40 lg:h-screen">
         <label htmlFor="app-drawer" className="drawer-overlay" aria-label="Close menu" />
-        <aside className="flex min-h-full w-72 flex-col border-r border-base-300 bg-base-100 text-base-content">
-          <div className="app-sidebar-brand border-b border-base-300 p-5">
+        <aside className="flex max-h-screen w-72 flex-col border-r border-base-300 bg-base-100 text-base-content max-lg:min-h-full lg:sticky lg:top-0 lg:h-screen">
+          <div className="app-sidebar-brand shrink-0 border-b border-base-300 p-5">
             <Link
               href="/dashboard"
               className="flex items-center gap-3 rounded-box outline-offset-2 hover:opacity-90 focus-visible:outline focus-visible:outline-2 focus-visible:outline-primary"
@@ -478,7 +435,7 @@ export function AppShell({
             >
               <RowanLaneMark size={46} />
               <div className="min-w-0">
-                <p className="text-xl font-bold tracking-tight text-primary">RowanLane</p>
+                <p className="font-brand text-xl font-bold text-primary">RowanLane</p>
                 <p className="text-sm font-medium text-base-content/80">{roleDisplay}</p>
               </div>
             </Link>
@@ -491,9 +448,11 @@ export function AppShell({
               </p>
             ) : null}
           </div>
-          <Suspense fallback={<AppShellNavFallback profile={profile} />}>
-            <AppShellNav profile={profile} />
-          </Suspense>
+          <div className="flex min-h-0 flex-1 flex-col overflow-y-auto overscroll-contain">
+            <Suspense fallback={<AppShellNavFallback profile={profile} />}>
+              <AppShellNav profile={profile} />
+            </Suspense>
+          </div>
         </aside>
       </div>
     </div>

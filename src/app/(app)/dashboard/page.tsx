@@ -1,5 +1,19 @@
 import Link from "next/link";
 import {
+  AlertTriangle,
+  Banknote,
+  CalendarClock,
+  ClipboardList,
+  FileWarning,
+  HandCoins,
+  Package,
+  PackageCheck,
+  Scale,
+  Timer,
+  Truck,
+  Wallet,
+} from "lucide-react";
+import {
   KpiRibbon,
   MorningBriefCard,
 } from "@/components/ExecutivePanels";
@@ -7,6 +21,10 @@ import { BillingInsightsPanel, UnbilledQueuePanel } from "@/components/BillingPa
 import { BrokerTaskBoard } from "@/components/BrokerTaskBoard";
 import { CarrierTaskList } from "@/components/CarrierTaskList";
 import { CollectionsWorklist } from "@/components/CollectionsWorklist";
+import {
+  AgingCompositionBar,
+  DashboardStatCard,
+} from "@/components/DashboardStatCard";
 import { PayablesWorklist } from "@/components/PayablesWorklist";
 import { CustomerFriendlyStatusCard } from "@/components/ShipmentHealthCard";
 import { ProfitabilityHeatmap } from "@/components/ProfitabilityHeatmap";
@@ -684,6 +702,15 @@ export default async function DashboardPage() {
       podShipmentIds: podSet,
     });
     const stats = brokerTaskStats(brokerTasks);
+    const brokerScale = Math.max(
+      1,
+      pendingCoverageCount,
+      stats.pickupsToday,
+      stats.deliveriesToday,
+      stats.unassigned,
+      stats.delayed,
+      stats.accessorial,
+    );
 
     const profitMap = new Map(
       profitList.map((p) => [
@@ -800,12 +827,12 @@ export default async function DashboardPage() {
         ? [
             {
               id: "broker-unassigned",
-              title: `${stats.unassigned} unassigned load(s)`,
+              title: `${stats.unassigned} load(s) need coverage`,
               metric: String(stats.unassigned),
               metricKind: "count" as const,
               metricUnit: stats.unassigned === 1 ? "load" : "loads",
               detail: "Cover with a Preferred / Approved carrier from scorecards",
-              href: "/shipments?filter=unassigned",
+              href: "/shipments?status=unassigned",
               tone: "warning" as const,
               cta: "Open",
               score: stats.unassigned * 60_000,
@@ -882,37 +909,55 @@ export default async function DashboardPage() {
           </ol>
         </div>
         <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-6">
-          <Stat
+          <DashboardStatCard
             title="Coverage requests"
             value={String(pendingCoverageCount)}
+            icon={ClipboardList}
             warn={pendingCoverageCount > 0}
+            meter={pendingCoverageCount / brokerScale}
+            meterLabel="Share of today's broker load"
             href="/coverage"
           />
-          <Stat
+          <DashboardStatCard
             title="Today's pickups"
             value={String(stats.pickupsToday)}
+            icon={Package}
+            meter={stats.pickupsToday / brokerScale}
+            meterLabel="Share of today's broker load"
             href="/shipments?filter=pickup-today"
           />
-          <Stat
+          <DashboardStatCard
             title="Today's deliveries"
             value={String(stats.deliveriesToday)}
+            icon={PackageCheck}
+            meter={stats.deliveriesToday / brokerScale}
+            meterLabel="Share of today's broker load"
             href="/shipments?filter=delivery-today"
           />
-          <Stat
-            title="Awaiting carrier"
+          <DashboardStatCard
+            title="Needs coverage"
             value={String(stats.unassigned)}
+            icon={Truck}
             warn={stats.unassigned > 0}
-            href="/shipments?filter=unassigned"
+            meter={stats.unassigned / brokerScale}
+            meterLabel="Share of today's broker load"
+            href="/shipments?status=unassigned"
           />
-          <Stat
+          <DashboardStatCard
             title="Delayed loads"
             value={String(stats.delayed)}
+            icon={AlertTriangle}
             warn={stats.delayed > 0}
+            meter={stats.delayed / brokerScale}
+            meterLabel="Share of today's broker load"
             href="/shipments?filter=delayed"
           />
-          <Stat
+          <DashboardStatCard
             title="Waiting on manager"
             value={String(stats.accessorial)}
+            icon={Scale}
+            meter={stats.accessorial / brokerScale}
+            meterLabel="Share of today's broker load"
             href="/warnings?severity=info"
           />
         </div>
@@ -954,6 +999,7 @@ export default async function DashboardPage() {
 
     const aging = computeAging(invList, today);
     const agingChart = agingChartData(aging);
+    const pastDueAr = aging.d1_30 + aging.d31_60 + aging.d61_90 + aging.d90_plus;
     const openDisputes = disputeList.filter((d) => d.status === "open");
     const disputedBalance = openDisputes.reduce(
       (s, d) => s + Number(d.amount_disputed),
@@ -1038,7 +1084,7 @@ export default async function DashboardPage() {
           subtitle="AR aging, AP payables, unbilled queues, disputes, and collection actions"
           action={
             <div className="flex flex-wrap gap-2">
-              <Link href="/invoices" className="btn btn-outline btn-sm">
+              <Link href="/invoices?status=ready" className="btn btn-outline btn-sm">
                 Ready to bill
               </Link>
               <Link href="/ap" className="btn btn-outline btn-sm">
@@ -1051,39 +1097,85 @@ export default async function DashboardPage() {
           }
         />
         <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
-          <Stat
+          <DashboardStatCard
             title="Delivered but unbilled"
             value={String(ready.length)}
+            icon={ClipboardList}
             warn={ready.length > 0}
-            href="/shipments?filter=ready-to-bill"
+            meter={ready.length / Math.max(1, ready.length + awaitingDocs.length)}
+            meterLabel={
+              ready.length + awaitingDocs.length > 0
+                ? `${ready.length} of ${ready.length + awaitingDocs.length} unbilled loads are ready`
+                : "No unbilled queue"
+            }
+            href="/shipments?status=ready"
           />
-          <Stat title="Total AR" value={money(ar)} href="/ar" />
-          <Stat
-            title="Past-due AR"
-            value={money(aging.d1_30 + aging.d31_60 + aging.d61_90 + aging.d90_plus)}
-            warn={aging.d1_30 + aging.d31_60 + aging.d61_90 + aging.d90_plus > 0}
+          <DashboardStatCard
+            title="Total AR"
+            value={money(ar)}
+            icon={Wallet}
+            caption={
+              pastDueAr > 0
+                ? `${Math.round((pastDueAr / Math.max(ar, 1)) * 100)}% is past due · ${money(pastDueAr)}`
+                : "Nothing past due"
+            }
+            href="/ar"
+          />
+          <DashboardStatCard
+            title="Past-due share"
+            value={ar > 0 ? `${Math.round((pastDueAr / ar) * 100)}%` : "0%"}
+            icon={AlertTriangle}
+            warn={pastDueAr > 0}
+            meter={ar > 0 ? pastDueAr / ar : 0}
+            meterLabel={`${money(pastDueAr)} past due of ${money(ar)} AR`}
             href="/ar?filter=d1_30"
           />
-          <Stat
-            title="Cash received this month"
+          <DashboardStatCard
+            title="Cash this month"
             value={money(cashMonth)}
+            icon={Banknote}
+            meter={ar > 0 ? Math.min(1, cashMonth / ar) : cashMonth > 0 ? 1 : 0}
+            meterLabel={
+              ar > 0
+                ? `${Math.round(Math.min(100, (cashMonth / ar) * 100))}% of open AR collected this month`
+                : "No open AR baseline"
+            }
             href="/payments?filter=month"
           />
-          <Stat title="Open AP" value={money(apOpenBilling)} warn={apOpenBilling > 0} href="/ap" />
-          <Stat
-            title="Disputed invoice balance"
-            value={money(disputedBalance)}
+          <DashboardStatCard
+            title="Open AP"
+            value={money(apOpenBilling)}
+            icon={HandCoins}
+            warn={apOpenBilling > 0}
+            meter={
+              ar + apOpenBilling > 0 ? apOpenBilling / (ar + apOpenBilling) : 0
+            }
+            meterLabel="Share of AR+AP open balances"
+            href="/ap"
+          />
+          <DashboardStatCard
+            title="Disputed share"
+            value={ar > 0 ? `${Math.round((disputedBalance / ar) * 100)}%` : "0%"}
+            icon={Scale}
             warn={disputedBalance > 0}
+            meter={ar > 0 ? disputedBalance / ar : 0}
+            meterLabel={`${money(disputedBalance)} disputed of ${money(ar)} AR`}
             href="/disputes?filter=open"
           />
         </div>
 
         <div className="grid gap-4 lg:grid-cols-2">
           <Panel title="AP aging">
-            <StatusPie data={apAgingChart} />
+            <AgingCompositionBar buckets={apAgingChart} />
+            <div className="mt-4 border-t border-base-300 pt-3">
+              <StatusPie data={apAgingChart} labelMode="percent" />
+            </div>
           </Panel>
           <Panel title="Invoice aging">
-            <StatusPie data={agingChart} />
+            <AgingCompositionBar buckets={agingChart} />
+            <div className="mt-4 border-t border-base-300 pt-3">
+              <StatusPie data={agingChart} labelMode="percent" />
+            </div>
           </Panel>
         </div>
 
@@ -1213,6 +1305,12 @@ export default async function DashboardPage() {
       })),
     ];
     const shipperDecideNow = rankDecideNowItems(attentionItems, 5);
+    const shipperScale = Math.max(
+      1,
+      current.length,
+      recentDeliveries.length,
+      overdueMine.length,
+    );
 
     return (
       <div className="space-y-6">
@@ -1234,33 +1332,56 @@ export default async function DashboardPage() {
           <p className="font-semibold">Need a carrier?</p>
           <p className="mt-1 opacity-80">
             Submit a coverage request with your lane and dates. Broker Operations books the load,
-            assigns a carrier, then you track it on My Shipments.
+            assigns a carrier, then you track it on My Shipments. Use{" "}
+            <Link href="/coverage" className="link link-primary font-medium">
+              Request coverage
+            </Link>{" "}
+            above to open the form.
           </p>
-          <Link href="/coverage" className="btn btn-primary btn-sm mt-3">
-            Open request form
-          </Link>
         </div>
         <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
-          <Stat
+          <DashboardStatCard
             title="Current shipments"
             value={String(current.length)}
+            icon={Truck}
+            meter={current.length / shipperScale}
+            meterLabel="Share of your shipment activity"
             href="/shipments?filter=active"
           />
-          <Stat
+          <DashboardStatCard
             title="Recent deliveries"
             value={String(recentDeliveries.length)}
+            icon={PackageCheck}
+            meter={recentDeliveries.length / shipperScale}
+            meterLabel="Share of your shipment activity"
             href="/shipments?filter=delivered"
           />
-          <Stat
+          <DashboardStatCard
             title="Outstanding balance"
             value={money(ar)}
+            icon={Wallet}
             warn={ar > 0}
+            meter={ar > 0 ? 1 : 0}
+            meterLabel={
+              overdueMine.length > 0
+                ? `${overdueMine.length} invoice(s) past due`
+                : "No past-due invoices"
+            }
             href="/invoices?filter=unpaid"
           />
-          <Stat
+          <DashboardStatCard
             title="Past-due invoices"
             value={String(overdueMine.length)}
+            icon={FileWarning}
             warn={overdueMine.length > 0}
+            meter={
+              invList.length > 0 ? overdueMine.length / Math.max(1, invList.length) : 0
+            }
+            meterLabel={
+              invList.length > 0
+                ? `${overdueMine.length} of ${invList.length} invoices`
+                : "No invoices on file"
+            }
             href="/invoices?filter=overdue"
           />
         </div>
@@ -1358,6 +1479,13 @@ export default async function DashboardPage() {
     today,
   });
   const missingPod = completed.filter((s) => !podSetCarrier.has(s.id));
+  const carrierScale = Math.max(
+    1,
+    assigned.length,
+    upcomingPickups.length,
+    dueToday.length,
+    missingPod.length,
+  );
 
   return (
     <div className="space-y-6">
@@ -1371,26 +1499,48 @@ export default async function DashboardPage() {
         }
       />
       <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
-        <Stat
+        <DashboardStatCard
           title="Assigned loads"
           value={String(assigned.length)}
+          icon={Truck}
+          meter={assigned.length / carrierScale}
+          meterLabel="Share of your assigned workload"
           href="/shipments?filter=active"
         />
-        <Stat
+        <DashboardStatCard
           title="Upcoming pickups"
           value={String(upcomingPickups.length)}
+          icon={Package}
+          meter={upcomingPickups.length / carrierScale}
+          meterLabel="Share of your assigned workload"
           href="/shipments?filter=pickup-upcoming"
         />
-        <Stat
+        <DashboardStatCard
           title="Deliveries due today"
           value={String(dueToday.length)}
+          icon={CalendarClock}
           warn={dueToday.length > 0}
+          meter={dueToday.length / carrierScale}
+          meterLabel="Share of your assigned workload"
           href="/shipments?filter=delivery-due-today"
         />
-        <Stat
+        <DashboardStatCard
           title="POD still needed"
           value={String(missingPod.length)}
+          icon={Timer}
           warn={missingPod.length > 0}
+          meter={
+            completed.length > 0
+              ? missingPod.length / Math.max(1, completed.length)
+              : missingPod.length > 0
+                ? 1
+                : 0
+          }
+          meterLabel={
+            completed.length > 0
+              ? `${missingPod.length} of ${completed.length} completed loads`
+              : "No completed loads yet"
+          }
           href="/documents?filter=missing-pod"
         />
       </div>
@@ -1451,44 +1601,6 @@ function Header({
         <p className="text-sm opacity-70">{subtitle}</p>
       </div>
       {action}
-    </div>
-  );
-}
-
-function Stat({
-  title,
-  value,
-  warn,
-  href,
-}: {
-  title: string;
-  value: string;
-  warn?: boolean;
-  href?: string;
-}) {
-  const inner = (
-    <div className="stat py-3">
-      <div className="stat-title text-xs">{title}</div>
-      <div className={`stat-value text-2xl ${warn ? "text-error" : "text-primary"}`}>
-        {value}
-      </div>
-    </div>
-  );
-
-  if (href) {
-    return (
-      <Link
-        href={href}
-        className="stats block w-full bg-base-100 shadow-sm transition hover:border-primary/40 hover:shadow-md focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary"
-      >
-        {inner}
-      </Link>
-    );
-  }
-
-  return (
-    <div className="stats w-full bg-base-100 shadow-sm">
-      {inner}
     </div>
   );
 }

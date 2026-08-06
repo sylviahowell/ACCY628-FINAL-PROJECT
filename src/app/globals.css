@@ -17,6 +17,13 @@ body {
   font-family: var(--font-source-sans), "Source Sans 3", system-ui, sans-serif;
 }
 
+/* RowanLane wordmark — Fraunces display, separate from UI sans */
+.font-brand {
+  font-family: var(--font-brand), "Fraunces", Georgia, "Times New Roman", serif;
+  letter-spacing: -0.03em;
+  font-optical-sizing: auto;
+}
+
 /* Soft sky canvas for authenticated shell (works with theme primary) */
 .app-canvas {
   background:

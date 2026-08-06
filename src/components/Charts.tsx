@@ -157,11 +157,15 @@ export function MonthlyBars({
 
 export function StatusPie({
   data,
+  labelMode = "money",
 }: {
   data: { name: string; value: number }[];
+  /** Slice labels: money (default), share %, or none (legend + tooltip only). */
+  labelMode?: "money" | "percent" | "none";
 }) {
   const colors = useChartColors();
   const palette = stackPalette(colors);
+  const total = data.reduce((s, d) => s + Math.max(0, Number(d.value) || 0), 0);
   return (
     <ChartFrame>
       <ResponsiveContainer width="100%" height="100%">
@@ -171,14 +175,31 @@ export function StatusPie({
             dataKey="value"
             nameKey="name"
             outerRadius={90}
-            label={({ value }) => money(Number(value ?? 0))}
+            label={
+              labelMode === "none"
+                ? false
+                : ({ value }) => {
+                    const n = Number(value ?? 0);
+                    if (labelMode === "percent") {
+                      if (total <= 0) return "0%";
+                      return `${Math.round((n / total) * 100)}%`;
+                    }
+                    return money(n);
+                  }
+            }
           >
             {data.map((_, i) => (
               <Cell key={i} fill={palette[i % palette.length]} />
             ))}
           </Pie>
           <Tooltip
-            formatter={(value) => money(Number(value ?? 0))}
+            formatter={(value) => {
+              const n = Number(value ?? 0);
+              if (labelMode === "percent" && total > 0) {
+                return `${money(n)} (${Math.round((n / total) * 100)}%)`;
+              }
+              return money(n);
+            }}
             contentStyle={tooltipStyle()}
           />
           <Legend />

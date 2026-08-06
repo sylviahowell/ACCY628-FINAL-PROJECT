@@ -70,30 +70,46 @@ type ShipRow = {
 };
 
 type InvoiceRow = {
+  id: string;
+  invoice_number: string;
   total: number;
   amount_paid: number;
   due_date: string;
 };
 
+type DisputeRow = {
+  id: string;
+  amount_disputed: number;
+  invoice_number: string | null;
+};
+
 export function buildDecideNowCandidates(input: {
   today: string;
   coverageCount: number;
+  /** Deep-link to the oldest / first pending coverage request when known. */
+  coverageFocusId?: string | null;
   approvals: ApprovalRow[];
   lateShipments: ShipRow[];
   unbilledShipments: ShipRow[];
   pastDueInvoices: InvoiceRow[];
+  openDisputes?: DisputeRow[];
   openDisputeCount: number;
   cashAtRisk: number;
   riskIssueCount: number;
   riskDetail: string;
   riskTone: DecideNowTone;
+  /** Prefer a specific customer or carrier row on /risk. */
+  riskFocusId?: string | null;
   supportOpenCount?: number;
   supportHighCount?: number;
+  /** Deep-link to a specific support ticket when known. */
+  supportFocusId?: string | null;
   resolveLoadNumber: (entityType: string, entityId: string) => string | null;
   sanitize: (text: string) => string;
 }): DecideNowItem[] {
   const items: DecideNowItem[] = [];
   const { today } = input;
+  const openDisputes = input.openDisputes ?? [];
 
   const supportOpen = input.supportOpenCount ?? 0;
   const supportHigh = input.supportHighCount ?? 0;
@@ -108,7 +124,9 @@ export function buildDecideNowCandidates(input: {
         supportHigh > 0
           ? `${supportHigh} high priority · shipper/carrier replies waiting`
           : "Open and pending tickets in the support inbox",
-      href: "/support",
+      href: input.supportFocusId
+        ? `/support/${input.supportFocusId}`
+        : "/support",
       tone: supportHigh > 0 ? "warning" : "info",
       cta: "Review",
       score: supportOpen * 25_000 + supportHigh * 40_000,
@@ -123,7 +141,9 @@ export function buildDecideNowCandidates(input: {
       metricKind: "count",
       metricUnit: input.coverageCount === 1 ? "request" : "requests",
       detail: "Shippers waiting for ops to book a load, then assign a carrier",
-      href: "/coverage",
+      href: input.coverageFocusId
+        ? `/coverage#focus-${input.coverageFocusId}`
+        : "/coverage",
       tone: "warning",
       cta: "Review",
       // Waiting shippers: volume drives urgency within the warning band.
@@ -186,7 +206,7 @@ export function buildDecideNowCandidates(input: {
       metricKind: "count",
       metricUnit: input.lateShipments.length === 1 ? "load" : "loads",
       detail: `${money(exposure)} exposure · worst ${worst.load_number} (${ageLabel(daysLate)} late)`,
-      href: "/shipments?status=delayed",
+      href: `/shipments/${worst.id}`,
       tone: "error",
       cta: "Review",
       // Service failures: days late outweigh pure dollar size.
@@ -202,6 +222,26 @@ export function buildDecideNowCandidates(input: {
     if (disputeN > 0) {
       parts.push(`${disputeN} open dispute${disputeN === 1 ? "" : "s"}`);
     }
+
+    const worstPastDue = [...input.pastDueInvoices].sort((a, b) => {
+      const aDays = daysPastDue(a.due_date, today);
+      const bDays = daysPastDue(b.due_date, today);
+      const aBal = Math.max(0, Number(a.total) - Number(a.amount_paid));
+      const bBal = Math.max(0, Number(b.total) - Number(b.amount_paid));
+      if (bDays !== aDays) return bDays - aDays;
+      return bBal - aBal;
+    })[0];
+    const worstDispute = [...openDisputes].sort(
+      (a, b) => Number(b.amount_disputed) - Number(a.amount_disputed),
+    )[0];
+    const focusInvoice =
+      worstPastDue?.invoice_number ||
+      worstDispute?.invoice_number ||
+      null;
+    const cashHref = focusInvoice
+      ? `/ar?filter=cash-at-risk&focus=${encodeURIComponent(focusInvoice)}`
+      : "/ar?filter=cash-at-risk";
+
     items.push({
       id: "cash-at-risk",
       title: "Cash at risk",
@@ -209,9 +249,11 @@ export function buildDecideNowCandidates(input: {
       metricKind: "money",
       detail:
         parts.length > 0
-          ? `${parts.join(" · ")} — overdue balances plus dispute amounts`
+          ? `${parts.join(" · ")} — overdue balances plus dispute amounts${
+              focusInvoice ? ` · focus ${focusInvoice}` : ""
+            }`
           : "Overdue balances plus open dispute amounts",
-      href: "/ar?filter=cash-at-risk",
+      href: cashHref,
       tone: "error",
       cta: "Review",
       score: 700_000 + input.cashAtRisk,
@@ -226,7 +268,9 @@ export function buildDecideNowCandidates(input: {
       metricKind: "count",
       metricUnit: input.riskIssueCount === 1 ? "issue" : "issues",
       detail: input.riskDetail || "Credit or carrier insurance needs review",
-      href: "/risk",
+      href: input.riskFocusId
+        ? `/risk?focus=${encodeURIComponent(input.riskFocusId)}`
+        : "/risk",
       tone: input.riskTone,
       cta: "Review",
       score:
@@ -251,7 +295,7 @@ export function buildDecideNowCandidates(input: {
       detail: `${input.unbilledShipments.length} load${
         input.unbilledShipments.length === 1 ? "" : "s"
       } with POD · top ${top.load_number}`,
-      href: "/shipments?filter=ready-to-bill",
+      href: `/shipments/${top.id}`,
       tone: "warning",
       cta: "Review",
       // Revenue waiting — important, but below service / credit failures.
@@ -264,6 +308,11 @@ export function buildDecideNowCandidates(input: {
       (s, i) => s + Math.max(0, Number(i.total) - Number(i.amount_paid)),
       0,
     );
+    const worst = [...input.pastDueInvoices].sort((a, b) => {
+      const aDays = daysPastDue(a.due_date, today);
+      const bDays = daysPastDue(b.due_date, today);
+      return bDays - aDays;
+    })[0];
     items.push({
       id: "overdue",
       title: "Overdue invoices",
@@ -271,8 +320,8 @@ export function buildDecideNowCandidates(input: {
       metricKind: "money",
       detail: `${input.pastDueInvoices.length} invoice${
         input.pastDueInvoices.length === 1 ? "" : "s"
-      } past due`,
-      href: "/ar?filter=past-due",
+      } past due · focus ${worst.invoice_number}`,
+      href: `/ar?filter=past-due&focus=${encodeURIComponent(worst.invoice_number)}`,
       tone: "warning",
       cta: "Review",
       score: 300_000 + overdueBal,
@@ -280,6 +329,12 @@ export function buildDecideNowCandidates(input: {
   }
 
   if (input.cashAtRisk <= 0 && input.openDisputeCount > 0) {
+    const topDispute = [...openDisputes].sort(
+      (a, b) => Number(b.amount_disputed) - Number(a.amount_disputed),
+    )[0];
+    const disputeHref = topDispute?.invoice_number
+      ? `/disputes?filter=open&focus=${encodeURIComponent(topDispute.invoice_number)}`
+      : "/disputes?filter=open";
     items.push({
       id: "disputes",
       title: "Open disputes",
@@ -287,7 +342,7 @@ export function buildDecideNowCandidates(input: {
       metricKind: "count",
       metricUnit: input.openDisputeCount === 1 ? "dispute" : "disputes",
       detail: "Billing disputes still unresolved",
-      href: "/disputes?filter=open",
+      href: disputeHref,
       tone: "info",
       cta: "Review",
       score: 150_000 + input.openDisputeCount * 25_000,

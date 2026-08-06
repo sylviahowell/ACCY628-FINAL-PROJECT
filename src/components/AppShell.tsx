@@ -20,6 +20,7 @@ import {
   Settings,
   ShieldAlert,
   Truck,
+  UserCheck,
   Users,
   Wallet,
 } from "lucide-react";
@@ -192,7 +193,13 @@ function navFor(
           { href: "/warnings", label: "Warnings", icon: i(<AlertTriangle className="h-4 w-4" />) },
           { href: "/approvals", label: "Approvals", icon: i(<CheckSquare className="h-4 w-4" />) },
           { href: "/risk", label: "Risk & Credit", icon: i(<ShieldAlert className="h-4 w-4" />) },
-          { href: "/coverage", label: "Coverage requests", icon: i(<Inbox className="h-4 w-4" />) },
+          { href: "/coverage", label: "Load requests", icon: i(<Inbox className="h-4 w-4" />) },
+          {
+            href: "/assign",
+            label: "Assign carriers",
+            icon: i(<UserCheck className="h-4 w-4" />),
+            count: c.unassigned > 0 ? c.unassigned : undefined,
+          },
           { href: "/controls", label: "Control activity", icon: i(<ScrollText className="h-4 w-4" />) },
           {
             href: "/shipments",
@@ -200,7 +207,7 @@ function navFor(
             icon: i(<Package className="h-4 w-4" />),
             children: [
               { href: "/shipments?status=delayed", label: "Delayed", count: c.delayed },
-              { href: "/shipments?status=unassigned", label: "Needs coverage", count: c.unassigned },
+              { href: "/assign", label: "Needs carrier", count: c.unassigned },
               { href: "/shipments?status=ready", label: "Ready to bill", count: c.ready },
               { href: "/shipments", label: "All loads" },
             ],
@@ -246,7 +253,7 @@ function navFor(
         more: [
           { href: "/customers", label: "Customers", icon: i(<Users className="h-4 w-4" />) },
           { href: "/carriers", label: "Carriers", icon: i(<Truck className="h-4 w-4" />) },
-          { href: "/contracts", label: "Contracts", icon: i(<ClipboardList className="h-4 w-4" />) },
+          { href: "/contracts", label: "Contracts (setup)", icon: i(<ClipboardList className="h-4 w-4" />) },
           { href: "/payments", label: "Payments", icon: i(<Wallet className="h-4 w-4" />) },
           { href: "/accounting", label: "Accounting", icon: i(<ClipboardList className="h-4 w-4" />) },
         ],
@@ -258,7 +265,13 @@ function navFor(
         primary: [
           { href: "/dashboard", label: "Broker Operations", icon: i(<LayoutDashboard className="h-4 w-4" />) },
           { href: "/warnings", label: "Warnings", icon: i(<AlertTriangle className="h-4 w-4" />) },
-          { href: "/coverage", label: "Coverage requests", icon: i(<Inbox className="h-4 w-4" />) },
+          { href: "/coverage", label: "Load requests", icon: i(<Inbox className="h-4 w-4" />) },
+          {
+            href: "/assign",
+            label: "Assign carriers",
+            icon: i(<UserCheck className="h-4 w-4" />),
+            count: c.unassigned > 0 ? c.unassigned : undefined,
+          },
           { href: "/risk", label: "Risk & Credit", icon: i(<ShieldAlert className="h-4 w-4" />) },
           {
             href: "/shipments",
@@ -266,14 +279,14 @@ function navFor(
             icon: i(<Package className="h-4 w-4" />),
             children: [
               { href: "/shipments?status=delayed", label: "Delayed", count: c.delayed },
-              { href: "/shipments?status=unassigned", label: "Needs coverage", count: c.unassigned },
+              { href: "/assign", label: "Needs carrier", count: c.unassigned },
               { href: "/shipments?filter=needs-pod", label: "Needs POD", count: c.needsPod },
               { href: "/shipments", label: "All loads" },
             ],
           },
           { href: "/carriers", label: "Carriers", icon: i(<Truck className="h-4 w-4" />) },
           { href: "/customers", label: "Customers", icon: i(<Users className="h-4 w-4" />) },
-          { href: "/contracts", label: "Contracts", icon: i(<ClipboardList className="h-4 w-4" />) },
+          { href: "/contracts", label: "Contracts (setup)", icon: i(<ClipboardList className="h-4 w-4" />) },
           supportStaff,
           settings,
         ],
@@ -303,7 +316,7 @@ function navFor(
         primary: [
           { href: "/dashboard", label: "Shipper Dashboard", icon: i(<LayoutDashboard className="h-4 w-4" />) },
           { href: "/warnings", label: "Alerts", icon: i(<AlertTriangle className="h-4 w-4" />) },
-          { href: "/coverage", label: "Request coverage", icon: i(<Inbox className="h-4 w-4" />) },
+          { href: "/coverage", label: "Request a load", icon: i(<Inbox className="h-4 w-4" />) },
           { href: "/shipments", label: "My Shipments", icon: i(<Package className="h-4 w-4" />) },
           { href: "/invoices", label: "My Invoices", icon: i(<FileText className="h-4 w-4" />) },
           { href: "/support", label: "Support", icon: i(<HelpCircle className="h-4 w-4" />) },

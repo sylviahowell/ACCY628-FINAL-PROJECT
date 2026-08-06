@@ -32,6 +32,7 @@ export async function updateSession(request: NextRequest) {
   const isStaticAsset =
     path.startsWith("/pod-samples/") ||
     path.startsWith("/pod-uploads/") ||
+    path.startsWith("/insurance-uploads/") ||
     path.startsWith("/brand/");
   if (isStaticAsset) {
     return NextResponse.next();

@@ -131,9 +131,9 @@ export function buildAlerts(src: AlertSources): AppAlert[] {
         id: `unassigned-${s.id}`,
         severity: "warning",
         title: "No carrier assigned",
-        reason: `${s.load_number} needs coverage`,
+        reason: `${s.load_number} needs a carrier`,
         action: "Assign a carrier",
-        href: `/shipments/${s.id}`,
+        href: `/assign?focus=${s.id}`,
         related: s.load_number,
         detectedAt: src.today,
         roles: ["manager", "broker"],
@@ -166,7 +166,7 @@ export function buildAlerts(src: AlertSources): AppAlert[] {
         title: "Delivered but not invoiced",
         reason: `${s.load_number} has POD and is ready to bill`,
         action: "Generate invoice from Ready to bill",
-        href: "/invoices",
+        href: `/invoices?filter=ready-to-bill&focus=${encodeURIComponent(s.load_number)}`,
         related: s.load_number,
         detectedAt: src.today,
         roles: ["manager", "billing"],
@@ -198,7 +198,7 @@ export function buildAlerts(src: AlertSources): AppAlert[] {
         title: "Invoice overdue",
         reason: `${inv.invoice_number} balance due since ${inv.due_date}`,
         action: "Follow up for collection",
-        href: "/ar",
+        href: `/invoices/${inv.id}`,
         related: inv.invoice_number,
         detectedAt: src.today,
         roles: ["manager", "billing", "customer"],
@@ -206,16 +206,23 @@ export function buildAlerts(src: AlertSources): AppAlert[] {
     }
   }
 
+  const invoiceNumberById = new Map(
+    src.invoices.map((i) => [i.id, i.invoice_number]),
+  );
+
   for (const d of src.disputes) {
     if (d.status === "open") {
+      const invNum = d.invoice_id ? invoiceNumberById.get(d.invoice_id) : null;
       alerts.push({
         id: `dispute-${d.id}`,
         severity: "warning",
         title: "Open billing dispute",
         reason: d.reason,
         action: "Review and resolve dispute",
-        href: "/disputes",
-        related: `Dispute ${d.amount_disputed}`,
+        href: invNum
+          ? `/disputes?filter=open&focus=${encodeURIComponent(invNum)}`
+          : "/disputes?filter=open",
+        related: invNum ?? `Dispute ${d.amount_disputed}`,
         detectedAt: src.today,
         roles: ["manager", "billing", "customer"],
       });
@@ -226,13 +233,16 @@ export function buildAlerts(src: AlertSources): AppAlert[] {
     if (c.approval_status === "pending") {
       const chargeShip = src.shipments.find((s) => s.id === c.shipment_id);
       const chargeRelated = chargeShip?.load_number ?? c.description;
+      const focusLoad = chargeShip?.load_number;
       alerts.push({
         id: `charge-${c.id}`,
         severity: "info",
         title: "Accessorial awaits approval",
         reason: `${c.description} (${c.amount})`,
         action: "Review in Approvals",
-        href: "/approvals",
+        href: focusLoad
+          ? `/approvals?type=accessorial&focus=${encodeURIComponent(focusLoad)}`
+          : "/approvals?type=accessorial",
         related: chargeRelated,
         detectedAt: src.today,
         roles: ["manager"],
@@ -259,7 +269,7 @@ export function buildAlerts(src: AlertSources): AppAlert[] {
         title: `Pending ${a.request_type} approval`,
         reason: a.reason ?? "Needs manager review",
         action: "Open Approval Inbox",
-        href: "/approvals",
+        href: `/approvals?type=${encodeURIComponent(a.request_type)}&focus=${encodeURIComponent(a.id)}`,
         related: a.request_type,
         detectedAt: src.today,
         roles: ["manager"],
@@ -275,9 +285,9 @@ export function buildAlerts(src: AlertSources): AppAlert[] {
           id: `ins-exp-${car.id}`,
           severity: "critical",
           title: "Carrier insurance expired",
-          reason: `${car.name} expired ${car.insurance_expiration}`,
-          action: "Do not book until updated",
-          href: "/carriers",
+          reason: `${car.name} expired ${car.insurance_expiration} — blocked from new assignments`,
+          action: "Open Risk & Credit for this carrier",
+          href: `/risk?focus=${encodeURIComponent(car.id)}`,
           related: car.name,
           detectedAt: src.today,
           roles: ["manager", "broker"],
@@ -289,7 +299,7 @@ export function buildAlerts(src: AlertSources): AppAlert[] {
           title: "Carrier insurance expiring soon",
           reason: `${car.name} expires ${car.insurance_expiration}`,
           action: "Request updated certificate",
-          href: "/carriers",
+          href: `/risk?focus=${encodeURIComponent(car.id)}`,
           related: car.name,
           detectedAt: src.today,
           roles: ["manager", "broker"],
@@ -308,7 +318,7 @@ export function buildAlerts(src: AlertSources): AppAlert[] {
           title: "Contract nearing expiration",
           reason: `${c.contract_number} ends ${c.end_date}`,
           action: "Discuss renewal with customer",
-          href: "/contracts?filter=expiring",
+          href: `/contracts?filter=expiring&focus=${encodeURIComponent(c.contract_number)}`,
           related: c.contract_number,
           detectedAt: src.today,
           roles: ["manager", "broker"],
@@ -339,6 +349,8 @@ export function buildAlerts(src: AlertSources): AppAlert[] {
   );
   if (supportTickets.length > 0) {
     const highCount = supportTickets.filter((t) => t.priority === "high").length;
+    const focusTicket =
+      supportTickets.find((t) => t.priority === "high") ?? supportTickets[0];
     alerts.push({
       id: "support-queue",
       severity: highCount > 0 ? "warning" : "info",
@@ -348,8 +360,8 @@ export function buildAlerts(src: AlertSources): AppAlert[] {
           ? `${supportTickets.length} open/pending · ${highCount} high priority`
           : `${supportTickets.length} open or pending ticket${supportTickets.length === 1 ? "" : "s"}`,
       action: "Review and reply in Support inbox",
-      href: "/support",
-      related: "Support",
+      href: `/support/${focusTicket.id}`,
+      related: focusTicket.ticket_number,
       detectedAt: src.today,
       roles: ["manager", "broker", "billing"],
     });
@@ -376,14 +388,21 @@ export function filterAlertsForProfile(alerts: AppAlert[], profile: Profile): Ap
   return alerts
     .filter((a) => a.roles.includes(profile.role))
     .map((a) => {
-      // Shipper portal cannot open AR/Disputes staff routes — send them to invoices.
-      if (profile.role === "customer" && (a.href === "/ar" || a.href === "/disputes")) {
-        return { ...a, href: "/invoices", action: "Review on My Invoices" };
+      // Shipper portal cannot open staff disputes route — keep invoice deep links, rewrite disputes list.
+      if (profile.role === "customer" && a.href.startsWith("/disputes")) {
+        const focus = new URL(a.href, "http://local").searchParams.get("focus");
+        return {
+          ...a,
+          href: focus
+            ? `/invoices?filter=open&focus=${encodeURIComponent(focus)}`
+            : "/invoices",
+          action: "Review on My Invoices",
+        };
       }
-      // Non-managers cannot use Approvals inbox — send them to Warnings.
+      // Non-managers cannot use Approvals inbox — send them to the related load when possible.
       if (
         (profile.role === "broker" || profile.role === "billing") &&
-        a.href === "/approvals"
+        a.href.startsWith("/approvals")
       ) {
         return {
           ...a,

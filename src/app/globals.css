@@ -3,8 +3,42 @@
   themes: corporate --default, business --prefersdark, nord, dim, silk;
 }
 
+/* RowanLane brand blues on the default corporate theme */
+@plugin "daisyui/theme" {
+  name: "corporate";
+  default: true;
+  --color-primary: #0866d9;
+  --color-primary-content: #ffffff;
+  --color-base-200: #f7fbff;
+  --color-base-300: #e2eaf3;
+}
+
 body {
   font-family: var(--font-source-sans), "Source Sans 3", system-ui, sans-serif;
+}
+
+/* Soft sky canvas for authenticated shell (works with theme primary) */
+.app-canvas {
+  background:
+    radial-gradient(
+      ellipse 80% 50% at 100% -20%,
+      color-mix(in oklab, var(--color-primary) 12%, transparent),
+      transparent 55%
+    ),
+    radial-gradient(
+      ellipse 60% 40% at 0% 100%,
+      color-mix(in oklab, var(--color-primary) 6%, transparent),
+      transparent 50%
+    ),
+    var(--color-base-200);
+}
+
+.app-sidebar-brand {
+  background: linear-gradient(
+    160deg,
+    color-mix(in oklab, var(--color-primary) 8%, var(--color-base-100)) 0%,
+    var(--color-base-100) 70%
+  );
 }
 
 .freight-hero {

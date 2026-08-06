@@ -368,22 +368,22 @@ export async function AppShell({
     : ROLE_LABELS[profile.role];
 
   return (
-    <div className="drawer lg:drawer-open min-h-screen bg-base-200">
+    <div className="drawer app-canvas lg:drawer-open min-h-screen">
       <input id="app-drawer" type="checkbox" className="drawer-toggle" />
       <div className="drawer-content flex flex-col">
-        <div className="navbar min-h-16 flex-wrap gap-y-2 border-b border-base-300 bg-base-100 px-3 py-2 sm:px-4">
+        <div className="navbar min-h-16 flex-wrap gap-y-2 border-b border-base-300 bg-base-100/95 px-3 py-2 backdrop-blur-sm sm:px-4">
           <div className="flex-none lg:hidden">
             <label htmlFor="app-drawer" className="btn btn-square btn-ghost">
               <Building2 className="h-5 w-5" />
             </label>
           </div>
           <div className="flex min-w-0 flex-1 items-center gap-3 sm:gap-4">
-            <div className="flex shrink-0 items-center gap-2">
-              <RowanLaneMark size={34} />
+            <div className="flex shrink-0 items-center gap-2.5">
+              <RowanLaneMark size={42} />
               <div className="min-w-0">
-                <p className="text-lg font-bold tracking-tight text-primary">RowanLane</p>
-                <p className="hidden text-xs opacity-60 sm:block">
-                  Freight Brokerage & Logistics Management System
+                <p className="text-xl font-bold tracking-tight text-primary">RowanLane</p>
+                <p className="hidden text-xs font-medium tracking-wide text-base-content/50 sm:block">
+                  Contract to cash
                 </p>
               </div>
             </div>
@@ -420,16 +420,20 @@ export async function AppShell({
 
       <div className="drawer-side z-40">
         <label htmlFor="app-drawer" className="drawer-overlay" aria-label="Close menu" />
-        <aside className="flex min-h-full w-72 flex-col bg-base-100 text-base-content">
-          <div className="border-b border-base-300 p-5">
-            <div className="flex items-center gap-2.5">
-              <RowanLaneMark size={36} />
-              <p className="text-xl font-bold text-primary">RowanLane</p>
+        <aside className="flex min-h-full w-72 flex-col border-r border-base-300 bg-base-100 text-base-content">
+          <div className="app-sidebar-brand border-b border-base-300 p-5">
+            <div className="flex items-center gap-3">
+              <RowanLaneMark size={46} />
+              <div className="min-w-0">
+                <p className="text-xl font-bold tracking-tight text-primary">RowanLane</p>
+                <p className="text-sm font-medium text-base-content/80">{roleDisplay}</p>
+              </div>
             </div>
-            <p className="mt-1 text-sm font-medium">{roleDisplay}</p>
-            <p className="mt-0.5 text-xs opacity-60">{ROLE_PORTAL_BLURB[profile.role]}</p>
+            <p className="mt-2 text-xs leading-snug text-base-content/55">
+              {ROLE_PORTAL_BLURB[profile.role]}
+            </p>
             {showDemoSelector ? (
-              <p className="mt-2 text-[10px] font-medium tracking-wide text-[#0866D9] uppercase">
+              <p className="mt-2 text-[10px] font-medium tracking-wide text-primary uppercase">
                 Demo Mode · sample data
               </p>
             ) : null}

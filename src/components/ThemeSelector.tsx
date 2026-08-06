@@ -8,7 +8,7 @@ export const DEFAULT_APPEARANCE = "corporate";
 
 /** daisyUI theme ids → labels shown as Application Theme options */
 export const APPEARANCE_OPTIONS = [
-  { id: "corporate", label: "Corporate" },
+  { id: "corporate", label: "RowanLane" },
   { id: "business", label: "Business Dark" },
   { id: "nord", label: "Nord" },
   { id: "dim", label: "Dim Dark" },

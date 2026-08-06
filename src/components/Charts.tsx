@@ -28,8 +28,8 @@ type ChartColors = {
 };
 
 const FALLBACK: ChartColors = {
-  primary: "#0284c7",
-  secondary: "#0369a1",
+  primary: "#0866d9",
+  secondary: "#0a1f3d",
   accent: "#0f766e",
   success: "#22c55e",
   warning: "#eab308",

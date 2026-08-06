@@ -22,6 +22,7 @@ export default async function CustomersPage({
 
   const params = await resolveSearchParams(searchParams);
   const customerId = params.customer;
+  const q = (params.q ?? "").trim();
 
   const supabase = await createClient();
   const today = new Date().toISOString().slice(0, 10);
@@ -34,9 +35,24 @@ export default async function CustomersPage({
     .select("customer_id, total, amount_paid, status, due_date");
 
   const allCustomers = customers ?? [];
-  const visibleCustomers = customerId
-    ? allCustomers.filter((c) => c.id === customerId)
+  const needle = q.toLowerCase();
+  const searchedCustomers = needle
+    ? allCustomers.filter((c) => {
+        const hay = [
+          c.name,
+          c.contact_name ?? "",
+          c.contact_email ?? "",
+          c.contact_phone ?? "",
+          c.billing_address ?? "",
+        ]
+          .join(" ")
+          .toLowerCase();
+        return hay.includes(needle);
+      })
     : allCustomers;
+  const visibleCustomers = customerId
+    ? searchedCustomers.filter((c) => c.id === customerId)
+    : searchedCustomers;
   const scopedName =
     visibleCustomers[0]?.name ??
     (customerId ? allCustomers.find((c) => c.id === customerId)?.name : null);
@@ -51,6 +67,33 @@ export default async function CustomersPage({
         </p>
       </div>
 
+      {!customerId ? (
+        <form
+          method="get"
+          action="/customers"
+          className="flex flex-col gap-2 rounded-box border border-base-300 bg-base-100 p-3 sm:flex-row sm:items-center"
+        >
+          <input
+            type="search"
+            name="q"
+            defaultValue={q}
+            placeholder="Search by company, contact, email, or phone…"
+            className="input input-bordered input-sm w-full flex-1"
+            aria-label="Search customers"
+          />
+          <div className="flex flex-wrap gap-2">
+            <button type="submit" className="btn btn-primary btn-sm">
+              Search
+            </button>
+            {q ? (
+              <Link href="/customers" className="btn btn-ghost btn-sm">
+                Clear
+              </Link>
+            ) : null}
+          </div>
+        </form>
+      ) : null}
+
       {customerId ? (
         <FilterBanner
           label={
@@ -58,6 +101,11 @@ export default async function CustomersPage({
               ? `customer profile for ${scopedName}`
               : "selected customer (not found)"
           }
+          clearHref="/customers"
+        />
+      ) : q ? (
+        <FilterBanner
+          label={`search results for “${q}” (${visibleCustomers.length})`}
           clearHref="/customers"
         />
       ) : null}
@@ -85,11 +133,19 @@ export default async function CustomersPage({
       <div className="grid gap-4">
         {visibleCustomers.length === 0 ? (
           <EmptyState
-            title={customerId ? "Customer not found" : "No customers yet"}
+            title={
+              customerId
+                ? "Customer not found"
+                : q
+                  ? "No customers match your search"
+                  : "No customers yet"
+            }
             description={
               customerId
                 ? "Clear the filter to see all customers, or check the link from Risk."
-                : "Add a customer to attach contracts and book loads."
+                : q
+                  ? "Try another name, contact, or email — or clear the search."
+                  : "Add a customer to attach contracts and book loads."
             }
           />
         ) : null}

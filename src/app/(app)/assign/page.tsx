@@ -330,23 +330,6 @@ export default async function AssignCarriersPage({
         ))}
       </div>
 
-      <div className="grid gap-3 sm:grid-cols-2">
-        <div className="rounded-box border border-base-300 bg-base-100 px-4 py-3">
-          <p className="text-xs font-semibold uppercase tracking-wide opacity-60">
-            Needs assignment
-          </p>
-          <p className="mt-1 text-2xl font-bold tabular-nums">{openLoads.length}</p>
-          <p className="text-xs opacity-70">No carrier yet — send an offer</p>
-        </div>
-        <div className="rounded-box border border-warning/40 bg-warning/5 px-4 py-3">
-          <p className="text-xs font-semibold uppercase tracking-wide text-warning opacity-80">
-            Awaiting acceptance
-          </p>
-          <p className="mt-1 text-2xl font-bold tabular-nums">{offeredLoads.length}</p>
-          <p className="text-xs opacity-70">Offer sent — waiting on the carrier</p>
-        </div>
-      </div>
-
       {declinedCount > 0 && showNeeds ? (
         <div className="alert alert-error text-sm">
           <span>

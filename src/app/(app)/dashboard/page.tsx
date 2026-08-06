@@ -83,6 +83,7 @@ export default async function DashboardPage() {
     { data: carrierBills },
     { data: coverageRequests },
     { data: supportTickets },
+    { data: vehiclePositions },
   ] = await Promise.all([
     supabase
       .from("shipments")
@@ -148,7 +149,26 @@ export default async function DashboardPage() {
       .from("support_tickets")
       .select("id, status, priority")
       .in("status", ["open", "pending"]),
+    profile.role === "manager" || profile.role === "broker"
+      ? supabase
+          .from("vehicle_positions")
+          .select("shipment_id, lat, lng, speed_mph, heading_deg, recorded_at, source")
+      : Promise.resolve({ data: [] as never[] }),
   ]);
+
+  const vehiclePositionByShipment = new Map(
+    (vehiclePositions ?? []).map((vp) => [
+      vp.shipment_id as string,
+      {
+        lat: Number(vp.lat),
+        lng: Number(vp.lng),
+        speed_mph: vp.speed_mph != null ? Number(vp.speed_mph) : null,
+        heading_deg: vp.heading_deg != null ? Number(vp.heading_deg) : null,
+        recorded_at: (vp.recorded_at as string | null) ?? null,
+        source: (vp.source as string | null) ?? null,
+      },
+    ]),
+  );
 
   const pendingCoverage = coverageRequests ?? [];
   const pendingCoverageCount = pendingCoverage.length;
@@ -378,6 +398,7 @@ export default async function DashboardPage() {
           carrier_name: (s.carriers as { name?: string } | null)?.name ?? "Unassigned",
           health_score: health.score,
           health_category: health.category,
+          last_position: vehiclePositionByShipment.get(s.id) ?? null,
         };
       });
 
@@ -686,6 +707,7 @@ export default async function DashboardPage() {
           carrier_name: (s.carriers as { name?: string } | null)?.name ?? "Unassigned",
           health_score: health.score,
           health_category: health.category,
+          last_position: vehiclePositionByShipment.get(s.id) ?? null,
         };
       });
 

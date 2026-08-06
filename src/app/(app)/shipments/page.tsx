@@ -151,34 +151,38 @@ export default async function ShipmentsPage({
           </p>
         </div>
         {profile.role === "carrier" ? (
-          <div className="flex flex-wrap gap-2">
-            <Link
-              href="/documents?filter=missing-pod"
-              className="btn btn-primary btn-sm"
-            >
-              Upload POD
-            </Link>
-            <Link
-              href="/shipments?filter=pickup-upcoming"
-              className={`btn btn-sm ${filter === "pickup-upcoming" ? "btn-primary" : "btn-outline"}`}
-            >
-              Upcoming pickups
-            </Link>
-            <Link
-              href="/shipments?filter=delivery-due-today"
-              className={`btn btn-sm ${filter === "delivery-due-today" ? "btn-primary" : "btn-outline"}`}
-            >
-              Due today
-            </Link>
-            <Link
-              href="/shipments"
-              className={`btn btn-sm ${!filter ? "btn-primary" : "btn-outline"}`}
-            >
-              All deliveries
-            </Link>
-            <Link href="/offers" className="btn btn-ghost btn-sm">
-              Load offers
-            </Link>
+          <div className="flex w-full flex-col gap-2 sm:w-auto">
+            <div className="flex flex-wrap gap-2">
+              <Link
+                href="/shipments?filter=pickup-upcoming"
+                className={`btn btn-sm ${filter === "pickup-upcoming" ? "btn-primary" : "btn-outline"}`}
+              >
+                Upcoming pickups
+              </Link>
+              <Link
+                href="/shipments?filter=delivery-due-today"
+                className={`btn btn-sm ${filter === "delivery-due-today" ? "btn-primary" : "btn-outline"}`}
+              >
+                Due today
+              </Link>
+              <Link
+                href="/shipments"
+                className={`btn btn-sm ${!filter ? "btn-primary" : "btn-outline"}`}
+              >
+                All deliveries
+              </Link>
+            </div>
+            <div className="flex flex-wrap gap-2">
+              <Link
+                href="/documents?filter=missing-pod"
+                className="btn btn-primary btn-sm"
+              >
+                Upload POD
+              </Link>
+              <Link href="/offers" className="btn btn-ghost btn-sm">
+                Load offers
+              </Link>
+            </div>
           </div>
         ) : isOperations(profile.role) ? (
           <Link href="/shipments/new" className="btn btn-primary">

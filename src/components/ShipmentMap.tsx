@@ -7,6 +7,7 @@ import {
   TileLayer,
   CircleMarker,
   Popup,
+  Tooltip,
   Polyline,
   useMap,
 } from "react-leaflet";
@@ -14,17 +15,19 @@ import "leaflet/dist/leaflet.css";
 import { coordKey, lookupCoords, type LatLng } from "@/lib/geo";
 import { formatStatusLabel } from "@/lib/types";
 import {
-  DEMO_GPS_TIME_SCALE,
+  hasCachedRoutePath,
   lookupRoutePath,
+  resolveTruckOnRoute,
 } from "@/lib/route-geometry";
-import { advanceDemoVehiclePositions } from "@/lib/actions/vehicle-positions";
-import {
-  computeDemoPosition,
-  fleetSpecForLoad,
-  isDemoGpsLoad,
-  type VehiclePositionRow,
-} from "@/lib/vehicle-positions";
-import { fetchVehiclePositions } from "@/lib/vehicle-positions-client";
+
+export type MapVehiclePosition = {
+  lat: number;
+  lng: number;
+  speed_mph: number | null;
+  heading_deg: number | null;
+  recorded_at: string | null;
+  source: string | null;
+};
 
 export type MapShipment = {
   id: string;
@@ -42,6 +45,8 @@ export type MapShipment = {
   carrier_name: string;
   health_score: number | null;
   health_category: string | null;
+  /** Last reported ping (may be snapped onto the driving path). */
+  last_position?: MapVehiclePosition | null;
 };
 
 type PlottedLane = {
@@ -54,10 +59,13 @@ type PlottedLane = {
   weight: number;
   opacity: number;
   zRank: number;
-  /** True when this load is in_transit/picked_up (lane styling). */
-  simTracking: boolean;
-  /** Fleet load with vehicle_positions telemetry — only these get truck markers. */
-  demoGps: boolean;
+  /** True when this load gets one on-route truck marker. */
+  truckTracking: boolean;
+  /** Route completion 0→1 for the single truck on this lane. */
+  routeProgress: number | null;
+  /** Resolved on-route marker position (GPS snap or varied %). */
+  truckPoint: LatLng | null;
+  truckPlacement: "gps_on_route" | "gps_snapped" | "varied" | null;
 };
 
 type CityHub = {
@@ -127,12 +135,10 @@ function isSimTracking(status: string) {
 
 /**
  * Fit once when the plotted lane set meaningfully changes.
- * Uses a stable string key (shipment ids) — NOT array identity — so the 1s
- * sim clock re-render does not reset zoom/pan.
+ * Uses a stable string key (shipment ids) — NOT array identity.
  */
 function FitBounds({ points, fitKey }: { points: LatLng[]; fitKey: string }) {
   const map = useMap();
-  // Re-fit only when fitKey changes (shipment set), not on sim-clock point churn.
   useEffect(() => {
     if (points.length === 0) return;
     const lats = points.map((p) => p.lat);
@@ -149,15 +155,83 @@ function FitBounds({ points, fitKey }: { points: LatLng[]; fitKey: string }) {
   return null;
 }
 
-/** Soft tick so simulated truck markers glide along the path during a pitch. */
-function useSimClock(enabled: boolean) {
-  const [now, setNow] = useState(() => Date.now());
+  /** Upgrade arc-fallback lanes with OSRM geometry from the route-geometry API. */
+function useRemoteRoutePaths(
+  lanes: {
+    id: string;
+    origin: LatLng;
+    dest: LatLng;
+    needsRemote: boolean;
+    originCity: string | null;
+    originState: string | null;
+    destCity: string | null;
+    destState: string | null;
+    pickupLocation: string | null;
+    deliveryLocation: string | null;
+    laneIndex: number;
+  }[],
+) {
+  const [overrides, setOverrides] = useState<Record<string, LatLng[]>>({});
+  const [attempted, setAttempted] = useState<Record<string, number>>({});
+  const requestKey = lanes
+    .filter((l) => l.needsRemote)
+    .map((l) => l.id)
+    .sort()
+    .join("|");
+
   useEffect(() => {
-    if (!enabled) return;
-    const id = window.setInterval(() => setNow(Date.now()), 250);
-    return () => window.clearInterval(id);
-  }, [enabled]);
-  return now;
+    const missing = lanes.filter((l) => {
+      if (!l.needsRemote || overrides[l.id]) return false;
+      const tries = attempted[l.id] ?? 0;
+      return tries < 2;
+    });
+    if (missing.length === 0) return;
+    let cancelled = false;
+    (async () => {
+      const next: Record<string, LatLng[]> = {};
+      const tried: Record<string, number> = {};
+      await Promise.all(
+        missing.map(async (lane) => {
+          tried[lane.id] = (attempted[lane.id] ?? 0) + 1;
+          try {
+            const res = await fetch("/api/route-geometry", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({
+                origin: lane.origin,
+                dest: lane.dest,
+                originCity: lane.originCity,
+                originState: lane.originState,
+                destCity: lane.destCity,
+                destState: lane.destState,
+                originLocation: lane.pickupLocation,
+                destLocation: lane.deliveryLocation,
+                laneIndex: lane.laneIndex,
+              }),
+            });
+            if (!res.ok) return;
+            const data = (await res.json()) as { path?: LatLng[] };
+            if (data.path && data.path.length >= 2) next[lane.id] = data.path;
+          } catch {
+            /* keep sync fallback */
+          }
+        }),
+      );
+      if (cancelled) return;
+      if (Object.keys(tried).length > 0) {
+        setAttempted((prev) => ({ ...prev, ...tried }));
+      }
+      if (Object.keys(next).length > 0) {
+        setOverrides((prev) => ({ ...prev, ...next }));
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- requestKey captures lane set
+  }, [requestKey]);
+
+  return overrides;
 }
 
 export function ShipmentMap({
@@ -208,14 +282,30 @@ export function ShipmentMap({
     [shipments, today, statusFilter, customerFilter, carrierFilter, fromDate, toDate],
   );
 
-  const plotted: PlottedLane[] = useMemo(() => {
-    const lanes = filtered
+  const baseLanes = useMemo(() => {
+    // Space progress across all active tracked loads (not just the filtered view)
+    // so trucks keep stable completion % when filters change.
+    const trackingSeeds = shipments
+      .filter((s) => isSimTracking(s.status))
+      .map((s) => s.load_number || s.id);
+
+    return filtered
       .map((s, index) => {
         const origin = lookupCoords(s.origin_city, s.origin_state, s.pickup_location);
         const dest = lookupCoords(s.dest_city, s.dest_state, s.delivery_location);
         if (!origin || !dest) return null;
         const delayed = isDelayed(s, today);
         const style = laneStyle(s.status, delayed);
+        const cached = hasCachedRoutePath(
+          s.origin_city,
+          s.origin_state,
+          s.dest_city,
+          s.dest_state,
+          s.pickup_location,
+          s.delivery_location,
+          origin,
+          dest,
+        );
         const path = lookupRoutePath(
           origin,
           dest,
@@ -227,8 +317,18 @@ export function ShipmentMap({
           s.pickup_location,
           s.delivery_location,
         );
-        const simTracking = isSimTracking(s.status);
-        const demoGps = simTracking && isDemoGpsLoad(s.load_number);
+        const truckTracking = isSimTracking(s.status);
+        const seed = s.load_number || s.id;
+        const placement = truckTracking
+          ? resolveTruckOnRoute(
+              path,
+              seed,
+              trackingSeeds,
+              s.last_position
+                ? { lat: s.last_position.lat, lng: s.last_position.lng }
+                : null,
+            )
+          : null;
         return {
           s,
           origin,
@@ -239,68 +339,76 @@ export function ShipmentMap({
           weight: style.weight,
           opacity: style.opacity,
           zRank: style.zRank,
-          simTracking,
-          demoGps,
+          truckTracking,
+          routeProgress: placement?.progress ?? null,
+          truckPoint: placement?.point ?? null,
+          truckPlacement: placement?.placement ?? null,
+          needsRemote: !cached,
+          laneIndex: index,
         };
       })
-      .filter(Boolean) as PlottedLane[];
+      .filter(Boolean) as (PlottedLane & {
+      needsRemote: boolean;
+      laneIndex: number;
+      truckPoint: LatLng | null;
+      truckPlacement: "gps_on_route" | "gps_snapped" | "varied" | null;
+    })[];
+  }, [filtered, today, shipments]);
 
+  const remotePaths = useRemoteRoutePaths(
+    baseLanes.map((lane) => ({
+      id: lane.s.id,
+      origin: lane.origin,
+      dest: lane.dest,
+      needsRemote: lane.needsRemote,
+      originCity: lane.s.origin_city,
+      originState: lane.s.origin_state,
+      destCity: lane.s.dest_city,
+      destState: lane.s.dest_state,
+      pickupLocation: lane.s.pickup_location,
+      deliveryLocation: lane.s.delivery_location,
+      laneIndex: lane.laneIndex,
+    })),
+  );
+
+  const plotted = useMemo(() => {
+    const trackingSeeds = shipments
+      .filter((s) => isSimTracking(s.status))
+      .map((s) => s.load_number || s.id);
+
+    const lanes = baseLanes.map((lane) => {
+      const path = remotePaths[lane.s.id] ?? lane.path;
+      const seed = lane.s.load_number || lane.s.id;
+      const placement = lane.truckTracking
+        ? resolveTruckOnRoute(
+            path,
+            seed,
+            trackingSeeds,
+            lane.s.last_position
+              ? { lat: lane.s.last_position.lat, lng: lane.s.last_position.lng }
+              : null,
+          )
+        : null;
+      return {
+        ...lane,
+        path,
+        routeProgress: placement?.progress ?? null,
+        truckPoint: placement?.point ?? null,
+        truckPlacement: placement?.placement ?? null,
+      };
+    });
     return lanes.sort((a, b) => a.zRank - b.zRank);
-  }, [filtered, today]);
+  }, [baseLanes, remotePaths, shipments]);
 
-  /** Stable key for FitBounds — shipment ids only, immune to sim-clock re-renders. */
+  /** Refit when shipment set or upgraded road geometry arrives. */
   const fitKey = useMemo(
     () =>
       plotted
-        .map((p) => p.s.id)
+        .map((p) => `${p.s.id}:${p.path.length}`)
         .sort()
         .join("|"),
     [plotted],
   );
-
-  const hasGpsMarkers = plotted.some((p) => p.demoGps);
-  const simNow = useSimClock(hasGpsMarkers);
-  const [dbPositions, setDbPositions] = useState<Map<string, VehiclePositionRow>>(
-    () => new Map(),
-  );
-  const [gpsDbLive, setGpsDbLive] = useState(false);
-
-  const demoGpsShipments = useMemo(
-    () => plotted.filter((p) => p.demoGps).map((p) => p.s),
-    [plotted],
-  );
-
-  useEffect(() => {
-    let cancelled = false;
-
-    async function syncPositions() {
-      if (demoGpsShipments.length === 0) return;
-      const ids = demoGpsShipments.map((s) => s.id);
-      const advanced = await advanceDemoVehiclePositions(
-        demoGpsShipments.map((s) => ({
-          id: s.id,
-          load_number: s.load_number,
-          origin_city: s.origin_city,
-          origin_state: s.origin_state,
-          dest_city: s.dest_city,
-          dest_state: s.dest_state,
-          pickup_location: s.pickup_location,
-          delivery_location: s.delivery_location,
-        })),
-      );
-      const latest = await fetchVehiclePositions(ids);
-      if (cancelled) return;
-      setDbPositions(latest);
-      setGpsDbLive(Boolean(advanced.ok) || latest.size > 0);
-    }
-
-    void syncPositions();
-    const id = window.setInterval(() => void syncPositions(), 5000);
-    return () => {
-      cancelled = true;
-      window.clearInterval(id);
-    };
-  }, [demoGpsShipments]);
 
   const hubs: CityHub[] = useMemo(() => {
     const map = new Map<string, CityHub>();
@@ -376,8 +484,7 @@ export function ShipmentMap({
           <div>
             <h3 className="card-title text-base">Shipment network map</h3>
             <p className="text-sm opacity-70">
-              Demo highway geometry · trucks move from vehicle_positions at highway speeds (not live
-              ELD)
+              Driving routes from pickup → delivery · one truck per active route (GPS snaps on-route when present)
             </p>
           </div>
           {exceptionCount > 0 ? (
@@ -559,52 +666,45 @@ export function ShipmentMap({
                 />
               ))}
               {plotted.map((lane) => {
-                if (!lane.demoGps) return null;
-                const fleet = fleetSpecForLoad(lane.s.load_number);
-                if (!fleet) return null;
+                if (!lane.truckTracking || lane.routeProgress == null || !lane.truckPoint) {
+                  return null;
+                }
+                const pos = lane.truckPoint;
                 const daysLate = daysPastPromised(lane.s.promised_delivery_date, today);
-                const dbRow = dbPositions.get(lane.s.id);
-                const computed = computeDemoPosition({
-                  path: lane.path,
-                  speedMph: dbRow?.speed_mph ?? fleet.speed_mph,
-                  phaseHours: fleet.phase_hours,
-                  nowMs: simNow,
-                });
-                const recordedMs = dbRow ? Date.parse(dbRow.recorded_at) : NaN;
-                const dbFresh =
-                  dbRow &&
-                  Number.isFinite(recordedMs) &&
-                  simNow - recordedMs < 15_000;
-                const pos = dbFresh
-                  ? { lat: dbRow.lat, lng: dbRow.lng }
-                  : computed.point;
+                const pct = Math.round(lane.routeProgress * 100);
+                const pointLabel =
+                  lane.truckPlacement === "gps_on_route"
+                    ? "Last reported (on route)"
+                    : lane.truckPlacement === "gps_snapped"
+                      ? "On-route position (GPS snapped to lane)"
+                      : "On-route position";
                 return (
                   <CircleMarker
                     key={`truck-${lane.s.id}`}
                     center={[pos.lat, pos.lng]}
                     radius={lane.delayed ? 9 : 8}
                     pathOptions={{
-                      color: lane.delayed ? "#991b1b" : "#14532d",
+                      color: lane.delayed ? "#991b1b" : "#0c4a6e",
                       fillColor: lane.color,
                       fillOpacity: 1,
                       weight: 2.5,
                       className: lane.delayed ? "rl-sim-truck-delayed" : "rl-sim-truck",
                     }}
                   >
+                    <Tooltip direction="top" offset={[0, -8]} opacity={0.95}>
+                      <span className="text-xs font-medium">
+                        {lane.s.load_number}
+                        {lane.s.carrier_name ? ` · ${lane.s.carrier_name}` : ""}
+                        {` · ${pct}%`}
+                      </span>
+                    </Tooltip>
                     <Popup>
                       <ShipmentPopup
                         s={lane.s}
                         delayed={lane.delayed}
-                        point={
-                          gpsDbLive
-                            ? "Demo GPS position (vehicle_positions)"
-                            : "Demo GPS position (telemetry pending migrate)"
-                        }
+                        point={pointLabel}
                         daysLate={daysLate}
-                        progressPct={Math.round(computed.legProgress * 100)}
-                        speedMph={dbRow?.speed_mph ?? fleet.speed_mph}
-                        coords={pos}
-                        timeScale={DEMO_GPS_TIME_SCALE}
+                        progressPct={pct}
                       />
                     </Popup>
                   </CircleMarker>
@@ -622,6 +722,9 @@ export function ShipmentMap({
                     weight: 2,
                   }}
                 >
+                  <Tooltip direction="top" offset={[0, -6]} opacity={0.95}>
+                    <HubHoverTooltip hub={hub} />
+                  </Tooltip>
                   <Popup>
                     <HubPopup hub={hub} />
                   </Popup>
@@ -637,8 +740,8 @@ export function ShipmentMap({
               <span className="inline-block h-2 w-2 rounded-full bg-[#0284c7]" /> In transit
             </span>
             <span className="flex items-center gap-1">
-              <span className="inline-block h-2.5 w-2.5 rounded-full border-2 border-[#14532d] bg-[#0284c7]" />{" "}
-              Demo GPS
+              <span className="inline-block h-2.5 w-2.5 rounded-full border-2 border-[#0c4a6e] bg-[#0284c7]" />{" "}
+              Truck (on route)
             </span>
             <span className="flex items-center gap-1">
               <span className="inline-block h-2 w-2 rounded-full bg-[#ef4444]" /> Delayed
@@ -646,9 +749,7 @@ export function ShipmentMap({
             <span className="flex items-center gap-1">
               <span className="inline-block h-2 w-2 rounded-full bg-[#22c55e]" /> Delivered
             </span>
-            <span className="w-full opacity-60">
-              Demo GPS only · vehicle_positions · highway speeds (timeline compressed for pitch)
-            </span>
+            <span className="w-full opacity-60">One truck per active route · varied completion %</span>
           </div>
         </div>
         <p className="text-xs opacity-60">
@@ -656,10 +757,40 @@ export function ShipmentMap({
           {hubs.length === 1 ? "" : "s"}
           {statusFilter === "delayed" ? " · delayed loads only" : ""}
           {statusFilter === "active" ? " · delivered hidden" : ""}. Hollow hubs = pickup; filled =
-          delivery. Truck markers only for loads in vehicle_positions
-          {gpsDbLive ? " (DB live)" : " (awaiting DB migrate)"} — not live ELD hardware.
+          delivery. Routes follow driving geometry between freight addresses; trucks sit on-route.
         </p>
       </div>
+    </div>
+  );
+}
+
+function HubHoverTooltip({ hub }: { hub: CityHub }) {
+  const title = hub.kind === "pickup" ? "Pickup" : "Delivery";
+  if (hub.loads.length === 1) {
+    const { s } = hub.loads[0];
+    return (
+      <span className="text-xs font-medium">
+        {title}: {s.load_number}
+        {s.carrier_name ? ` · ${s.carrier_name}` : ""}
+      </span>
+    );
+  }
+  return (
+    <div className="max-w-[14rem] text-xs">
+      <p className="font-semibold">
+        {title} · {hub.loads.length} loads
+      </p>
+      <ul className="mt-0.5 space-y-0.5">
+        {hub.loads.slice(0, 5).map(({ s }) => (
+          <li key={s.id}>
+            {s.load_number}
+            {s.carrier_name ? ` · ${s.carrier_name}` : ""}
+          </li>
+        ))}
+        {hub.loads.length > 5 ? (
+          <li className="opacity-70">+{hub.loads.length - 5} more</li>
+        ) : null}
+      </ul>
     </div>
   );
 }
@@ -680,7 +811,8 @@ function HubPopup({ hub }: { hub: CityHub }) {
             <span className="opacity-70">
               {" "}
               · {formatStatusLabel(s.status)}
-              {delayed ? " · delayed" : ""} · {s.customer_name}
+              {delayed ? " · delayed" : ""}
+              {s.carrier_name ? ` · ${s.carrier_name}` : ""} · {s.customer_name}
             </span>
           </li>
         ))}
@@ -695,19 +827,14 @@ function ShipmentPopup({
   point,
   daysLate,
   progressPct,
-  speedMph,
-  coords,
-  timeScale,
 }: {
   s: MapShipment;
   delayed: boolean;
   point: string;
   daysLate?: number | null;
   progressPct?: number;
-  speedMph?: number;
-  coords?: LatLng;
-  timeScale?: number;
 }) {
+  const pos = s.last_position;
   return (
     <div className="min-w-[12rem] text-sm">
       <p className="font-semibold">{s.load_number}</p>
@@ -716,24 +843,18 @@ function ShipmentPopup({
         <li>Customer: {s.customer_name}</li>
         <li>Carrier: {s.carrier_name}</li>
         <li>
-          {s.origin_city}, {s.origin_state} → {s.dest_city}, {s.dest_state}
+          {s.pickup_location || `${s.origin_city}, ${s.origin_state}`} →{" "}
+          {s.delivery_location || `${s.dest_city}, ${s.dest_state}`}
         </li>
         <li>
           Status: {formatStatusLabel(s.status)}
           {delayed ? " · delayed (past promised delivery)" : ""}
         </li>
-        {speedMph != null ? (
-          <li>
-            Speed: {speedMph} mph
-            {timeScale != null ? ` · demo clock ${timeScale}×` : ""}
-          </li>
+        {progressPct != null ? <li>Route complete: ~{progressPct}%</li> : null}
+        {pos?.speed_mph != null ? <li>Speed: {Number(pos.speed_mph).toFixed(0)} mph</li> : null}
+        {pos?.recorded_at ? (
+          <li>Reported: {new Date(pos.recorded_at).toLocaleString()}</li>
         ) : null}
-        {coords ? (
-          <li>
-            Lat {coords.lat.toFixed(4)}, Lng {coords.lng.toFixed(4)}
-          </li>
-        ) : null}
-        {progressPct != null ? <li>Route progress: ~{progressPct}%</li> : null}
         <li>Promised delivery: {s.promised_delivery_date ?? "—"}</li>
         {delayed && daysLate != null && daysLate > 0 ? (
           <li>

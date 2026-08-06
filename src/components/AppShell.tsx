@@ -420,7 +420,7 @@ export function AppShell({
             <div className="flex shrink-0 items-center gap-2.5">
               <RowanLaneMark size={42} />
               <div className="min-w-0">
-                <p className="text-xl font-bold tracking-tight text-primary">RowanLane</p>
+                <p className="font-brand text-xl font-bold text-primary">RowanLane</p>
                 <p className="hidden text-xs font-medium tracking-wide text-base-content/50 sm:block">
                   Contract to cash
                 </p>
@@ -469,7 +469,7 @@ export function AppShell({
             <div className="flex items-center gap-3">
               <RowanLaneMark size={46} />
               <div className="min-w-0">
-                <p className="text-xl font-bold tracking-tight text-primary">RowanLane</p>
+                <p className="font-brand text-xl font-bold text-primary">RowanLane</p>
                 <p className="text-sm font-medium text-base-content/80">{roleDisplay}</p>
               </div>
             </div>

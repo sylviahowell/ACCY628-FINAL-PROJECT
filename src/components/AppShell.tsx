@@ -467,10 +467,10 @@ export function AppShell({
         </main>
       </div>
 
-      <div className="drawer-side z-40">
+      <div className="drawer-side z-40 lg:h-screen">
         <label htmlFor="app-drawer" className="drawer-overlay" aria-label="Close menu" />
-        <aside className="flex min-h-full w-72 flex-col border-r border-base-300 bg-base-100 text-base-content">
-          <div className="app-sidebar-brand border-b border-base-300 p-5">
+        <aside className="flex max-h-screen w-72 flex-col border-r border-base-300 bg-base-100 text-base-content max-lg:min-h-full lg:sticky lg:top-0 lg:h-screen">
+          <div className="app-sidebar-brand shrink-0 border-b border-base-300 p-5">
             <Link
               href="/dashboard"
               className="flex items-center gap-3 rounded-box outline-offset-2 hover:opacity-90 focus-visible:outline focus-visible:outline-2 focus-visible:outline-primary"
@@ -491,9 +491,11 @@ export function AppShell({
               </p>
             ) : null}
           </div>
-          <Suspense fallback={<AppShellNavFallback profile={profile} />}>
-            <AppShellNav profile={profile} />
-          </Suspense>
+          <div className="flex min-h-0 flex-1 flex-col overflow-y-auto overscroll-contain">
+            <Suspense fallback={<AppShellNavFallback profile={profile} />}>
+              <AppShellNav profile={profile} />
+            </Suspense>
+          </div>
         </aside>
       </div>
     </div>

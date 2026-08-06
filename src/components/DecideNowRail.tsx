@@ -95,7 +95,7 @@ export function DecideNowRail({
               return (
                 <li
                   key={item.id}
-                  className={`grid grid-cols-1 items-center gap-3 rounded-box border px-3 py-2.5 sm:grid-cols-[2rem_minmax(0,1fr)_6.5rem] ${toneRowClass(item.tone)}`}
+                  className={`grid grid-cols-1 items-center gap-3 rounded-box border px-3 py-2.5 sm:grid-cols-[2rem_minmax(0,1fr)_minmax(5.5rem,7rem)_6.5rem] sm:gap-x-3 ${toneRowClass(item.tone)}`}
                 >
                   <span
                     className="badge badge-ghost badge-sm tabular-nums justify-self-start sm:justify-self-center"
@@ -107,26 +107,26 @@ export function DecideNowRail({
                   <div className="min-w-0">
                     <div className="flex flex-wrap items-baseline gap-x-2 gap-y-0.5">
                       <p className="font-semibold">{item.title}</p>
-                      <p
-                        className={`text-sm font-bold tabular-nums ${toneMetricClass(item.tone)}`}
-                      >
-                        {item.metric}
-                        {item.metricKind === "count" && item.metricUnit ? (
-                          <span className="ml-1 text-xs font-medium opacity-60">
-                            {item.metricUnit}
-                          </span>
-                        ) : null}
-                      </p>
                       <span className={`badge badge-xs ${urgencyBadgeClass(item.tone)}`}>
                         {urgencyLabel(item.tone)}
                       </span>
                     </div>
                     <p className="text-sm opacity-70">{item.detail}</p>
                   </div>
+                  <p
+                    className={`text-sm font-bold tabular-nums sm:justify-self-end sm:text-right ${toneMetricClass(item.tone)}`}
+                  >
+                    {item.metric}
+                    {item.metricKind === "count" && item.metricUnit ? (
+                      <span className="ml-1 text-xs font-medium opacity-60">
+                        {item.metricUnit}
+                      </span>
+                    ) : null}
+                  </p>
                   <Link
                     href={item.href}
                     aria-label={`${cta} — ${item.title} (${item.metric})`}
-                    className={`btn btn-sm w-full justify-center ${toneBtnClass(item.tone)}`}
+                    className={`btn btn-sm w-full justify-center sm:w-[6.5rem] ${toneBtnClass(item.tone)}`}
                   >
                     {cta}
                   </Link>

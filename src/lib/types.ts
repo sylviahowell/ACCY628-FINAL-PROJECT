@@ -134,6 +134,10 @@ export function statusBadge(status: string) {
   return map[status] ?? "badge-ghost";
 }
 
+/** Equal-size status chips for shipper dashboard lists and status cards. */
+export const UNIFORM_STATUS_BADGE =
+  "badge badge-sm inline-flex h-6 min-h-6 w-[9.5rem] shrink-0 items-center justify-center whitespace-nowrap px-2";
+
 /** Human-readable status for badges and lists (e.g. in_transit → In Transit). */
 export function formatStatusLabel(status: string) {
   if (!status) return "";

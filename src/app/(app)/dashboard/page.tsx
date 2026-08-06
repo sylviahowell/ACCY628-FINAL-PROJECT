@@ -67,7 +67,7 @@ import {
 import { computeShipmentHealth } from "@/lib/shipment-health";
 import { createClient } from "@/lib/supabase/server";
 import { sanitizeDemoText } from "@/lib/display-text";
-import { money, statusBadge, formatStatusLabel } from "@/lib/types";
+import { money, statusBadge, formatStatusLabel, UNIFORM_STATUS_BADGE } from "@/lib/types";
 
 export default async function DashboardPage() {
   const profile = await requirePathAccess("/dashboard");
@@ -1303,21 +1303,42 @@ export default async function DashboardPage() {
           emptyDescription="No delayed loads, past-due invoices, or open billing questions."
         />
 
-        <div className="grid gap-4 lg:grid-cols-2">
-          {statusCards.map(({ s, friendly }) => (
-            <div key={s.id} className="space-y-2">
-              <div className="flex items-center justify-between gap-2 px-1">
-                <Link href={`/shipments/${s.id}`} className="link link-primary font-semibold">
-                  {s.load_number}
-                </Link>
-                <span className={`badge badge-sm ${statusBadge(s.status)}`}>
-                  {formatStatusLabel(s.status)}
-                </span>
-              </div>
-              <CustomerFriendlyStatusCard health={friendly} />
+        <section className="space-y-3">
+          <div>
+            <h2 className="text-lg font-bold tracking-tight">Shipment status</h2>
+            <p className="text-sm opacity-70">
+              How your current loads look — lane, ops status, and what needs a follow-up.
+            </p>
+          </div>
+          {statusCards.length === 0 ? (
+            <div className="rounded-box border border-base-300 bg-base-100 px-4 py-6 text-sm opacity-70 shadow-sm">
+              No active shipments to review.
             </div>
-          ))}
-        </div>
+          ) : (
+            <div className="grid gap-4 sm:grid-cols-2">
+              {statusCards.map(({ s, friendly }) => {
+                const origin =
+                  [s.origin_city, s.origin_state].filter(Boolean).join(", ") ||
+                  s.pickup_location ||
+                  "Origin";
+                const dest =
+                  [s.dest_city, s.dest_state].filter(Boolean).join(", ") ||
+                  s.delivery_location ||
+                  "Destination";
+                return (
+                  <CustomerFriendlyStatusCard
+                    key={s.id}
+                    loadNumber={s.load_number}
+                    href={`/shipments/${s.id}`}
+                    lane={`${origin} → ${dest}`}
+                    opsStatus={formatStatusLabel(s.status)}
+                    health={friendly}
+                  />
+                );
+              })}
+            </div>
+          )}
+        </section>
 
         <Panel title="Active shipments">
           <ShipmentList rows={current} empty="No active shipments." />
@@ -1595,7 +1616,7 @@ function ShipmentList({
     <ul className="divide-y divide-base-200">
       {rows.map((s) => (
         <li key={s.id} className="flex flex-wrap items-center justify-between gap-2 py-2">
-          <div>
+          <div className="min-w-0">
             <Link href={`/shipments/${s.id}`} className="link link-primary font-medium">
               {s.load_number}
             </Link>
@@ -1604,7 +1625,7 @@ function ShipmentList({
               {(s.carriers as { name?: string } | null)?.name ?? "No carrier"}
             </p>
           </div>
-          <span className={`badge ${statusBadge(s.status)}`}>
+          <span className={`${UNIFORM_STATUS_BADGE} ${statusBadge(s.status)}`}>
             {formatStatusLabel(s.status)}
           </span>
         </li>

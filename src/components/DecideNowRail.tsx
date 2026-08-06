@@ -42,28 +42,26 @@ export function DecideNowRail({ items }: { items: DecideNowItem[] }) {
               return (
                 <li
                   key={item.id}
-                  className={`grid grid-cols-1 items-center gap-3 rounded-box border px-3 py-2.5 sm:grid-cols-[minmax(0,1fr)_6.5rem] ${toneRowClass(item.tone)}`}
+                  className={`grid grid-cols-1 items-center gap-2 rounded-box border px-3 py-2.5 sm:grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)] sm:gap-x-4 sm:gap-y-2 ${toneRowClass(item.tone)}`}
                 >
                   <div className="min-w-0">
-                    <div className="flex flex-wrap items-baseline gap-x-2 gap-y-0.5">
-                      <p className="font-semibold">{item.title}</p>
-                      <p
-                        className={`text-sm font-bold tabular-nums ${toneMetricClass(item.tone)}`}
-                      >
-                        {item.metric}
-                        {item.metricKind === "count" && item.metricUnit ? (
-                          <span className="ml-1 text-xs font-medium opacity-60">
-                            {item.metricUnit}
-                          </span>
-                        ) : null}
-                      </p>
-                    </div>
+                    <p className="font-semibold">{item.title}</p>
                     <p className="text-sm opacity-70">{item.detail}</p>
                   </div>
+                  <p
+                    className={`text-sm font-bold tabular-nums sm:justify-self-center sm:text-center ${toneMetricClass(item.tone)}`}
+                  >
+                    {item.metric}
+                    {item.metricKind === "count" && item.metricUnit ? (
+                      <span className="ml-1 text-xs font-medium opacity-60">
+                        {item.metricUnit}
+                      </span>
+                    ) : null}
+                  </p>
                   <Link
                     href={item.href}
                     aria-label={`${cta} — ${item.title} (${item.metric})`}
-                    className={`btn btn-sm w-full justify-center ${toneBtnClass(item.tone)}`}
+                    className={`btn btn-sm w-[7.5rem] justify-center sm:justify-self-end ${toneBtnClass(item.tone)}`}
                   >
                     {cta}
                   </Link>

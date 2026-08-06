@@ -70,18 +70,21 @@ export function DemoRoleSelector({ activeRole }: { activeRole: UserRole }) {
   }
 
   return (
-    <div className="flex max-w-full flex-wrap items-center justify-end gap-1.5 sm:gap-2">
-      <span className="inline-flex items-center gap-1 rounded-full border border-sky-200 bg-sky-50 px-2 py-0.5 text-[10px] font-semibold tracking-wide text-[#0866D9] uppercase">
+    <div className="flex max-w-full shrink-0 flex-nowrap items-center justify-end gap-1.5 sm:gap-2">
+      <span
+        className="inline-flex shrink-0 items-center gap-1 rounded-full border border-sky-200 bg-sky-50 px-2 py-0.5 text-[10px] font-semibold tracking-wide text-[#0866D9] uppercase"
+        title="Demo Mode"
+      >
         <Beaker className="h-3 w-3" aria-hidden />
-        Demo Mode
+        <span className="hidden min-[1100px]:inline">Demo Mode</span>
       </span>
 
       <label className="flex min-w-0 items-center gap-1.5 text-xs">
-        <span className="hidden shrink-0 font-medium text-base-content/70 md:inline">
+        <span className="hidden shrink-0 font-medium text-base-content/70 xl:inline">
           Demo Role:
         </span>
         <select
-          className="select select-bordered select-sm max-w-[min(100vw-6rem,15.5rem)] min-w-[10.5rem] text-xs font-medium"
+          className="select select-bordered select-sm w-[10.75rem] shrink-0 text-xs font-medium sm:w-[12.5rem]"
           aria-label="Demo Role"
           disabled={pending}
           value={activeRole}
@@ -96,7 +99,7 @@ export function DemoRoleSelector({ activeRole }: { activeRole: UserRole }) {
         </select>
       </label>
       {pending ? (
-        <span className="text-[11px] text-[#0866D9]">Switching…</span>
+        <span className="shrink-0 text-[11px] text-[#0866D9]">Switching…</span>
       ) : null}
       {error ? (
         <p
@@ -109,7 +112,7 @@ export function DemoRoleSelector({ activeRole }: { activeRole: UserRole }) {
 
       <button
         type="button"
-        className="btn btn-ghost btn-sm gap-1 text-xs"
+        className="btn btn-ghost btn-sm shrink-0 gap-1 text-xs"
         disabled={pending}
         title="Exit Demo Mode"
         onClick={() => {
@@ -120,7 +123,7 @@ export function DemoRoleSelector({ activeRole }: { activeRole: UserRole }) {
         }}
       >
         <LogOut className="h-3.5 w-3.5" />
-        <span className="hidden sm:inline">Exit Demo</span>
+        <span className="hidden xl:inline">Exit Demo</span>
       </button>
     </div>
   );

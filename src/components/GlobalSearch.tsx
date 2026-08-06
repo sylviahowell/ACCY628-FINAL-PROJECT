@@ -16,7 +16,7 @@ export function GlobalSearch({ placeholder = "Search…" }: { placeholder?: stri
   const tooShort = query.length < 2;
 
   useEffect(() => {
-    if (tooShort) return;
+    if (deferred.trim().length < 2) return;
     let cancelled = false;
     startTransition(async () => {
       const results = await globalSearch(deferred);
@@ -28,18 +28,18 @@ export function GlobalSearch({ placeholder = "Search…" }: { placeholder?: stri
     return () => {
       cancelled = true;
     };
-  }, [deferred, tooShort]);
+  }, [deferred]);
 
   const visibleHits = tooShort ? [] : hits;
   const hasSearched = tooShort ? false : searched;
 
   return (
-    <div className="relative hidden min-w-[14rem] max-w-md flex-1 md:block">
-      <label className="input input-bordered input-sm flex items-center gap-2">
-        <Search className="h-4 w-4 opacity-50" />
+    <div className="relative hidden min-w-0 max-w-[13rem] flex-1 md:block lg:max-w-xs xl:max-w-md">
+      <label className="input input-bordered input-sm flex w-full items-center gap-2">
+        <Search className="h-4 w-4 shrink-0 opacity-50" />
         <input
           type="search"
-          className="grow"
+          className="min-w-0 grow"
           placeholder={placeholder}
           value={q}
           onChange={(e) => setQ(e.target.value)}

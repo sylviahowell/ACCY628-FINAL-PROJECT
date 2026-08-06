@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { ExportTrialBalanceButton } from "@/components/ExportTrialBalanceButton";
 import {
   ACCOUNT_TYPE_LABEL,
   ACCOUNT_TYPE_ORDER,
@@ -6,6 +7,7 @@ import {
   type AccountActivity,
   type AccountType,
 } from "@/lib/chart-of-accounts";
+import { buildTrialBalance } from "@/lib/trial-balance";
 import { money } from "@/lib/types";
 
 function typeBadge(type: AccountType) {
@@ -29,16 +31,21 @@ export function ChartOfAccountsPanel({
 }: {
   activity: Map<string, AccountActivity>;
 }) {
+  const trialBalanceRows = buildTrialBalance(activity);
+
   return (
     <div id="chart-of-accounts" className="card bg-base-100 shadow-sm">
       <div className="card-body gap-4">
-        <div>
-          <h2 className="card-title text-base">Chart of accounts</h2>
-          <p className="text-sm opacity-70">
-            RowanLane’s brokerage books — sell-side freight revenue, purchased transportation
-            COGS, and working-capital accounts used in the C2C journals. Activity totals are
-            rolled from demo entries on this page.
-          </p>
+        <div className="flex flex-wrap items-start justify-between gap-3">
+          <div>
+            <h2 className="card-title text-base">Chart of accounts</h2>
+            <p className="text-sm opacity-70">
+              RowanLane’s brokerage books — sell-side freight revenue, purchased transportation
+              COGS, and working-capital accounts used in the C2C journals. Activity totals are
+              rolled from demo entries on this page.
+            </p>
+          </div>
+          <ExportTrialBalanceButton rows={trialBalanceRows} />
         </div>
 
         <div className="space-y-5">
@@ -101,7 +108,8 @@ export function ChartOfAccountsPanel({
 
         <p className="text-xs opacity-60">
           Revenue and COGS drive load margin; G&A accounts exist for the brokerage entity but
-          are not auto-allocated per shipment in this demo.{" "}
+          are not auto-allocated per shipment in this demo. Export downloads an Excel-compatible
+          trial balance (account #, name, type, debit/credit) for billing review.{" "}
           <Link href="#accounting-entries" className="link link-primary">
             See accounting entries
           </Link>

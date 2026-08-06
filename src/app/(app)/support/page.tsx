@@ -32,7 +32,7 @@ export default async function SupportPage({
   let ticketQuery = supabase
     .from("support_tickets")
     .select(
-      "id, ticket_number, subject, category, priority, status, created_at, updated_at, customer_id, carrier_id, customers(name), carriers(name)",
+      "id, ticket_number, subject, category, priority, status, created_at, updated_at, customer_id, carrier_id, shipment_id, customers(name), carriers(name), shipments(load_number)",
     )
     .order("updated_at", { ascending: false });
 
@@ -57,6 +57,8 @@ export default async function SupportPage({
   let overdue: { id: string; invoice_number: string; total: number; amount_paid: number }[] = [];
   let delayed: { id: string; load_number: string }[] = [];
   let openDisputes: { id: string; reason: string; amount_disputed: number }[] = [];
+  let linkShipments: { id: string; load_number: string; status: string }[] = [];
+  let linkInvoices: { id: string; invoice_number: string; status: string }[] = [];
 
   if (profile.role === "customer" && profile.customer_id) {
     const [{ data: invoices }, { data: disputes }, { data: shipments }] = await Promise.all([
@@ -74,8 +76,21 @@ export default async function SupportPage({
         .from("shipments")
         .select("id, load_number, status, promised_delivery_date")
         .eq("customer_id", profile.customer_id)
-        .not("status", "in", '("completed","cancelled")'),
+        .order("created_at", { ascending: false })
+        .limit(40),
     ]);
+    linkShipments = (shipments ?? []).map((s) => ({
+      id: s.id,
+      load_number: s.load_number,
+      status: s.status,
+    }));
+    linkInvoices = (invoices ?? [])
+      .filter((i) => !["cancelled"].includes(i.status))
+      .map((i) => ({
+        id: i.id,
+        invoice_number: i.invoice_number,
+        status: i.status,
+      }));
     overdue = (invoices ?? []).filter((i) => {
       const bal = Number(i.total) - Number(i.amount_paid);
       return bal > 0 && i.due_date < today && !["paid", "cancelled"].includes(i.status);
@@ -84,9 +99,17 @@ export default async function SupportPage({
       (s) =>
         s.promised_delivery_date &&
         s.promised_delivery_date < today &&
-        !["delivered", "completed"].includes(s.status),
+        !["delivered", "completed", "cancelled"].includes(s.status),
     );
     openDisputes = disputes ?? [];
+  } else if (profile.role === "carrier" && profile.carrier_id) {
+    const { data: shipments } = await supabase
+      .from("shipments")
+      .select("id, load_number, status")
+      .eq("carrier_id", profile.carrier_id)
+      .order("created_at", { ascending: false })
+      .limit(40);
+    linkShipments = shipments ?? [];
   }
 
   return (
@@ -131,44 +154,70 @@ export default async function SupportPage({
                 : "Ask about POD uploads, delivery docs, or account questions — your account team will reply here."}
             </p>
             <form action={createSupportTicket} className="grid gap-3 md:grid-cols-2">
-              <label className="form-control md:col-span-2">
-                <span className="label-text text-sm">Subject</span>
+              <fieldset className="fieldset md:col-span-2">
+                <legend className="fieldset-legend">Subject</legend>
                 <input
                   name="subject"
                   required
                   maxLength={200}
-                  className="input input-bordered input-sm"
+                  className="input input-bordered input-sm w-full"
                   placeholder="Short summary of your question"
                 />
-              </label>
-              <label className="form-control">
-                <span className="label-text text-sm">Category</span>
-                <select name="category" className="select select-bordered select-sm" defaultValue="other">
+              </fieldset>
+              <fieldset className="fieldset">
+                <legend className="fieldset-legend">Category</legend>
+                <select name="category" className="select select-bordered select-sm w-full" defaultValue="other">
                   <option value="shipment">Shipment</option>
                   <option value="billing">Billing question</option>
                   <option value="account">Account / portal</option>
                   <option value="other">Other</option>
                 </select>
-              </label>
-              <label className="form-control">
-                <span className="label-text text-sm">Priority</span>
-                <select name="priority" className="select select-bordered select-sm" defaultValue="normal">
+              </fieldset>
+              <fieldset className="fieldset">
+                <legend className="fieldset-legend">Priority</legend>
+                <select name="priority" className="select select-bordered select-sm w-full" defaultValue="normal">
                   <option value="low">Low</option>
                   <option value="normal">Normal</option>
                   <option value="high">High</option>
                 </select>
-              </label>
-              <label className="form-control md:col-span-2">
-                <span className="label-text text-sm">Message</span>
+              </fieldset>
+              <fieldset className="fieldset">
+                <legend className="fieldset-legend">Related load (optional)</legend>
+                <select name="shipment_id" className="select select-bordered select-sm w-full" defaultValue="">
+                  <option value="">None</option>
+                  {linkShipments.map((s) => (
+                    <option key={s.id} value={s.id}>
+                      {s.load_number} · {s.status}
+                    </option>
+                  ))}
+                </select>
+              </fieldset>
+              {profile.role === "customer" ? (
+                <fieldset className="fieldset">
+                  <legend className="fieldset-legend">Related invoice (optional)</legend>
+                  <select name="invoice_id" className="select select-bordered select-sm w-full" defaultValue="">
+                    <option value="">None</option>
+                    {linkInvoices.map((i) => (
+                      <option key={i.id} value={i.id}>
+                        {i.invoice_number} · {i.status}
+                      </option>
+                    ))}
+                  </select>
+                </fieldset>
+              ) : (
+                <div className="hidden md:block" />
+              )}
+              <fieldset className="fieldset md:col-span-2">
+                <legend className="fieldset-legend">Message</legend>
                 <textarea
                   name="body"
                   required
                   maxLength={4000}
                   rows={4}
-                  className="textarea textarea-bordered text-sm"
+                  className="textarea textarea-bordered w-full text-sm"
                   placeholder="Describe what you need help with"
                 />
-              </label>
+              </fieldset>
               <button type="submit" className="btn btn-primary btn-sm w-fit">
                 Submit ticket
               </button>
@@ -194,6 +243,7 @@ export default async function SupportPage({
                 <tr>
                   <th>Ticket</th>
                   <th>Subject</th>
+                  <th>Load</th>
                   <th>Category</th>
                   {staff ? <th>Requester</th> : null}
                   <th>Age</th>
@@ -204,6 +254,7 @@ export default async function SupportPage({
                 {visibleTickets.map((t) => {
                   const customerName = (t.customers as { name?: string } | null)?.name;
                   const carrierName = (t.carriers as { name?: string } | null)?.name;
+                  const loadNumber = (t.shipments as { load_number?: string } | null)?.load_number;
                   const requester = customerName ?? carrierName ?? "—";
                   return (
                     <tr key={t.id} className="hover">
@@ -216,6 +267,15 @@ export default async function SupportPage({
                         <Link href={`/support/${t.id}`} className="link link-hover font-medium">
                           {sanitizeDemoText(t.subject)}
                         </Link>
+                      </td>
+                      <td className="font-mono text-xs">
+                        {loadNumber && t.shipment_id ? (
+                          <Link className="link link-hover" href={`/shipments/${t.shipment_id}`}>
+                            {loadNumber}
+                          </Link>
+                        ) : (
+                          <span className="opacity-40">—</span>
+                        )}
                       </td>
                       <td className="capitalize">{t.category}</td>
                       {staff ? <td>{sanitizeDemoText(requester)}</td> : null}

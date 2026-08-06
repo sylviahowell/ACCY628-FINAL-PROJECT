@@ -183,7 +183,7 @@ export async function signIn(formData: FormData) {
 }
 
 /** Legacy form helper — prefers enterDemoMode for portal cards. */
-export async function loginAsDemo(email: string, _formData?: FormData) {
+export async function loginAsDemo(email: string) {
   const demo = DEMO_USERS.find((u) => u.email === email);
   if (!demo) throw new Error("Unknown demo user");
   await enterDemoMode(demo.role);
@@ -194,7 +194,7 @@ export async function loginAsDemo(email: string, _formData?: FormData) {
  * Credentials stay server-side; the visitor never enters a password.
  * Disable with DEMO_ENABLED=false in the environment.
  */
-export async function enterDemoMode(role: UserRole, _formData?: FormData) {
+export async function enterDemoMode(role: UserRole) {
   if (!demoEnabled()) {
     throw new Error("Demo portals are disabled in this environment.");
   }

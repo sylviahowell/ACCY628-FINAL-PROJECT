@@ -84,7 +84,10 @@ export function DemoPortalGrid() {
     try {
       await clientSignInDemoRole(role);
       await activateDemoModeSession();
-      window.location.assign(`/dashboard?portal=${encodeURIComponent(role)}`);
+      // Absolute URL + full reload so auth cookies are visible to middleware/RSC.
+      window.location.assign(
+        new URL(`/dashboard?portal=${encodeURIComponent(role)}`, window.location.origin).href,
+      );
     } catch (e) {
       setActiveRole(null);
       setPending(false);

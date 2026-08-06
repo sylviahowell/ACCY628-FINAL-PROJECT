@@ -499,7 +499,7 @@ export default async function ShipmentDetailPage({
     nextAction = { label: "Check Support for your open billing question", href: "/support" };
   }
 
-  async function setStatus(status: ShipmentStatus, _fd?: FormData) {
+  async function setStatus(status: ShipmentStatus) {
     "use server";
     await updateShipmentStatus(id, status);
   }

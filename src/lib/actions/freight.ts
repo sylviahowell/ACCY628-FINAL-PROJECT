@@ -1246,7 +1246,7 @@ export async function requestAccessorial(formData: FormData) {
   );
 }
 
-export async function generateInvoice(shipmentId: string, _formData?: FormData) {
+export async function generateInvoice(shipmentId: string) {
   const profile = await getCurrentProfile();
   if (!profile || !canManageBilling(profile.role)) {
     throw new Error("Only billing or managers can generate invoices.");
@@ -1949,7 +1949,7 @@ export async function addCollectionNote(formData: FormData) {
   revalidatePath("/invoices");
 }
 
-export async function generateCarrierBill(shipmentId: string, _formData?: FormData) {
+export async function generateCarrierBill(shipmentId: string) {
   const profile = await getCurrentProfile();
   if (!profile || !canManageBilling(profile.role)) {
     throw new Error("Only billing or managers can create carrier bills.");

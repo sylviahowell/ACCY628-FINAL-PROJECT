@@ -55,3 +55,8 @@ next-env.d.ts
 /public/insurance-uploads/**
 !/public/insurance-uploads/.gitkeep
 
+.env*
+
+# local Playwright failure dumps
+scripts/*-failure.png
+scripts/.tmp-c2c/

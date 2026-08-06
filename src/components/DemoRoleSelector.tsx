@@ -61,8 +61,11 @@ export function DemoRoleSelector({ activeRole }: { activeRole: UserRole }) {
     try {
       await clientSignInDemoRole(role);
       await activateDemoModeSession();
-      // Full reload so middleware + RSC see the new auth cookies (soft nav races /login).
-      window.location.assign(`/dashboard?portal=${encodeURIComponent(role)}`);
+      // Absolute URL + full reload so middleware + RSC see new auth cookies
+      // (soft client nav races /login). Absolute destination satisfies Next lint.
+      window.location.assign(
+        new URL(`/dashboard?portal=${encodeURIComponent(role)}`, window.location.origin).href,
+      );
     } catch (e) {
       setPending(false);
       setError(e instanceof Error ? e.message : "Could not switch demo role");

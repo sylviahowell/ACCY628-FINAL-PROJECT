@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useMemo, useState } from "react";
 import { createCoverageRequest } from "@/lib/actions/coverage";
 import {
   isDateOutsideContractWindow,
@@ -19,9 +19,8 @@ type Props = {
 export function CoverageRequestForm({ contracts }: Props) {
   const defaultId = contracts.length === 1 ? contracts[0].id : "";
   const [contractId, setContractId] = useState(defaultId);
-  const [miles, setMiles] = useState("");
-  const [milesHint, setMilesHint] = useState<string | null>(null);
-  const milesAutoRef = useRef(false);
+  /** When set, user overrode the auto estimate; null means use derived miles. */
+  const [milesOverride, setMilesOverride] = useState<string | null>(null);
   const [pickupLocation, setPickupLocation] = useState("");
   const [deliveryLocation, setDeliveryLocation] = useState("");
   const [pickupDate, setPickupDate] = useState("");
@@ -37,30 +36,26 @@ export function CoverageRequestForm({ contracts }: Props) {
     Number(selected!.customer_rate_per_mile) > 0 &&
     Number(selected!.carrier_rate_per_mile) > 0;
 
-  useEffect(() => {
+  const laneEstimate = useMemo(() => {
     const estimated = estimateLaneMiles(pickupLocation, deliveryLocation);
     if (estimated != null && estimated > 0) {
-      setMiles(String(estimated));
-      milesAutoRef.current = true;
-      setMilesHint(`Estimated from ${pickupLocation.trim()} → ${deliveryLocation.trim()}`);
-      return;
+      return {
+        miles: String(estimated),
+        hint: `Estimated from ${pickupLocation.trim()} → ${deliveryLocation.trim()}`,
+      };
     }
     if (pickupLocation.trim() && deliveryLocation.trim()) {
-      setMilesHint(
-        "Couldn’t match those cities — enter miles manually (try City, ST like Chicago, IL).",
-      );
-      if (milesAutoRef.current) {
-        setMiles("");
-        milesAutoRef.current = false;
-      }
-      return;
+      return {
+        miles: "",
+        hint: "Couldn’t match those cities — enter miles manually (try City, ST like Chicago, IL).",
+      };
     }
-    setMilesHint(null);
-    if (milesAutoRef.current) {
-      setMiles("");
-      milesAutoRef.current = false;
-    }
+    return { miles: "", hint: null as string | null };
   }, [pickupLocation, deliveryLocation]);
+
+  const miles = milesOverride ?? laneEstimate.miles;
+  const milesHint =
+    milesOverride !== null ? "Miles edited manually" : laneEstimate.hint;
 
   const quote = selected && hasMileRates ? calcLaneQuote(Number(miles), selected) : null;
   const suggested = selected ? suggestedRateFromText(selected.shipping_rates) : null;
@@ -172,7 +167,10 @@ export function CoverageRequestForm({ contracts }: Props) {
         placeholder="Pickup (City, ST)"
         className="input input-bordered"
         value={pickupLocation}
-        onChange={(e) => setPickupLocation(e.target.value)}
+        onChange={(e) => {
+          setPickupLocation(e.target.value);
+          setMilesOverride(null);
+        }}
       />
       <input
         name="delivery_location"
@@ -180,7 +178,10 @@ export function CoverageRequestForm({ contracts }: Props) {
         placeholder="Delivery (City, ST)"
         className="input input-bordered"
         value={deliveryLocation}
-        onChange={(e) => setDeliveryLocation(e.target.value)}
+        onChange={(e) => {
+          setDeliveryLocation(e.target.value);
+          setMilesOverride(null);
+        }}
       />
       <input
         name="pickup_date"
@@ -207,11 +208,7 @@ export function CoverageRequestForm({ contracts }: Props) {
             required
             className="input input-bordered w-full"
             value={miles}
-            onChange={(e) => {
-              setMiles(e.target.value);
-              milesAutoRef.current = false;
-              setMilesHint("Miles edited manually");
-            }}
+            onChange={(e) => setMilesOverride(e.target.value)}
             placeholder="e.g. 520"
           />
           {milesHint ? <span className="label-text-alt opacity-60">{milesHint}</span> : null}

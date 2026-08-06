@@ -250,14 +250,17 @@ export default async function DashboardPage() {
     weekAgo.setUTCDate(weekAgo.getUTCDate() - 7);
     const weekAgoStr = weekAgo.toISOString().slice(0, 10);
 
-    const revInMonth = (start: Date, end: Date) =>
-      invList
-        .filter((i) => i.status !== "cancelled" && inRange(i.issue_date, start, end))
-        .reduce((s, i) => s + Number(i.total), 0);
-    const profitInMonth = (start: Date, end: Date) =>
-      shipList.reduce((sum, s) => {
+    // Revenue + GP share the same shipment window so margin cannot exceed 100%
+    // from mixing invoice issue dates with delivery dates.
+    const shipmentsInMonth = (start: Date, end: Date) =>
+      shipList.filter((s) => {
         const date = s.delivery_date || s.pickup_date || s.created_at;
-        if (!inRange(date, start, end)) return sum;
+        return inRange(date, start, end);
+      });
+    const revInMonth = (start: Date, end: Date) =>
+      shipmentsInMonth(start, end).reduce((sum, s) => sum + Number(s.customer_rate), 0);
+    const profitInMonth = (start: Date, end: Date) =>
+      shipmentsInMonth(start, end).reduce((sum, s) => {
         const p = profitByShipment.get(s.id);
         return sum + (p ? Number(p.margin) : Number(s.customer_rate) - Number(s.carrier_cost));
       }, 0);
@@ -1656,37 +1659,6 @@ function Panel({ title, children }: { title: string; children: React.ReactNode }
         <h3 className="card-title text-base">{title}</h3>
         {children}
       </div>
-    </div>
-  );
-}
-
-function MiniTable({
-  headers,
-  rows,
-}: {
-  headers: string[];
-  rows: string[][];
-}) {
-  return (
-    <div className="overflow-x-auto">
-      <table className="table table-sm">
-        <thead>
-          <tr>
-            {headers.map((h) => (
-              <th key={h}>{h}</th>
-            ))}
-          </tr>
-        </thead>
-        <tbody>
-          {rows.map((row, i) => (
-            <tr key={i}>
-              {row.map((cell, j) => (
-                <td key={j}>{cell}</td>
-              ))}
-            </tr>
-          ))}
-        </tbody>
-      </table>
     </div>
   );
 }

@@ -485,6 +485,243 @@ export default async function ShipmentDetailPage({
     await updateShipmentStatus(id, status);
   }
 
+  const customerBillableCharges = (charges ?? []).filter((c) => c.billable_to_customer);
+
+  if (isCustomer) {
+    return (
+      <div className="space-y-8">
+        <header className="space-y-2">
+          <Link href="/shipments" className="link link-hover text-sm">
+            ← Shipments
+          </Link>
+          <div className="flex flex-wrap items-start justify-between gap-3">
+            <div>
+              <h1 className="text-2xl font-bold tracking-tight">{s.load_number}</h1>
+              <p className="text-sm opacity-70">
+                {s.pickup_location} → {s.delivery_location}
+              </p>
+              <p className="mt-1 text-sm opacity-60">
+                Pickup {s.pickup_date ?? "TBD"}
+                {s.promised_delivery_date ? ` · Expected ${s.promised_delivery_date}` : ""}
+                {s.delivery_date ? ` · Delivered ${s.delivery_date}` : ""}
+              </p>
+            </div>
+            <span className={`badge badge-lg ${statusBadge(s.status)}`}>
+              {s.status.replaceAll("_", " ")}
+            </span>
+          </div>
+        </header>
+
+        {nextAction ? (
+          <div className="flex flex-wrap items-center justify-between gap-3 rounded-box border border-primary/30 bg-primary/10 px-4 py-3">
+            <div>
+              <p className="text-xs font-semibold tracking-wide text-primary uppercase">
+                Next action
+              </p>
+              <p className="font-medium">{nextAction.label}</p>
+            </div>
+            {nextAction.href ? (
+              <Link href={nextAction.href} className="btn btn-primary btn-sm">
+                Go
+              </Link>
+            ) : null}
+          </div>
+        ) : null}
+
+        <section className="space-y-3">
+          <div>
+            <h2 className="text-lg font-semibold">Where is it?</h2>
+            <p className="text-sm opacity-60">Live status and progress for this load.</p>
+          </div>
+          <div className="grid items-start gap-6 rounded-box border border-base-300 bg-base-100 p-4 lg:grid-cols-[minmax(0,18rem)_1fr] lg:gap-0 lg:p-5">
+            <div className="lg:pr-5">
+              <CustomerFriendlyStatusCard health={friendly} embedded hideTitle />
+            </div>
+            <div className="border-t border-base-200 pt-5 lg:border-t-0 lg:border-l lg:pt-0 lg:pl-5">
+              <C2CTimeline
+                steps={c2cSteps}
+                embedded
+                title="Progress"
+                description="Milestones for this shipment from booking through invoice."
+              />
+            </div>
+          </div>
+        </section>
+
+        <section className="space-y-3">
+          <div>
+            <h2 className="text-lg font-semibold">Load & documents</h2>
+            <p className="text-sm opacity-60">Shipment facts and proof of delivery.</p>
+          </div>
+          <div className="grid gap-4 lg:grid-cols-2">
+            <div className="rounded-box border border-base-300 bg-base-100 p-4 sm:p-5">
+              <h3 className="text-sm font-semibold">Details</h3>
+              <ul className="mt-3 space-y-2 text-sm">
+                <li className="flex justify-between gap-3">
+                  <span className="opacity-60">Carrier</span>
+                  <span className="text-right font-medium">
+                    {s.carrier_id ? "Assigned" : "Pending assignment"}
+                  </span>
+                </li>
+                <li className="flex justify-between gap-3">
+                  <span className="opacity-60">Contract</span>
+                  <span className="text-right font-medium">
+                    {(s.contracts as { contract_number?: string } | null)?.contract_number ??
+                      "Spot"}
+                  </span>
+                </li>
+                <li className="flex justify-between gap-3">
+                  <span className="opacity-60">Freight</span>
+                  <span className="text-right font-medium">{s.freight_type ?? "—"}</span>
+                </li>
+                <li className="flex justify-between gap-3">
+                  <span className="opacity-60">Weight</span>
+                  <span className="text-right font-medium">
+                    {s.weight_lbs != null ? `${s.weight_lbs} lbs` : "—"}
+                  </span>
+                </li>
+                <li className="flex justify-between gap-3">
+                  <span className="opacity-60">Pickup</span>
+                  <span className="text-right font-medium">{s.pickup_date ?? "TBD"}</span>
+                </li>
+                <li className="flex justify-between gap-3">
+                  <span className="opacity-60">Delivery</span>
+                  <span className="text-right font-medium">{s.delivery_date ?? "TBD"}</span>
+                </li>
+              </ul>
+            </div>
+
+            <div className="rounded-box border border-base-300 bg-base-100 p-4 sm:p-5">
+              <h3 className="text-sm font-semibold">Proof of delivery</h3>
+              {(pods ?? []).length ? (
+                <ul className="mt-3 space-y-2 text-sm">
+                  {(pods ?? []).map((p) => (
+                    <li key={p.id} className="rounded-box bg-base-200/70 p-3">
+                      Signed by {p.signed_by ?? "—"} ·{" "}
+                      {new Date(p.delivered_at).toLocaleString()}
+                      {sanitizeDemoText(p.notes) ? (
+                        <div className="mt-1 opacity-70">{sanitizeDemoText(p.notes)}</div>
+                      ) : null}
+                      {normalizePodUrl(p.file_url) ? (
+                        <a
+                          className="link mt-1 inline-block"
+                          href={normalizePodUrl(p.file_url)!}
+                          target="_blank"
+                          rel="noreferrer"
+                        >
+                          Open delivery document
+                        </a>
+                      ) : null}
+                    </li>
+                  ))}
+                </ul>
+              ) : (
+                <p className="mt-3 text-sm opacity-70">
+                  No proof of delivery on file yet.
+                </p>
+              )}
+            </div>
+          </div>
+        </section>
+
+        <section className="space-y-3">
+          <div>
+            <h2 className="text-lg font-semibold">Billing</h2>
+            <p className="text-sm opacity-60">Your rate, extra charges, and invoices.</p>
+          </div>
+          <div className="space-y-4 rounded-box border border-base-300 bg-base-100 p-4 sm:p-5">
+            <div className="flex flex-wrap items-end justify-between gap-3 border-b border-base-200 pb-4">
+              <div>
+                <p className="text-xs font-medium tracking-wide uppercase opacity-50">
+                  Your shipment rate
+                </p>
+                <p className="text-2xl font-semibold tabular-nums">{money(s.customer_rate)}</p>
+              </div>
+            </div>
+
+            <div>
+              <h3 className="text-sm font-semibold">Extra charges</h3>
+              {customerBillableCharges.length === 0 ? (
+                <p className="mt-2 text-sm opacity-70">No extra charges on this shipment.</p>
+              ) : (
+                <ul className="mt-2 space-y-1 text-sm">
+                  {customerBillableCharges.map((c) => (
+                    <li
+                      key={c.id}
+                      className="flex justify-between gap-2 border-b border-base-200 py-2 last:border-0"
+                    >
+                      <span>{c.description}</span>
+                      <span className="font-medium tabular-nums">{money(c.amount)}</span>
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </div>
+
+            <div className="border-t border-base-200 pt-4">
+              <h3 className="text-sm font-semibold">Invoices</h3>
+              {(invoices ?? []).length === 0 ? (
+                <p className="mt-2 text-sm opacity-70">Not billed yet.</p>
+              ) : (
+                <ul className="mt-2 space-y-2 text-sm">
+                  {(invoices ?? []).map((inv) => (
+                    <li key={inv.id} className="flex flex-wrap items-center justify-between gap-2">
+                      <span>
+                        <Link href="/invoices" className="link font-medium">
+                          {inv.invoice_number}
+                        </Link>{" "}
+                        <span className={`badge ${statusBadge(inv.status)}`}>{inv.status}</span>
+                      </span>
+                      <span className="tabular-nums opacity-80">
+                        {money(inv.amount_paid)} / {money(inv.total)}
+                      </span>
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </div>
+          </div>
+        </section>
+
+        <details className="group rounded-box border border-base-300 bg-base-100">
+          <summary className="cursor-pointer list-none px-4 py-3 text-sm font-semibold marker:content-none sm:px-5">
+            <span className="flex items-center justify-between gap-2">
+              Status history
+              <span className="text-xs font-normal opacity-50 group-open:hidden">Show</span>
+              <span className="hidden text-xs font-normal opacity-50 group-open:inline">
+                Hide
+              </span>
+            </span>
+          </summary>
+          <div className="border-t border-base-200 px-4 py-3 sm:px-5">
+            {(timeline ?? []).length === 0 ? (
+              <p className="text-sm opacity-70">No status changes logged yet.</p>
+            ) : (
+              <ul className="timeline timeline-vertical timeline-compact">
+                {(timeline ?? []).map((t) => (
+                  <li key={t.id}>
+                    <hr />
+                    <div className="timeline-start text-xs opacity-60">
+                      {new Date(t.created_at).toLocaleString()}
+                    </div>
+                    <div className="timeline-middle">
+                      <div className="h-3 w-3 rounded-full bg-primary" />
+                    </div>
+                    <div className="timeline-end timeline-box text-sm">
+                      {t.from_status ?? "—"} → {t.to_status}
+                      {t.note ? ` · ${sanitizeDemoText(t.note)}` : ""}
+                    </div>
+                    <hr />
+                  </li>
+                ))}
+              </ul>
+            )}
+          </div>
+        </details>
+      </div>
+    );
+  }
+
   return (
     <div className="space-y-6">
       <div className="flex flex-wrap items-start justify-between gap-3">

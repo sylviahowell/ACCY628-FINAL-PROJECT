@@ -10,50 +10,66 @@ export function CustomerFriendlyStatusCard({
   lane,
   opsStatus,
   health,
+  embedded = false,
+  hideTitle = false,
 }: {
   loadNumber?: string;
   href?: string;
   lane?: string;
   opsStatus?: string;
   health: FriendlyHealth;
+  /** Drop outer card chrome when nested inside a parent section. */
+  embedded?: boolean;
+  /** Hide the default "Shipment status" heading (e.g. parent section already titles it). */
+  hideTitle?: boolean;
 }) {
   const hasShipmentMeta = Boolean(loadNumber && href);
 
+  const body = (
+    <>
+      <div className="flex items-start justify-between gap-3">
+        <div className="min-w-0">
+          {hasShipmentMeta ? (
+            <>
+              <Link href={href!} className="link link-primary font-semibold">
+                {loadNumber}
+              </Link>
+              {lane ? (
+                <p className="mt-0.5 truncate text-sm opacity-70" title={lane}>
+                  {lane}
+                </p>
+              ) : null}
+              {opsStatus ? (
+                <p className="mt-1 text-xs opacity-50">{opsStatus}</p>
+              ) : null}
+            </>
+          ) : hideTitle ? (
+            <p className="text-sm font-semibold">Status</p>
+          ) : (
+            <h2 className="card-title text-base">Shipment status</h2>
+          )}
+        </div>
+        <span className={`${UNIFORM_STATUS_BADGE} ${health.badgeClass}`}>{health.label}</span>
+      </div>
+      <p className="text-sm opacity-80">{health.summary}</p>
+      <ul className="space-y-1 text-sm opacity-70">
+        {health.reasons.map((r) => (
+          <li key={r} className="flex gap-2">
+            <span className="mt-1.5 h-1.5 w-1.5 shrink-0 rounded-full bg-current opacity-50" />
+            <span>{r}</span>
+          </li>
+        ))}
+      </ul>
+    </>
+  );
+
+  if (embedded) {
+    return <div className="flex h-full flex-col gap-3">{body}</div>;
+  }
+
   return (
     <div className="card h-full border border-base-300 bg-base-100 shadow-sm">
-      <div className="card-body gap-3 p-4">
-        <div className="flex items-start justify-between gap-3">
-          <div className="min-w-0">
-            {hasShipmentMeta ? (
-              <>
-                <Link href={href!} className="link link-primary font-semibold">
-                  {loadNumber}
-                </Link>
-                {lane ? (
-                  <p className="mt-0.5 truncate text-sm opacity-70" title={lane}>
-                    {lane}
-                  </p>
-                ) : null}
-                {opsStatus ? (
-                  <p className="mt-1 text-xs opacity-50">{opsStatus}</p>
-                ) : null}
-              </>
-            ) : (
-              <h2 className="card-title text-base">Shipment status</h2>
-            )}
-          </div>
-          <span className={`${UNIFORM_STATUS_BADGE} ${health.badgeClass}`}>{health.label}</span>
-        </div>
-        <p className="text-sm opacity-80">{health.summary}</p>
-        <ul className="space-y-1 text-sm opacity-70">
-          {health.reasons.map((r) => (
-            <li key={r} className="flex gap-2">
-              <span className="mt-1.5 h-1.5 w-1.5 shrink-0 rounded-full bg-current opacity-50" />
-              <span>{r}</span>
-            </li>
-          ))}
-        </ul>
-      </div>
+      <div className="card-body gap-3 p-4">{body}</div>
     </div>
   );
 }

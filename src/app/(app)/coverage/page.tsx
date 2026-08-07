@@ -2,6 +2,7 @@ import Link from "next/link";
 import { Suspense } from "react";
 import { BookCoverageForm, type CoverageContractOption } from "@/components/BookCoverageForm";
 import { CoverageRequestForm } from "@/components/CoverageRequestForm";
+import { CoverageStatusFilter } from "@/components/CoverageStatusFilter";
 import { FocusScroll } from "@/components/FocusScroll";
 import { requirePathAccess } from "@/lib/authz";
 import {
@@ -191,7 +192,7 @@ export default async function CoveragePage() {
             : "No load requests yet."}
         </p>
       ) : (
-        <ul className="space-y-3">
+        <CoverageStatusFilter>
           {(rows ?? []).map((r) => {
             const customerName = (r.customers as { name?: string } | null)?.name ?? "Customer";
             const loadNumber = (r.shipments as { load_number?: string } | null)?.load_number;
@@ -207,6 +208,7 @@ export default async function CoveragePage() {
               <li
                 key={r.id}
                 id={`focus-${r.id}`}
+                data-status={r.status}
                 className="rounded-box border border-base-300 bg-base-100 px-4 py-3"
               >
                 <div className="flex flex-wrap items-start justify-between gap-3">
@@ -334,7 +336,7 @@ export default async function CoveragePage() {
               </li>
             );
           })}
-        </ul>
+        </CoverageStatusFilter>
       )}
     </div>
   );

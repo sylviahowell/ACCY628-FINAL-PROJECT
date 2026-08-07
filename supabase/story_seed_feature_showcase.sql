@@ -1,19 +1,35 @@
 -- Feature showcase seed: ensure every role has live work on dashboards.
 -- Idempotent. Preserves demo portal FKs (Midwest Retail / Prairie Haulers).
 -- Run after story_seed_phase7.sql or against the live demo DB.
+--
+-- Margin bands (heatmap): Gulf Strong · Summit Acceptable · Midwest Low · Cascade Low · Prairie Unprofitable
+-- Option A: Midwest stays under credit-hold threshold so brokers can Book; a declined credit
+-- request is seeded for Customer portal history. Prairie holds + pending manager credit approval.
 
 -- ---------------------------------------------------------------------------
 -- Risk & Credit: force over-limit + watch customers; insurance stories
 -- ---------------------------------------------------------------------------
 UPDATE public.customers SET
   credit_limit = 1500,
-  notes = 'SHOWCASE: Over credit limit — broker/manager Risk & Credit demo.'
+  notes = 'SHOWCASE: Unprofitable + over credit limit — Risk & Credit / manager override demo.'
 WHERE id = '11111111-1111-1111-1111-111111111104'; -- Prairie Foods Co-op
 
 UPDATE public.customers SET
   credit_limit = 2500,
-  notes = 'SHOWCASE: Credit watch (≥80% utilization) for Risk & Credit.'
+  notes = 'SHOWCASE: Acceptable margins · credit watch (≥80% utilization) for Risk & Credit.'
 WHERE id = '11111111-1111-1111-1111-111111111105'; -- Summit Retail DC
+
+UPDATE public.customers SET
+  notes = 'SHOWCASE: Strong Profit lanes — preferred partner (healthy buy/sell).'
+WHERE id = '11111111-1111-1111-1111-111111111102'; -- Gulf Coast Foods
+
+UPDATE public.customers SET
+  notes = 'SHOWCASE: Low Margin shipper portal account — thin margins, still bookable (not on credit hold).'
+WHERE id = '11111111-1111-1111-1111-111111111101'; -- Midwest Retail Group
+
+UPDATE public.customers SET
+  notes = 'SHOWCASE: Low Margin + dispute-prone — accessorials and renewals pressure.'
+WHERE id = '11111111-1111-1111-1111-111111111103'; -- Cascade Electronics
 
 UPDATE public.carriers SET
   insurance_expiration = DATE '2026-07-01',
@@ -124,7 +140,57 @@ SELECT id, NULL, status, 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaa1',
 FROM public.shipments WHERE load_number = 'LD-2030-CREDIT'
 LIMIT 1;
 
--- Delivered + POD ready to bill (LOSS lane)
+-- ---------------------------------------------------------------------------
+-- Margin bands: pin portfolio rates so heatmap shows all four bands
+-- ---------------------------------------------------------------------------
+-- Gulf Coast Foods → Strong Profit (≥20%)
+UPDATE public.shipments SET customer_rate = 2800, carrier_cost = 2000
+WHERE load_number = 'LD-1002';
+UPDATE public.shipments SET customer_rate = 3400, carrier_cost = 2400
+WHERE load_number = 'LD-2020-WIN';
+UPDATE public.shipments SET customer_rate = 1900, carrier_cost = 1450
+WHERE load_number = 'LD-1004';
+UPDATE public.shipments SET customer_rate = 1800, carrier_cost = 1300
+WHERE load_number = 'LD-GPS-01';
+
+-- Summit Retail DC → Acceptable (12–20%)
+UPDATE public.shipments SET customer_rate = 2900, carrier_cost = 2550
+WHERE load_number = 'LD-2010-LATE';
+UPDATE public.shipments SET customer_rate = 2100, carrier_cost = 1800
+WHERE load_number = 'LD-2013-OVER';
+UPDATE public.shipments SET customer_rate = 1500, carrier_cost = 1300
+WHERE load_number = 'LD-GPS-04';
+
+-- Midwest Retail Group → Low Margin (0–12%) thin-margin story
+UPDATE public.shipments SET customer_rate = 3200, carrier_cost = 3000
+WHERE load_number = 'LD-1001';
+UPDATE public.shipments SET customer_rate = 2800, carrier_cost = 2600
+WHERE load_number = 'LD-1003';
+UPDATE public.shipments SET customer_rate = 2200, carrier_cost = 2050
+WHERE load_number = 'LD-2012-ACC';
+UPDATE public.shipments SET customer_rate = 2600, carrier_cost = 2450
+WHERE load_number = 'LD-2021-NOPOD';
+UPDATE public.shipments SET customer_rate = 1600, carrier_cost = 1500
+WHERE load_number = 'LD-GPS-02';
+
+-- Cascade Electronics → Low Margin
+UPDATE public.shipments SET customer_rate = 3100, carrier_cost = 2900
+WHERE load_number = 'LD-2022-DISP';
+UPDATE public.shipments SET customer_rate = 2900, carrier_cost = 2700
+WHERE load_number = 'LD-GPS-03';
+
+-- Prairie Foods Co-op → Unprofitable (kept on LOSS lane)
+-- Delivered + POD ready to bill (LOSS lane) — cancel any interactive invoices first
+DELETE FROM public.payments
+WHERE invoice_id IN (
+  SELECT id FROM public.invoices
+  WHERE shipment_id = (SELECT id FROM public.shipments WHERE load_number = 'LD-2011-LOSS' LIMIT 1)
+    AND status <> 'cancelled'
+);
+UPDATE public.invoices SET status = 'cancelled'
+WHERE shipment_id = (SELECT id FROM public.shipments WHERE load_number = 'LD-2011-LOSS' LIMIT 1)
+  AND status <> 'cancelled';
+
 UPDATE public.shipments SET
   status = 'delivered',
   delivery_date = (CURRENT_DATE - 3),
@@ -149,6 +215,19 @@ ON CONFLICT (id) DO UPDATE SET
   shipment_id = EXCLUDED.shipment_id,
   notes = EXCLUDED.notes;
 
+-- Awaiting supporting documents: delivered, no POD, no active invoice
+DELETE FROM public.payments
+WHERE invoice_id IN (
+  SELECT id FROM public.invoices
+  WHERE shipment_id = (SELECT id FROM public.shipments WHERE load_number = 'LD-2021-NOPOD' LIMIT 1)
+    AND status <> 'cancelled'
+);
+UPDATE public.invoices SET status = 'cancelled'
+WHERE shipment_id = (SELECT id FROM public.shipments WHERE load_number = 'LD-2021-NOPOD' LIMIT 1)
+  AND status <> 'cancelled';
+DELETE FROM public.proof_of_delivery
+WHERE shipment_id = (SELECT id FROM public.shipments WHERE load_number = 'LD-2021-NOPOD' LIMIT 1);
+
 -- Accessorial pending approval on LD-2012-ACC
 UPDATE public.shipments SET
   status = 'delivered',
@@ -168,7 +247,15 @@ SELECT
   '/pod-samples/ld-2012.pdf'
 FROM public.shipments s
 WHERE s.load_number = 'LD-2012-ACC'
-ON CONFLICT (id) DO NOTHING;
+ON CONFLICT (id) DO UPDATE SET
+  shipment_id = EXCLUDED.shipment_id,
+  notes = EXCLUDED.notes;
+
+-- Drop legacy duplicate detention charge if present (phase7/old id)
+DELETE FROM public.approval_requests
+WHERE entity_id = '66666666-6666-6666-6666-666666666610';
+DELETE FROM public.shipment_charges
+WHERE id = '66666666-6666-6666-6666-666666666610';
 
 INSERT INTO public.shipment_charges (
   id, shipment_id, charge_type, description, amount,
@@ -216,15 +303,35 @@ WHERE s.load_number = 'LD-1004'
 ON CONFLICT (id) DO UPDATE SET status = 'pending', amount = 250, reason = EXCLUDED.reason;
 
 -- ---------------------------------------------------------------------------
--- Coverage requests (shipper → broker)
+-- Coverage requests (shipper → broker) + credit stories
 -- ---------------------------------------------------------------------------
+DELETE FROM public.approval_requests
+WHERE id IN (
+  '77777777-7777-7777-7777-777777777712'
+)
+OR (
+  request_type IN ('credit_hold', 'credit_override')
+  AND entity_type = 'coverage_request'
+  AND entity_id IN (
+    '88888888-8888-8888-8888-888888888803',
+    '88888888-8888-8888-8888-888888888804'
+  )
+);
+
 DELETE FROM public.coverage_requests
-WHERE notes ILIKE 'SHOWCASE%' OR notes ILIKE '%C2C-%';
+WHERE notes ILIKE 'SHOWCASE%' OR notes ILIKE '%C2C-%'
+   OR id IN (
+     '88888888-8888-8888-8888-888888888801',
+     '88888888-8888-8888-8888-888888888802',
+     '88888888-8888-8888-8888-888888888803',
+     '88888888-8888-8888-8888-888888888804'
+   );
 
 INSERT INTO public.coverage_requests (
   id, customer_id, requested_by, status, contract_id,
   pickup_location, delivery_location, pickup_date, delivery_date,
-  freight_type, weight_lbs, miles, quoted_customer_rate, quoted_carrier_cost, notes
+  freight_type, weight_lbs, miles, quoted_customer_rate, quoted_carrier_cost, notes,
+  reviewed_by, reviewed_at
 ) VALUES
 (
   '88888888-8888-8888-8888-888888888801',
@@ -236,7 +343,8 @@ INSERT INTO public.coverage_requests (
   CURRENT_DATE + 3, CURRENT_DATE + 5,
   'Dry van', 24000,
   287, 1004.50, 789.25,
-  'SHOWCASE: Shipper needs coverage on Midwest lane — broker Book load.'
+  'SHOWCASE: Shipper needs coverage on Midwest lane — broker Book load.',
+  NULL, NULL
 ),
 (
   '88888888-8888-8888-8888-888888888802',
@@ -248,17 +356,70 @@ INSERT INTO public.coverage_requests (
   CURRENT_DATE + 1, CURRENT_DATE + 2,
   'Dry van', 18000,
   106, 371.00, 291.50,
-  'SHOWCASE: Short-haul coverage request — scorecard assign after book.'
+  'SHOWCASE: Short-haul coverage request — scorecard assign after book.',
+  NULL, NULL
+),
+(
+  -- Option A: Customer portal history — declined for credit (Midwest stays off hold for new Books)
+  '88888888-8888-8888-8888-888888888803',
+  '11111111-1111-1111-1111-111111111101',
+  'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaa3',
+  'declined',
+  (SELECT id FROM public.contracts WHERE contract_number = 'CTR-2026-001' LIMIT 1),
+  'Green Bay, WI', 'Louisville, KY',
+  CURRENT_DATE - 4, CURRENT_DATE - 1,
+  'Dry van', 22000,
+  412, 1442.00, 1133.00,
+  E'SHOWCASE: Prior request while AR was past due.\n[Declined] Credit hold — past-due AR above $1,000. Clear overdue invoices or ask your broker to escalate a manager override, then resubmit.',
+  'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaa2',
+  now() - interval '2 days'
+),
+(
+  -- Prairie on credit hold — pending broker escalate / manager Approvals
+  '88888888-8888-8888-8888-888888888804',
+  '11111111-1111-1111-1111-111111111104',
+  'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaa2',
+  'pending',
+  (SELECT id FROM public.contracts WHERE customer_id = '11111111-1111-1111-1111-111111111104' AND status = 'active' LIMIT 1),
+  'Des Moines, IA', 'Omaha, NE',
+  CURRENT_DATE + 2, CURRENT_DATE + 4,
+  'Reefer', 28000,
+  135, 675.00, 540.00,
+  'SHOWCASE: Prairie Foods on credit hold — escalate to manager before Book.',
+  NULL, NULL
 )
 ON CONFLICT (id) DO UPDATE SET
-  status = 'pending',
+  status = EXCLUDED.status,
   notes = EXCLUDED.notes,
   contract_id = EXCLUDED.contract_id,
   miles = EXCLUDED.miles,
   quoted_customer_rate = EXCLUDED.quoted_customer_rate,
   quoted_carrier_cost = EXCLUDED.quoted_carrier_cost,
   pickup_date = EXCLUDED.pickup_date,
-  delivery_date = EXCLUDED.delivery_date;
+  delivery_date = EXCLUDED.delivery_date,
+  reviewed_by = EXCLUDED.reviewed_by,
+  reviewed_at = EXCLUDED.reviewed_at,
+  customer_id = EXCLUDED.customer_id;
+
+-- Manager Approvals: pending credit_hold for Prairie coverage request
+INSERT INTO public.approval_requests (
+  id, request_type, entity_type, entity_id, amount, reason, status, requested_by
+) VALUES (
+  '77777777-7777-7777-7777-777777777712',
+  'credit_hold',
+  'coverage_request',
+  '88888888-8888-8888-8888-888888888804',
+  3200,
+  'SHOWCASE: Prairie Foods Co-op past-due AR $3,200 — broker escalated load request for manager credit override.',
+  'pending',
+  'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaa2'
+)
+ON CONFLICT (id) DO UPDATE SET
+  status = 'pending',
+  amount = 3200,
+  reason = EXCLUDED.reason,
+  entity_id = EXCLUDED.entity_id,
+  request_type = 'credit_hold';
 
 -- ---------------------------------------------------------------------------
 -- Billing: overdue AR, dispute, collection note, AP hold
@@ -267,7 +428,12 @@ UPDATE public.invoices SET
   status = 'sent',
   due_date = (CURRENT_DATE - 18),
   amount_paid = 0
-WHERE invoice_number IN ('INV-9001', 'INV-9002', 'INV-EDGE-OVERDUE');
+WHERE invoice_number IN ('INV-EDGE-OVERDUE');
+
+-- Gulf Coast stays current (Strong Profit partner) — do not put preferred lanes on credit hold
+UPDATE public.invoices SET
+  due_date = (CURRENT_DATE + 20)
+WHERE invoice_number IN ('INV-9002', 'INV-9003');
 
 -- Ensure an overdue disputed invoice exists (Prairie Foods — not the demo shipper portal,
 -- which must stay under the $1,000 past-due credit-hold threshold so brokers can book coverage)
@@ -397,6 +563,7 @@ WHERE carrier_bill_id IN (
        OR load_number LIKE 'LD-CXL%'
        OR load_number LIKE 'LD-C2C-%'
        OR load_number LIKE 'LD-REQ-%'
+       OR load_number LIKE 'LD-MGR-OV-%'
   )
 );
 
@@ -431,6 +598,7 @@ WHERE invoice_id IN (
        OR load_number LIKE 'LD-CXL%'
        OR load_number LIKE 'LD-C2C-%'
        OR load_number LIKE 'LD-REQ-%'
+       OR load_number LIKE 'LD-MGR-OV-%'
   )
 );
 
@@ -501,13 +669,32 @@ WHERE entity_type = 'shipment'
        OR load_number LIKE 'LD-CXL%'
        OR load_number LIKE 'LD-C2C-%'
        OR load_number LIKE 'LD-REQ-%'
+       OR load_number LIKE 'LD-MGR-OV-%'
   );
+
+DELETE FROM public.approval_requests
+WHERE entity_id IN (
+  SELECT id FROM public.shipments
+  WHERE load_number LIKE 'LD-TEST%'
+     OR load_number LIKE 'LD-CXL%'
+     OR load_number LIKE 'LD-C2C-%'
+     OR load_number LIKE 'LD-REQ-%'
+     OR load_number LIKE 'LD-MGR-OV-%'
+)
+OR entity_id IN (
+  SELECT id FROM public.shipment_charges
+  WHERE shipment_id IN (
+    SELECT id FROM public.shipments
+    WHERE load_number LIKE 'LD-MGR-OV-%'
+  )
+);
 
 DELETE FROM public.shipments
 WHERE load_number LIKE 'LD-TEST%'
    OR load_number LIKE 'LD-CXL%'
    OR load_number LIKE 'LD-C2C-%'
-   OR load_number LIKE 'LD-REQ-%';
+   OR load_number LIKE 'LD-REQ-%'
+   OR load_number LIKE 'LD-MGR-OV-%';
 
 -- ---------------------------------------------------------------------------
 -- Support tickets (shipper + carrier + one resolved for staff filters)

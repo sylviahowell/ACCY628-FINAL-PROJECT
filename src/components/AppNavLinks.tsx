@@ -19,6 +19,12 @@ function pathOnly(href: string) {
   return href.split("?")[0] ?? href;
 }
 
+/** Close the mobile drawer so module hops feel instant on small screens. */
+function closeMobileDrawer() {
+  const toggle = document.getElementById("app-drawer") as HTMLInputElement | null;
+  if (toggle?.checked) toggle.checked = false;
+}
+
 /** Compare triage query keys (status/band/dim); ignore focus. */
 function childQueryActive(childHref: string, searchParams: URLSearchParams, onList: boolean, base: string) {
   if (!onList) return false;
@@ -59,7 +65,7 @@ function AppNavLinksFallback({ links }: { links: ShellNavItem[] }) {
     <ul className="menu flex-1 gap-1 p-3">
       {links.map((item) => (
         <li key={item.href + item.label}>
-          <Link href={item.href} className="gap-3">
+          <Link href={item.href} prefetch className="gap-3" onClick={closeMobileDrawer}>
             {item.icon}
             <span className="flex-1">{item.label}</span>
             {typeof item.count === "number" && item.count > 0 ? (
@@ -97,7 +103,12 @@ function AppNavLinksInner({ links }: { links: ShellNavItem[] }) {
                     const childActive = childQueryActive(child.href, searchParams, onList, base);
                     return (
                       <li key={child.href + child.label}>
-                        <Link href={child.href} className={childActive ? "active" : undefined}>
+                        <Link
+                          href={child.href}
+                          prefetch
+                          className={childActive ? "active" : undefined}
+                          onClick={closeMobileDrawer}
+                        >
                           <ChildLabel label={child.label} count={child.count} />
                         </Link>
                       </li>
@@ -115,7 +126,12 @@ function AppNavLinksInner({ links }: { links: ShellNavItem[] }) {
 
         return (
           <li key={item.href + item.label}>
-            <Link href={item.href} className={`gap-3 ${active ? "active" : ""}`}>
+            <Link
+              href={item.href}
+              prefetch
+              className={`gap-3 ${active ? "active" : ""}`}
+              onClick={closeMobileDrawer}
+            >
               {item.icon}
               <span className="flex-1">{item.label}</span>
               {typeof item.count === "number" && item.count > 0 ? (

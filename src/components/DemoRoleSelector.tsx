@@ -1,14 +1,15 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useState, useTransition } from "react";
 import { Beaker, LogOut } from "lucide-react";
-import { activateDemoModeSession, exitDemo } from "@/lib/actions/auth";
+import { exitDemo } from "@/lib/actions/auth";
 import { clientSignInDemoRole } from "@/lib/demo-auth-client";
 import {
   DEMO_MODE_STORAGE_KEY,
   DEMO_ROLE_OPTIONS,
   DEMO_ROLE_STORAGE_KEY,
 } from "@/lib/demo-mode";
+import { canAccessPath } from "@/lib/roles";
 import type { UserRole } from "@/lib/types";
 
 function persistDemoClientState(role: UserRole) {
@@ -29,9 +30,26 @@ function clearDemoClientState() {
   }
 }
 
+/** Prefer staying on the current module when the new role can open it. */
+function destinationForRole(role: UserRole): string {
+  const path = window.location.pathname || "/dashboard";
+  const base = path.split("?")[0] || "/dashboard";
+  const stay =
+    base !== "/login" &&
+    base !== "/signup" &&
+    base !== "/" &&
+    canAccessPath(role, base);
+  const target = stay ? base : "/dashboard";
+  return new URL(
+    `${target}?portal=${encodeURIComponent(role)}`,
+    window.location.origin,
+  ).href;
+}
+
 export function DemoRoleSelector({ activeRole }: { activeRole: UserRole }) {
   const [pending, setPending] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [, startTransition] = useTransition();
 
   useEffect(() => {
     persistDemoClientState(activeRole);
@@ -60,12 +78,9 @@ export function DemoRoleSelector({ activeRole }: { activeRole: UserRole }) {
     setPending(true);
     try {
       await clientSignInDemoRole(role);
-      await activateDemoModeSession();
-      // Absolute URL + full reload so middleware + RSC see new auth cookies
-      // (soft client nav races /login). Absolute destination satisfies Next lint.
-      window.location.assign(
-        new URL(`/dashboard?portal=${encodeURIComponent(role)}`, window.location.origin).href,
-      );
+      // Already in Demo Mode (selector only mounts then) — skip activateDemoModeSession
+      // round-trip. Hard navigation so middleware + RSC see the new auth cookies.
+      window.location.replace(destinationForRole(role));
     } catch (e) {
       setPending(false);
       setError(e instanceof Error ? e.message : "Could not switch demo role");
@@ -92,7 +107,9 @@ export function DemoRoleSelector({ activeRole }: { activeRole: UserRole }) {
           disabled={pending}
           value={activeRole}
           onChange={(e) => {
-            void onChange(e.target.value);
+            startTransition(() => {
+              void onChange(e.target.value);
+            });
           }}
         >
           {DEMO_ROLE_OPTIONS.map((opt) => (
@@ -121,7 +138,9 @@ export function DemoRoleSelector({ activeRole }: { activeRole: UserRole }) {
         disabled={pending}
         title="Exit Demo Mode"
         onClick={() => {
-          void onChange("exit");
+          startTransition(() => {
+            void onChange("exit");
+          });
         }}
       >
         <LogOut className="h-3.5 w-3.5" />

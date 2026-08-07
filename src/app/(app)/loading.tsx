@@ -1,13 +1,12 @@
+/** Lightweight content placeholder — avoid full-page skeleton flash between modules. */
 export default function AppLoading() {
   return (
-    <div className="space-y-4 p-1" aria-busy="true" aria-label="Loading workspace">
-      <div className="h-8 w-48 animate-pulse rounded bg-base-300" />
-      <div className="h-4 w-80 max-w-full animate-pulse rounded bg-base-300" />
-      <div className="grid gap-4 lg:grid-cols-2">
-        <div className="h-40 animate-pulse rounded-box bg-base-300" />
-        <div className="h-40 animate-pulse rounded-box bg-base-300" />
-      </div>
-      <div className="h-64 animate-pulse rounded-box bg-base-300" />
+    <div
+      className="h-0.5 w-full overflow-hidden rounded-full bg-base-300"
+      aria-busy="true"
+      aria-label="Loading workspace"
+    >
+      <div className="h-full w-1/3 animate-[pulse_0.9s_ease-in-out_infinite] bg-primary" />
     </div>
   );
 }

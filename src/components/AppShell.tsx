@@ -27,10 +27,8 @@ import { CustomizableManagerNav } from "@/components/CustomizableManagerNav";
 import { DemoRoleSelector } from "@/components/DemoRoleSelector";
 import { FlashToast } from "@/components/FlashToast";
 import { RowanLaneMark } from "@/components/RowanLaneMark";
-import { GlobalSearch } from "@/components/GlobalSearch";
 import { signOut } from "@/lib/actions/auth";
 import { demoRoleLabel } from "@/lib/demo-mode";
-import { searchPlaceholderForRole } from "@/lib/portal-scope";
 import { createClient } from "@/lib/supabase/server";
 import type { Profile } from "@/lib/types";
 import { ROLE_LABELS, ROLE_PORTAL_BLURB } from "@/lib/roles";
@@ -412,7 +410,6 @@ export function AppShell({
                 <p className="font-brand text-xl font-bold text-primary">RowanLane</p>
               </div>
             </Link>
-            <GlobalSearch placeholder={searchPlaceholderForRole(profile.role)} />
           </div>
           <div className="flex min-w-0 shrink-0 grow basis-auto items-center justify-end gap-2 sm:gap-3">
             {showDemoSelector ? (

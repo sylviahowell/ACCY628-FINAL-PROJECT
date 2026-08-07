@@ -125,54 +125,6 @@ export default async function ContractsPage({
         </p>
       </div>
 
-      <div className="rounded-box border border-primary/20 bg-base-100 p-4 shadow-sm">
-        <h2 className="font-semibold">Where contracts fit</h2>
-        <ol className="mt-2 list-decimal space-y-1 pl-5 text-sm opacity-80">
-          <li>Ops creates or renews an active contract for the customer (this page).</li>
-          <li>
-            Customer submits a load request on that contract → broker{" "}
-            <Link href="/coverage" className="link link-primary">
-              approves
-            </Link>{" "}
-            (blocked on credit hold).
-          </li>
-          <li>
-            Broker{" "}
-            <Link href="/assign" className="link link-primary">
-              assigns a carrier
-            </Link>{" "}
-            (blocked if insurance expired).
-          </li>
-          <li>
-            After delivery + POD, Billing runs AR / AP
-            {isManager ? (
-              <>
-                {" "}
-                — <Link href="/invoices" className="link link-primary">Invoices</Link> /{" "}
-                <Link href="/ar" className="link link-primary">AR</Link> /{" "}
-                <Link href="/ap" className="link link-primary">AP</Link>
-              </>
-            ) : (
-              " in the Billing portal"
-            )}
-            .
-          </li>
-        </ol>
-        <p className="mt-2 text-xs opacity-60">
-          Only RowanLane operations can renew or end a contract. Customers and carriers request
-          changes through Support — they cannot cancel agreements in the portal.
-        </p>
-        {totalPendingCoverage > 0 ? (
-          <p className="mt-3 text-sm">
-            <Link href="/coverage" className="link link-primary font-medium">
-              {totalPendingCoverage} load request
-              {totalPendingCoverage === 1 ? "" : "s"}
-            </Link>{" "}
-            waiting for approval (not approved here).
-          </p>
-        ) : null}
-      </div>
-
       {expiringOnly ? (
         <FilterBanner
           label="contracts ending within 30 days (or already past end)"
@@ -422,6 +374,54 @@ export default async function ContractsPage({
           })}
         </div>
       )}
+
+      <div className="rounded-box border border-primary/20 bg-base-100 p-4 shadow-sm">
+        <h2 className="font-semibold">Where contracts fit</h2>
+        <ol className="mt-2 list-decimal space-y-1 pl-5 text-sm opacity-80">
+          <li>Ops creates or renews an active contract for the customer (this page).</li>
+          <li>
+            Customer submits a load request on that contract → broker{" "}
+            <Link href="/coverage" className="link link-primary">
+              approves
+            </Link>{" "}
+            (blocked on credit hold).
+          </li>
+          <li>
+            Broker{" "}
+            <Link href="/assign" className="link link-primary">
+              assigns a carrier
+            </Link>{" "}
+            (blocked if insurance expired).
+          </li>
+          <li>
+            After delivery + POD, Billing runs AR / AP
+            {isManager ? (
+              <>
+                {" "}
+                — <Link href="/invoices" className="link link-primary">Invoices</Link> /{" "}
+                <Link href="/ar" className="link link-primary">AR</Link> /{" "}
+                <Link href="/ap" className="link link-primary">AP</Link>
+              </>
+            ) : (
+              " in the Billing portal"
+            )}
+            .
+          </li>
+        </ol>
+        <p className="mt-2 text-xs opacity-60">
+          Only RowanLane operations can renew or end a contract. Customers and carriers request
+          changes through Support — they cannot cancel agreements in the portal.
+        </p>
+        {totalPendingCoverage > 0 ? (
+          <p className="mt-3 text-sm">
+            <Link href="/coverage" className="link link-primary font-medium">
+              {totalPendingCoverage} load request
+              {totalPendingCoverage === 1 ? "" : "s"}
+            </Link>{" "}
+            waiting for approval (not approved here).
+          </p>
+        ) : null}
+      </div>
     </div>
   );
 }
